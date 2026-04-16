@@ -640,13 +640,33 @@ export const chatApi = {
   },
 
   audioToText(appId: number, file: File | Blob, config?: AxiosRequestConfig) {
-    const form = toFormData({ appId, file })
+    const form = new FormData()
+    form.append('appId', String(appId))
+
+    // 关键：Blob 必须显式提供文件名，且文件名要带合法扩展名
+    if (file instanceof File) {
+      form.append('file', file, file.name)
+    } else {
+      // Blob 兜底：根据 type 推断扩展名
+      const mime = file.type || 'audio/webm'
+      const ext = mime.includes('webm')
+        ? 'webm'
+        : mime.includes('mp4')
+          ? 'mp4'
+          : mime.includes('mpeg')
+            ? 'mp3'
+            : mime.includes('wav')
+              ? 'wav'
+              : 'webm'
+      form.append('file', file, `recording-${Date.now()}.${ext}`)
+    }
+
     return unwrap<AnyObject>(
       apiClient.post('/chat/audio-to-text', form, {
         ...config,
         headers: {
-          ...(config?.headers ?? {}),
-          'Content-Type': 'multipart/form-data'
+          ...(config?.headers ?? {})
+          // 不要手动设置 Content-Type，让浏览器自动加 boundary
         }
       })
     )

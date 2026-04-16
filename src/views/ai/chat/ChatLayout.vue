@@ -1,14 +1,22 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, Plus, Refresh } from '@element-plus/icons-vue'
+import {
+  ArrowLeft,
+  Close,
+  Delete,
+  Microphone,
+  Paperclip,
+  Plus,
+  Refresh
+} from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
-import { appApi, chatApi, conversationApi, type AppConfigVO } from '@/api/frontend-api'
-import { useChatStore, type ChatMessage } from '@/store/modules/chat'
+import { appApi, chatApi, conversationApi, fileApi, type AppConfigVO } from '@/api/frontend-api'
+import { useChatStore, type ChatMessage, type UploadedFile } from '@/store/modules/chat'
 import { useUserStore } from '@/store/modules/user'
 
 interface ConversationItem {
@@ -43,25 +51,70 @@ const inputValue = ref('')
 const appLoading = ref(false)
 const conversationLoading = ref(false)
 const messageLoading = ref(false)
+const deletingConversationId = ref<string | null>(null)
+const uploadLoading = ref(false)
+const audioRecognizing = ref(false)
+const isRecording = ref(false)
 
 const streamController = ref<AbortController | null>(null)
+const mediaRecorderRef = ref<MediaRecorder | null>(null)
+const mediaStreamRef = ref<MediaStream | null>(null)
+const audioChunksRef = ref<Blob[]>([])
 
 const messageScrollbarRef = ref<any>(null)
 const messageListRef = ref<HTMLElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 const shouldStickToBottom = ref(true)
 
 const currentAppId = computed(() => chatStore.getCurrentAppId)
 const currentConversationId = computed(() => chatStore.getCurrentConversationId)
 const messages = computed(() => chatStore.getMessages)
 const isGenerating = computed(() => chatStore.getIsGenerating)
+const uploadedFiles = computed(() => chatStore.getUploadedFiles)
 const displayName = computed(() => userStore.getDisplayName)
 const canSend = computed(() =>
-  Boolean(currentAppId.value && inputValue.value.trim() && !isGenerating.value)
+  Boolean(
+    currentAppId.value &&
+      inputValue.value.trim() &&
+      !isGenerating.value &&
+      !uploadLoading.value &&
+      !audioRecognizing.value
+  )
+)
+const canUseVoice = computed(() =>
+  Boolean(
+    currentAppId.value &&
+      typeof window !== 'undefined' &&
+      typeof navigator !== 'undefined' &&
+      navigator.mediaDevices &&
+      typeof MediaRecorder !== 'undefined'
+  )
 )
 
 const currentConversation = computed(() =>
   conversations.value.find((item) => item.id === currentConversationId.value)
 )
+const maxUploadSize = 20 * 1024 * 1024
+const allowedFileExtensions = new Set([
+  'txt',
+  'md',
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'csv',
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'mp3',
+  'wav',
+  'm4a',
+  'mp4'
+])
 
 function renderMarkdown(content: string): string {
   return md.render(content || '')
@@ -526,6 +579,347 @@ function extractErrorMessage(error: unknown): string {
   return '请求失败'
 }
 
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+function getFileExtension(filename: string): string {
+  const index = filename.lastIndexOf('.')
+  if (index < 0) {
+    return ''
+  }
+  return filename.slice(index + 1).toLowerCase()
+}
+
+function validateUploadFile(file: File): string | null {
+  if (file.size > maxUploadSize) {
+    return `文件 ${file.name} 超过 20MB 限制`
+  }
+
+  const extension = getFileExtension(file.name)
+  if (!extension || !allowedFileExtensions.has(extension)) {
+    return `文件 ${file.name} 类型暂不支持`
+  }
+
+  return null
+}
+
+function findUploadRecord(payload: unknown): Record<string, unknown> | null {
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const record = toRecord(item)
+      if (record) {
+        return record
+      }
+    }
+    return null
+  }
+
+  const directRecord = toRecord(payload)
+  if (!directRecord) {
+    return null
+  }
+
+  const list = pickList(payload)
+  if (list.length > 0) {
+    return findUploadRecord(list[0])
+  }
+
+  const nested = toRecord(directRecord.data)
+  if (nested) {
+    const id = extractStringByKeys(nested, ['fileId', 'file_id', 'id', 'upload_file_id'])
+    if (id) {
+      return nested
+    }
+  }
+
+  return directRecord
+}
+
+function parseUploadedFile(response: unknown, sourceFile: File): UploadedFile | null {
+  const record = findUploadRecord(response)
+  if (!record) {
+    return null
+  }
+
+  const fileId = extractStringByKeys(record, ['fileId', 'file_id', 'id', 'upload_file_id'])
+  if (!fileId) {
+    return null
+  }
+
+  const fileName =
+    extractStringByKeys(record, ['fileName', 'filename', 'name', 'originalFilename']) ||
+    sourceFile.name
+
+  const fileSize =
+    toFiniteNumber(record.fileSize) ??
+    toFiniteNumber(record.size) ??
+    toFiniteNumber(record.file_size) ??
+    sourceFile.size
+
+  const fileType =
+    extractStringByKeys(record, ['fileType', 'type', 'mimeType', 'mime_type']) ||
+    sourceFile.type ||
+    undefined
+
+  return {
+    fileId,
+    fileName,
+    fileSize,
+    fileType
+  }
+}
+
+function parseAudioToTextResult(response: unknown): string {
+  const record = toRecord(response)
+  if (!record) {
+    return ''
+  }
+
+  const text =
+    extractDisplayStringByKeys(record, [
+      'text',
+      'message',
+      'content',
+      'query',
+      'result',
+      'transcript'
+    ]) || ''
+
+  if (text) {
+    return text
+  }
+
+  const nested = toRecord(record.data)
+  if (!nested) {
+    return ''
+  }
+  return (
+    extractDisplayStringByKeys(nested, [
+      'text',
+      'message',
+      'content',
+      'query',
+      'result',
+      'transcript'
+    ]) || ''
+  )
+}
+
+function buildFileInputs(files: UploadedFile[]): Record<string, unknown> | undefined {
+  if (files.length === 0) {
+    return undefined
+  }
+
+  return {
+    files: files.map((item) => ({
+      fileId: item.fileId,
+      fileName: item.fileName,
+      fileType: item.fileType,
+      fileSize: item.fileSize,
+      upload_file_id: item.fileId,
+      transfer_method: 'local_file',
+      type: 'file'
+    }))
+  }
+}
+
+function removeUploadedFile(fileId: string) {
+  chatStore.setUploadedFiles(chatStore.getUploadedFiles.filter((item) => item.fileId !== fileId))
+}
+
+function triggerFileSelect() {
+  if (!currentAppId.value) {
+    ElMessage.warning('请先选择应用')
+    return
+  }
+  fileInputRef.value?.click()
+}
+
+async function handleFileInputChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const files = Array.from(target.files || [])
+  target.value = ''
+
+  if (!currentAppId.value || files.length === 0) {
+    return
+  }
+
+  const invalidReason = files
+    .map((file) => validateUploadFile(file))
+    .find((reason) => Boolean(reason))
+  if (invalidReason) {
+    ElMessage.warning(invalidReason)
+    return
+  }
+
+  uploadLoading.value = true
+  const nextFiles = [...chatStore.getUploadedFiles]
+  let successCount = 0
+
+  try {
+    for (const file of files) {
+      try {
+        const response = await fileApi.upload(currentAppId.value, file)
+        const parsed = parseUploadedFile(response, file)
+        if (!parsed) {
+          ElMessage.warning(`文件 ${file.name} 上传成功，但未返回可用文件ID`)
+          continue
+        }
+
+        if (!nextFiles.some((item) => item.fileId === parsed.fileId)) {
+          nextFiles.push(parsed)
+          successCount += 1
+        }
+      } catch (error: unknown) {
+        ElMessage.error(extractErrorMessage(error) || `文件 ${file.name} 上传失败`)
+      }
+    }
+  } finally {
+    uploadLoading.value = false
+  }
+
+  chatStore.setUploadedFiles(nextFiles)
+  if (successCount > 0) {
+    ElMessage.success(`已上传 ${successCount} 个文件`)
+  }
+}
+
+function appendTextToInput(text: string) {
+  const appended = text.trim()
+  if (!appended) {
+    return
+  }
+
+  const current = inputValue.value.trimEnd()
+  if (!current) {
+    inputValue.value = appended
+    return
+  }
+  inputValue.value = `${current}\n${appended}`
+}
+
+function releaseAudioResources() {
+  if (mediaRecorderRef.value && mediaRecorderRef.value.state !== 'inactive') {
+    mediaRecorderRef.value.onstop = null
+    mediaRecorderRef.value.onerror = null
+    mediaRecorderRef.value.stop()
+  }
+  mediaRecorderRef.value = null
+  audioChunksRef.value = []
+
+  if (mediaStreamRef.value) {
+    mediaStreamRef.value.getTracks().forEach((track) => track.stop())
+    mediaStreamRef.value = null
+  }
+
+  isRecording.value = false
+}
+
+async function startVoiceInput() {
+  if (!currentAppId.value) {
+    ElMessage.warning('请先选择应用')
+    return
+  }
+  if (!canUseVoice.value) {
+    ElMessage.warning('当前浏览器不支持语音输入')
+    return
+  }
+  if (isRecording.value || audioRecognizing.value || isGenerating.value) {
+    return
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    const recorder = new MediaRecorder(stream)
+
+    mediaStreamRef.value = stream
+    mediaRecorderRef.value = recorder
+    audioChunksRef.value = []
+
+    recorder.ondataavailable = (recorderEvent: BlobEvent) => {
+      if (recorderEvent.data?.size) {
+        audioChunksRef.value.push(recorderEvent.data)
+      }
+    }
+
+    recorder.onstop = async () => {
+      isRecording.value = false
+
+      const chunks = [...audioChunksRef.value]
+      audioChunksRef.value = []
+
+      if (mediaStreamRef.value) {
+        mediaStreamRef.value.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.value = null
+      }
+      mediaRecorderRef.value = null
+
+      if (!currentAppId.value || chunks.length === 0) {
+        return
+      }
+
+      // 关键改动：使用 recorder 实际的 mimeType，并且用 File 而不是 Blob
+      const mimeType = recorder.mimeType || 'audio/webm'
+      const audioBlob = new Blob(chunks, { type: mimeType })
+      if (!audioBlob.size) {
+        return
+      }
+
+      // 包装成 File，提供明确的文件名和扩展名
+      const extension = mimeType.includes('webm')
+        ? 'webm'
+        : mimeType.includes('mp4')
+          ? 'mp4'
+          : mimeType.includes('wav')
+            ? 'wav'
+            : 'webm'
+      const audioFile = new File([audioBlob], `recording-${Date.now()}.${extension}`, {
+        type: mimeType
+      })
+
+      audioRecognizing.value = true
+      try {
+        const response = await chatApi.audioToText(currentAppId.value, audioBlob)
+        const recognizedText = parseAudioToTextResult(response)
+        if (recognizedText) {
+          appendTextToInput(recognizedText)
+          ElMessage.success('语音识别完成')
+        } else {
+          ElMessage.warning('语音识别结果为空')
+        }
+      } catch (error: unknown) {
+        ElMessage.error(extractErrorMessage(error) || '语音识别失败')
+      } finally {
+        audioRecognizing.value = false
+      }
+    }
+
+    recorder.start()
+    isRecording.value = true
+  } catch (error: unknown) {
+    releaseAudioResources()
+    ElMessage.error(extractErrorMessage(error) || '无法启动录音')
+  }
+}
+
+function stopVoiceInput() {
+  const recorder = mediaRecorderRef.value
+  if (!recorder || recorder.state === 'inactive') {
+    return
+  }
+  recorder.stop()
+}
+
 async function handleSelectApp(appId: number, forceReload = false) {
   if (!forceReload && appId === currentAppId.value) {
     return
@@ -612,6 +1006,7 @@ async function handleSelectConversation(conversationId: string) {
   }
 
   chatStore.setCurrentConversationId(conversationId)
+  chatStore.setUploadedFiles([])
   await loadMessages(conversationId)
 }
 
@@ -637,10 +1032,49 @@ async function loadMessages(conversationId: string) {
   }
 }
 
+async function handleDeleteConversation(conversationId: string) {
+  if (!currentAppId.value || deletingConversationId.value) {
+    return
+  }
+
+  deletingConversationId.value = conversationId
+  try {
+    await conversationApi.delete(conversationId, currentAppId.value)
+
+    const previous = [...conversations.value]
+    const removedIndex = previous.findIndex((item) => item.id === conversationId)
+    conversations.value = previous.filter((item) => item.id !== conversationId)
+
+    if (currentConversationId.value === conversationId) {
+      const candidate =
+        conversations.value[removedIndex] ||
+        conversations.value[removedIndex - 1] ||
+        conversations.value[0] ||
+        null
+
+      if (!candidate) {
+        chatStore.setCurrentConversationId(null)
+        chatStore.setMessages([])
+        chatStore.setTaskId(null)
+      } else {
+        chatStore.setCurrentConversationId(candidate.id)
+        await loadMessages(candidate.id)
+      }
+    }
+
+    ElMessage.success('会话删除成功')
+  } catch (error: unknown) {
+    ElMessage.error(extractErrorMessage(error) || '会话删除失败')
+  } finally {
+    deletingConversationId.value = null
+  }
+}
+
 function handleNewConversation() {
   chatStore.setCurrentConversationId(null)
   chatStore.setMessages([])
   chatStore.setTaskId(null)
+  chatStore.setUploadedFiles([])
   inputValue.value = ''
   requestStickBottom('auto')
 }
@@ -658,6 +1092,8 @@ async function handleSend() {
   if (!question) {
     return
   }
+  const attachedFiles = [...uploadedFiles.value]
+  const inputs = buildFileInputs(attachedFiles)
 
   const now = Date.now()
   const userMessageId = `local-user-${now}`
@@ -691,13 +1127,15 @@ async function handleSend() {
   chatStore.setTaskId(null)
 
   inputValue.value = ''
+  let sendSucceeded = false
 
   try {
     await chatApi.streamChat(
       currentAppId.value,
       {
         query: question,
-        conversationId: previousConversationId || undefined
+        conversationId: previousConversationId || undefined,
+        inputs
       },
       {
         signal: controller.signal,
@@ -792,6 +1230,7 @@ async function handleSend() {
         }
       }
     )
+    sendSucceeded = true
 
     const latestConversationId = chatStore.getCurrentConversationId
     if (!previousConversationId && latestConversationId) {
@@ -815,6 +1254,9 @@ async function handleSend() {
       streamController.value = null
     }
     chatStore.setGenerating(false)
+    if (sendSucceeded && attachedFiles.length > 0) {
+      chatStore.setUploadedFiles([])
+    }
   }
 }
 
@@ -836,6 +1278,7 @@ onBeforeUnmount(() => {
     streamController.value.abort()
     streamController.value = null
   }
+  releaseAudioResources()
   chatStore.setGenerating(false)
 })
 </script>
@@ -902,6 +1345,26 @@ onBeforeUnmount(() => {
               >
                 <div class="item-title">{{ conversation.name }}</div>
                 <div class="item-sub">{{ formatTime(conversation.updatedAt) }}</div>
+                <div class="conversation-action" @click.stop>
+                  <el-popconfirm
+                    title="确认删除该会话？"
+                    confirm-button-text="删除"
+                    cancel-button-text="取消"
+                    @confirm="handleDeleteConversation(conversation.id)"
+                  >
+                    <template #reference>
+                      <el-button
+                        text
+                        type="danger"
+                        :loading="deletingConversationId === conversation.id"
+                        class="conversation-delete-btn"
+                        @click.stop
+                      >
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </template>
+                  </el-popconfirm>
+                </div>
               </div>
               <el-empty
                 v-if="conversations.length === 0"
@@ -1001,6 +1464,24 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="input-panel">
+          <input
+            ref="fileInputRef"
+            class="hidden-file-input"
+            type="file"
+            multiple
+            accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.bmp,.mp3,.wav,.m4a,.mp4"
+            @change="handleFileInputChange"
+          />
+
+          <div v-if="uploadedFiles.length > 0" class="uploaded-file-list">
+            <div v-for="file in uploadedFiles" :key="file.fileId" class="file-chip">
+              <span class="file-chip-name">{{ file.fileName }}</span>
+              <el-button text class="file-chip-remove" @click="removeUploadedFile(file.fileId)">
+                <el-icon><Close /></el-icon>
+              </el-button>
+            </div>
+          </div>
+
           <el-input
             v-model="inputValue"
             type="textarea"
@@ -1010,6 +1491,28 @@ onBeforeUnmount(() => {
             @keydown="handleInputKeydown"
           />
           <div class="input-actions">
+            <div class="input-actions-left">
+              <el-button text :loading="uploadLoading" @click="triggerFileSelect">
+                <el-icon><Paperclip /></el-icon>
+                上传文件
+              </el-button>
+
+              <el-button
+                v-if="canUseVoice"
+                text
+                :type="isRecording ? 'danger' : undefined"
+                :loading="audioRecognizing"
+                @mousedown.prevent="startVoiceInput"
+                @mouseup.prevent="stopVoiceInput"
+                @mouseleave.prevent="stopVoiceInput"
+                @touchstart.prevent="startVoiceInput"
+                @touchend.prevent="stopVoiceInput"
+              >
+                <el-icon><Microphone /></el-icon>
+                {{ isRecording ? '松开结束录音' : audioRecognizing ? '语音识别中' : '按住说话' }}
+              </el-button>
+            </div>
+
             <el-button
               type="primary"
               :loading="isGenerating"
@@ -1102,6 +1605,7 @@ onBeforeUnmount(() => {
 
 .app-item,
 .conversation-item {
+  position: relative;
   padding: 10px 12px;
   margin-bottom: 8px;
   border-radius: 8px;
@@ -1120,6 +1624,27 @@ onBeforeUnmount(() => {
 .conversation-item.active {
   border-color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
+}
+
+.conversation-item {
+  padding-right: 44px;
+}
+
+.conversation-action {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.conversation-item:hover .conversation-action,
+.conversation-item.active .conversation-action {
+  opacity: 1;
+}
+
+.conversation-delete-btn {
+  padding: 4px;
 }
 
 .item-title {
@@ -1351,10 +1876,95 @@ onBeforeUnmount(() => {
   padding: 12px 16px;
 }
 
+.hidden-file-input {
+  display: none;
+}
+
+.uploaded-file-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.file-chip {
+  height: 28px;
+  max-width: 360px;
+  padding: 0 4px 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 14px;
+  background: #eef3ff;
+  border: 1px solid #d9e4ff;
+}
+
+.file-chip-name {
+  font-size: 12px;
+  color: #35496b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-chip-remove {
+  margin-left: 4px;
+  padding: 2px;
+}
+
 .input-actions {
   margin-top: 10px;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.input-actions-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.input-actions-left :deep(.el-button) {
+  margin-left: 0;
+}
+
+.input-actions-left :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.input-actions-left :deep(.el-button.is-text:not(.is-disabled):hover) {
+  background: #eef3ff;
+}
+
+.input-actions > .el-button {
+  margin-left: auto;
+}
+
+@media (max-width: 960px) {
+  .input-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .input-actions-left {
+    justify-content: flex-start;
+  }
+
+  .input-actions > .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+.input-actions :deep(.el-icon) {
+  margin-right: 4px;
+}
+
+.input-actions :deep(.el-button .el-icon:only-child) {
+  margin-right: 0;
 }
 
 .tip-text {
