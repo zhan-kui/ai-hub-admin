@@ -82,9 +82,7 @@
           <div class="action-icon action-icon--config">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3" />
-              <path
-                d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"
-              />
+              <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14" />
             </svg>
           </div>
           <div class="action-title">应用配置</div>
@@ -193,7 +191,9 @@
   display: flex;
   gap: 16px;
   align-items: flex-start;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 1px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    0 0 1px rgba(0, 0, 0, 0.04);
   border: 1px solid #f1f3f5;
   transition: box-shadow 0.2s ease;
 }
