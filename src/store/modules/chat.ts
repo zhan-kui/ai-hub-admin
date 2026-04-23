@@ -1,13 +1,26 @@
-﻿import { defineStore } from 'pinia'
+import { defineStore } from 'pinia'
 import { store } from '../index'
 
 export type ChatMode = 'dify' | 'agent'
+export type UploadedFileType = 'document' | 'image' | 'audio' | 'video' | 'custom'
+export type UploadedFileTransferMethod = 'local_file' | 'remote_url'
 
 export interface UploadedFile {
   fileId: string
   fileName: string
   fileSize?: number
   fileType?: string
+  type?: UploadedFileType
+  transferMethod?: UploadedFileTransferMethod
+  uploadFileId?: string
+  url?: string
+}
+
+export interface ChatMessageFileReference {
+  id: string
+  name: string
+  extension?: string
+  transferMethod?: UploadedFileTransferMethod
 }
 
 export interface ChatMessage {
@@ -17,6 +30,7 @@ export interface ChatMessage {
   content: string
   isThinking: boolean
   createdAt?: string
+  fileReferences?: ChatMessageFileReference[]
 }
 
 interface ChatState {

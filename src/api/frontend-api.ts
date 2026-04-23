@@ -238,6 +238,17 @@ export interface ChatRequest {
   query: string
   conversationId?: string
   inputs?: Record<string, any>
+  files?: ChatFilePayload[]
+}
+
+export type ChatFileType = 'document' | 'image' | 'audio' | 'video' | 'custom'
+export type ChatFileTransferMethod = 'remote_url' | 'local_file'
+
+export interface ChatFilePayload {
+  type: ChatFileType
+  transferMethod?: ChatFileTransferMethod
+  url?: string
+  uploadFileId?: string
 }
 
 export interface AgentChatRequest {
@@ -874,10 +885,14 @@ export const knowledgeApi = {
 
 export const fileApi = {
   upload(appId: number, file: File | Blob, config?: AxiosRequestConfig) {
-    const form = toFormData({ appId, file })
+    const form = toFormData({ file })
     return unwrap<AnyObject>(
       apiClient.post('/files/upload', form, {
         ...config,
+        params: {
+          ...(config?.params ?? {}),
+          appId
+        },
         headers: {
           ...(config?.headers ?? {}),
           'Content-Type': 'multipart/form-data'

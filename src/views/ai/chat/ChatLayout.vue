@@ -15,8 +15,20 @@ import {
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
-import { appApi, chatApi, conversationApi, fileApi, type AppConfigVO } from '@/api/frontend-api'
-import { useChatStore, type ChatMessage, type UploadedFile } from '@/store/modules/chat'
+import {
+  appApi,
+  chatApi,
+  conversationApi,
+  fileApi,
+  type AppConfigVO,
+  type ChatFilePayload
+} from '@/api/frontend-api'
+import {
+  useChatStore,
+  type ChatMessage,
+  type ChatMessageFileReference,
+  type UploadedFile
+} from '@/store/modules/chat'
 import { useUserStore } from '@/store/modules/user'
 
 interface ConversationItem {
@@ -115,6 +127,11 @@ const allowedFileExtensions = new Set([
   'm4a',
   'mp4'
 ])
+const imageExtensions = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
+const audioExtensions = new Set(['mp3', 'wav', 'm4a'])
+const videoExtensions = new Set(['mp4'])
+const documentExtensions = new Set(['txt', 'md', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv'])
+const remoteUrlRegex = /https?:\/\/[^\s]+/gi
 
 function renderMarkdown(content: string): string {
   return md.render(content || '')
@@ -600,6 +617,125 @@ function getFileExtension(filename: string): string {
   return filename.slice(index + 1).toLowerCase()
 }
 
+function inferChatFileType(fileName: string, mimeType?: string): ChatFilePayload['type'] {
+  const extension = getFileExtension(fileName)
+  const normalizedMimeType = (mimeType || '').toLowerCase()
+
+  if (normalizedMimeType.startsWith('image/') || imageExtensions.has(extension)) {
+    return 'image'
+  }
+  if (normalizedMimeType.startsWith('audio/') || audioExtensions.has(extension)) {
+    return 'audio'
+  }
+  if (normalizedMimeType.startsWith('video/') || videoExtensions.has(extension)) {
+    return 'video'
+  }
+  if (
+    normalizedMimeType.startsWith('text/') ||
+    normalizedMimeType.startsWith('application/pdf') ||
+    normalizedMimeType.includes('word') ||
+    normalizedMimeType.includes('excel') ||
+    normalizedMimeType.includes('sheet') ||
+    documentExtensions.has(extension)
+  ) {
+    return 'document'
+  }
+  return 'custom'
+}
+
+function normalizeRemoteUrl(value: string): string | null {
+  const trimmed = value.trim().replace(/[),.;!?]+$/, '')
+  if (!trimmed) {
+    return null
+  }
+  try {
+    const parsed = new URL(trimmed)
+    if (!/^https?:$/.test(parsed.protocol)) {
+      return null
+    }
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+function extractRemoteUrls(question: string): string[] {
+  const matches = question.match(remoteUrlRegex) || []
+  const seen = new Set<string>()
+
+  for (const item of matches) {
+    const normalized = normalizeRemoteUrl(item)
+    if (!normalized) {
+      continue
+    }
+    seen.add(normalized)
+  }
+
+  return Array.from(seen)
+}
+
+function splitFileName(rawName: string): { name: string; extension?: string } {
+  const normalized = rawName.trim()
+  if (!normalized) {
+    return { name: '未命名文件' }
+  }
+
+  const dotIndex = normalized.lastIndexOf('.')
+  if (dotIndex <= 0 || dotIndex === normalized.length - 1) {
+    return { name: normalized }
+  }
+
+  return {
+    name: normalized.slice(0, dotIndex),
+    extension: normalized.slice(dotIndex + 1).toLowerCase()
+  }
+}
+
+function getRemoteReferenceName(url: string): string {
+  const normalized = normalizeRemoteUrl(url)
+  if (!normalized) {
+    return ''
+  }
+  try {
+    const parsed = new URL(normalized)
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    const tail = segments.length > 0 ? segments[segments.length - 1] : ''
+    if (tail) {
+      return decodeURIComponent(tail)
+    }
+    return parsed.hostname
+  } catch {
+    return ''
+  }
+}
+
+function buildMessageFileReferences(
+  files: UploadedFile[]
+): NonNullable<ChatMessage['fileReferences']> | undefined {
+  if (files.length === 0) {
+    return undefined
+  }
+
+  const references: ChatMessageFileReference[] = files.map((item, index) => {
+    const transferMethod = item.transferMethod || 'local_file'
+    const fallbackName = item.fileName || `文件${index + 1}`
+    const referenceName =
+      transferMethod === 'remote_url'
+        ? getRemoteReferenceName(item.url || '') || fallbackName
+        : fallbackName
+
+    const { name, extension } = splitFileName(referenceName)
+    return {
+      id: item.fileId || item.uploadFileId || `${transferMethod}-${index}-${referenceName}`,
+      name,
+      extension,
+      transferMethod
+    }
+  })
+
+  return references.length > 0 ? references : undefined
+}
+
 function validateUploadFile(file: File): string | null {
   if (file.size > maxUploadSize) {
     return `文件 ${file.name} 超过 20MB 限制`
@@ -675,7 +811,10 @@ function parseUploadedFile(response: unknown, sourceFile: File): UploadedFile | 
     fileId,
     fileName,
     fileSize,
-    fileType
+    fileType,
+    type: inferChatFileType(fileName, fileType),
+    transferMethod: 'local_file',
+    uploadFileId: fileId
   }
 }
 
@@ -715,21 +854,61 @@ function parseAudioToTextResult(response: unknown): string {
   )
 }
 
-function buildFileInputs(files: UploadedFile[]): Record<string, unknown> | undefined {
-  if (files.length === 0) {
-    return undefined
+function buildChatFiles(
+  files: UploadedFile[],
+  question: string
+): { files?: ChatFilePayload[]; validationError?: string } {
+  const payloadFiles: ChatFilePayload[] = []
+  const remoteUrls = new Set<string>()
+
+  for (const item of files) {
+    const transferMethod = item.transferMethod || 'local_file'
+    const fileType = item.type || inferChatFileType(item.fileName, item.fileType)
+
+    if (transferMethod === 'local_file') {
+      const uploadFileId = (item.uploadFileId || item.fileId || '').trim()
+      if (!uploadFileId) {
+        return {
+          validationError: `本地文件 ${item.fileName || '未命名文件'} 缺少 uploadFileId，请重新上传后再试`
+        }
+      }
+      payloadFiles.push({
+        type: fileType,
+        transferMethod,
+        uploadFileId
+      })
+      continue
+    }
+
+    const remoteUrl = normalizeRemoteUrl(item.url || '')
+    if (!remoteUrl) {
+      return {
+        validationError: `远程文件 ${item.fileName || '未命名文件'} 缺少有效 url，请检查后再试`
+      }
+    }
+
+    remoteUrls.add(remoteUrl)
+    payloadFiles.push({
+      type: fileType,
+      transferMethod,
+      url: remoteUrl
+    })
+  }
+
+  const extractedUrls = extractRemoteUrls(question)
+  for (const url of extractedUrls) {
+    if (remoteUrls.has(url)) {
+      continue
+    }
+    payloadFiles.push({
+      type: 'document',
+      transferMethod: 'remote_url',
+      url
+    })
   }
 
   return {
-    files: files.map((item) => ({
-      fileId: item.fileId,
-      fileName: item.fileName,
-      fileType: item.fileType,
-      fileSize: item.fileSize,
-      upload_file_id: item.fileId,
-      transfer_method: 'local_file',
-      type: 'file'
-    }))
+    files: payloadFiles.length > 0 ? payloadFiles : undefined
   }
 }
 
@@ -1093,7 +1272,12 @@ async function handleSend() {
     return
   }
   const attachedFiles = [...uploadedFiles.value]
-  const inputs = buildFileInputs(attachedFiles)
+  const messageFileReferences = buildMessageFileReferences(attachedFiles)
+  const { files, validationError } = buildChatFiles(attachedFiles, question)
+  if (validationError) {
+    ElMessage.warning(validationError)
+    return
+  }
 
   const now = Date.now()
   const userMessageId = `local-user-${now}`
@@ -1105,7 +1289,8 @@ async function handleSend() {
     thought: '',
     content: question,
     isThinking: false,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    fileReferences: messageFileReferences
   })
 
   chatStore.appendMessage({
@@ -1135,7 +1320,8 @@ async function handleSend() {
       {
         query: question,
         conversationId: previousConversationId || undefined,
-        inputs
+        inputs: {},
+        files
       },
       {
         signal: controller.signal,
@@ -1410,8 +1596,8 @@ onBeforeUnmount(() => {
                     :class="`role-${message.role}`"
                   >
                     <div class="message-meta">
-                      {{ roleLabel(message.role) }}
-                      <span>{{ formatTime(message.createdAt) }}</span>
+                      <span class="message-meta-role">{{ roleLabel(message.role) }}</span>
+                      <span class="message-meta-time">{{ formatTime(message.createdAt) }}</span>
                     </div>
 
                     <div class="message-bubble">
@@ -1453,6 +1639,22 @@ onBeforeUnmount(() => {
                       </template>
 
                       <template v-else>
+                        <div
+                          v-if="message.role === 'user' && message.fileReferences?.length"
+                          class="user-file-reference-list"
+                        >
+                          <div
+                            v-for="fileRef in message.fileReferences"
+                            :key="fileRef.id"
+                            class="user-file-reference-chip"
+                            :title="`${fileRef.name}${fileRef.extension ? `.${fileRef.extension}` : ''}`"
+                          >
+                            <span class="user-file-reference-name">{{ fileRef.name }}</span>
+                            <span v-if="fileRef.extension" class="user-file-reference-ext">
+                              .{{ fileRef.extension }}
+                            </span>
+                          </div>
+                        </div>
                         <div class="plain-content">{{ message.content }}</div>
                       </template>
                     </div>
@@ -1701,6 +1903,7 @@ onBeforeUnmount(() => {
 
 .message-row.role-user {
   margin-left: auto;
+  margin-right: 18px;
 }
 
 .message-row.role-assistant,
@@ -1712,8 +1915,24 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  line-height: 1;
   gap: 8px;
   margin-bottom: 4px;
+}
+
+.message-meta-role,
+.message-meta-time {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.message-row.role-user .message-meta {
+  justify-content: flex-end;
+  text-align: right;
 }
 
 .message-bubble {
@@ -1723,10 +1942,62 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: #ffffff;
   border: 1px solid var(--el-border-color-light);
+  /* display: inline-block;
+  max-width: 100%; */
 }
 
 .plain-content {
   white-space: pre-wrap;
+}
+
+.user-file-reference-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.role-user .user-file-reference-list {
+  justify-content: flex-end;
+}
+
+.user-file-reference-chip {
+  max-width: 240px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  border: 1px solid #b6ccff;
+  background: linear-gradient(135deg, #ffffff 0%, #eef4ff 100%);
+  box-shadow: 0 2px 8px rgba(38, 99, 222, 0.12);
+}
+
+.user-file-reference-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4f84ff;
+  flex-shrink: 0;
+}
+
+.user-file-reference-name {
+  max-width: 164px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #244071;
+  font-weight: 600;
+}
+
+.user-file-reference-ext {
+  font-size: 11px;
+  color: #4d6291;
+  font-family: Menlo, Monaco, Consolas, 'Courier New', monospace;
+  white-space: nowrap;
 }
 
 .role-user .message-bubble {
