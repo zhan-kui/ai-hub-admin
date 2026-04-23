@@ -1603,64 +1603,64 @@ onBeforeUnmount(() => {
                         <span class="message-meta-time">{{ formatTime(message.createdAt) }}</span>
                       </div>
 
-                    <div class="message-bubble">
-                      <template v-if="message.role === 'assistant'">
-                        <details
-                          v-if="message.thought || message.isThinking"
-                          class="thought-panel"
-                          :open="message.isThinking"
-                        >
-                          <summary class="thought-summary">
-                            <span class="thinking-icon" :class="{ active: message.isThinking }">
-                              <svg viewBox="0 0 48 48" aria-hidden="true">
-                                <circle class="ring ring-blue" cx="24" cy="24" r="16" />
-                                <circle class="ring ring-red" cx="24" cy="24" r="16" />
-                                <circle class="ring ring-yellow" cx="24" cy="24" r="16" />
-                                <circle class="ring ring-green" cx="24" cy="24" r="16" />
-                                <path
-                                  class="star-core"
-                                  d="M24 13L27.4 20.6L35 24L27.4 27.4L24 35L20.6 27.4L13 24L20.6 20.6Z"
-                                />
-                              </svg>
-                            </span>
-                            <span class="thought-summary-text">
-                              {{ message.isThinking ? '深度思考中...' : '查看思考过程' }}
-                            </span>
-                          </summary>
-
-                          <div
-                            class="thought-content"
-                            v-html="renderMarkdown(message.thought || '正在组织思路...')"
-                          ></div>
-                        </details>
-
-                        <div
-                          v-if="message.content"
-                          class="assistant-content"
-                          v-html="renderMarkdown(message.content)"
-                        ></div>
-                      </template>
-
-                      <template v-else>
-                        <div
-                          v-if="message.role === 'user' && message.fileReferences?.length"
-                          class="user-file-reference-list"
-                        >
-                          <div
-                            v-for="fileRef in message.fileReferences"
-                            :key="fileRef.id"
-                            class="user-file-reference-chip"
-                            :title="`${fileRef.name}${fileRef.extension ? `.${fileRef.extension}` : ''}`"
+                      <div class="message-bubble">
+                        <template v-if="message.role === 'assistant'">
+                          <details
+                            v-if="message.thought || message.isThinking"
+                            class="thought-panel"
+                            :open="message.isThinking"
                           >
-                            <span class="user-file-reference-name">{{ fileRef.name }}</span>
-                            <span v-if="fileRef.extension" class="user-file-reference-ext">
-                              .{{ fileRef.extension }}
-                            </span>
+                            <summary class="thought-summary">
+                              <span class="thinking-icon" :class="{ active: message.isThinking }">
+                                <svg viewBox="0 0 48 48" aria-hidden="true">
+                                  <circle class="ring ring-blue" cx="24" cy="24" r="16" />
+                                  <circle class="ring ring-red" cx="24" cy="24" r="16" />
+                                  <circle class="ring ring-yellow" cx="24" cy="24" r="16" />
+                                  <circle class="ring ring-green" cx="24" cy="24" r="16" />
+                                  <path
+                                    class="star-core"
+                                    d="M24 13L27.4 20.6L35 24L27.4 27.4L24 35L20.6 27.4L13 24L20.6 20.6Z"
+                                  />
+                                </svg>
+                              </span>
+                              <span class="thought-summary-text">
+                                {{ message.isThinking ? '深度思考中...' : '查看思考过程' }}
+                              </span>
+                            </summary>
+
+                            <div
+                              class="thought-content"
+                              v-html="renderMarkdown(message.thought || '正在组织思路...')"
+                            ></div>
+                          </details>
+
+                          <div
+                            v-if="message.content"
+                            class="assistant-content"
+                            v-html="renderMarkdown(message.content)"
+                          ></div>
+                        </template>
+
+                        <template v-else>
+                          <div
+                            v-if="message.role === 'user' && message.fileReferences?.length"
+                            class="user-file-reference-list"
+                          >
+                            <div
+                              v-for="fileRef in message.fileReferences"
+                              :key="fileRef.id"
+                              class="user-file-reference-chip"
+                              :title="`${fileRef.name}${fileRef.extension ? `.${fileRef.extension}` : ''}`"
+                            >
+                              <span class="user-file-reference-name">{{ fileRef.name }}</span>
+                              <span v-if="fileRef.extension" class="user-file-reference-ext">
+                                .{{ fileRef.extension }}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                        <div class="plain-content">{{ message.content }}</div>
-                      </template>
-                    </div>
+                          <div class="plain-content">{{ message.content }}</div>
+                        </template>
+                      </div>
                     </div>
 
                     <div v-if="message.role === 'user'" class="message-avatar avatar-user">
