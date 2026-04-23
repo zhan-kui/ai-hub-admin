@@ -1596,6 +1596,9 @@ onBeforeUnmount(() => {
                     :class="`role-${message.role}`"
                   >
                     <div v-if="message.role !== 'user'" class="message-avatar avatar-ai">AI</div>
+                    <div v-else class="message-avatar avatar-user">
+                      {{ displayName ? displayName.charAt(0).toUpperCase() : 'U' }}
+                    </div>
 
                     <div class="message-main">
                       <div class="message-meta">
@@ -1663,9 +1666,9 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <div v-if="message.role === 'user'" class="message-avatar avatar-user">
+                    <!-- <div v-if="message.role === 'user'" class="message-avatar avatar-user">
                       {{ displayName ? displayName.charAt(0).toUpperCase() : 'U' }}
-                    </div>
+                    </div> -->
                   </div>
                 </div>
               </template>
