@@ -45,6 +45,8 @@ interface PromptSuggestion {
   prompt: string
 }
 
+type FeedbackRating = 'like' | 'dislike'
+
 const md = new MarkdownIt({
   html: false,
   linkify: true,
@@ -66,6 +68,9 @@ const userStore = useUserStore()
 const apps = ref<AppConfigVO[]>([])
 const conversations = ref<ConversationItem[]>([])
 const inputValue = ref('')
+const feedbackByMessageId = ref<Record<string, FeedbackRating | undefined>>({})
+const suggestedByMessageId = ref<Record<string, string[]>>({})
+const suggestedLoadingByMessageId = ref<Record<string, boolean>>({})
 
 const appLoading = ref(false)
 const conversationLoading = ref(false)
@@ -74,8 +79,10 @@ const deletingConversationId = ref<string | null>(null)
 const uploadLoading = ref(false)
 const audioRecognizing = ref(false)
 const isRecording = ref(false)
+const stopLoading = ref(false)
 
 const streamController = ref<AbortController | null>(null)
+const activeAssistantMessageId = ref<string | null>(null)
 const mediaRecorderRef = ref<MediaRecorder | null>(null)
 const mediaStreamRef = ref<MediaStream | null>(null)
 const audioChunksRef = ref<Blob[]>([])
@@ -99,6 +106,9 @@ const canSend = computed(() =>
       !uploadLoading.value &&
       !audioRecognizing.value
   )
+)
+const canStop = computed(() =>
+  Boolean(currentAppId.value && chatStore.getTaskId && isGenerating.value && !stopLoading.value)
 )
 const canUseVoice = computed(() =>
   Boolean(
@@ -474,6 +484,8 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   const createdAt = normalizeTimeValue(
     record.createdAt ?? record.created_at ?? record.updatedAt ?? record.updated_at
   )
+  const backendMessageId =
+    extractStringByKeys(record, ['messageId', 'message_id', 'id']) || undefined
 
   if (query || answer) {
     const pairMessages: ChatMessage[] = []
@@ -497,7 +509,8 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
         thought: thoughtText,
         content: answer || '',
         isThinking: false,
-        createdAt
+        createdAt,
+        backendMessageId
       })
     }
     return pairMessages
@@ -520,14 +533,17 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
     return []
   }
 
+  const role = parseMessageRole(extractStringByKeys(record, ['role', 'type']))
+
   return [
     {
       id: extractStringByKeys(record, ['id', 'messageId']) || `message-${index}`,
-      role: parseMessageRole(extractStringByKeys(record, ['role', 'type'])),
+      role,
       thought: thoughtText,
       content,
       isThinking: false,
-      createdAt
+      createdAt,
+      backendMessageId: role === 'assistant' ? backendMessageId : undefined
     }
   ]
 }
@@ -623,6 +639,44 @@ function extractContentText(payload: Record<string, unknown>): string {
     extractRawStringByKeys(payload, ['answer', 'content', 'text', 'delta', 'message', 'output']) ||
     ''
   )
+}
+
+function extractBackendMessageId(payload: Record<string, unknown>): string | null {
+  return (
+    extractStringByKeys(payload, ['messageId', 'message_id', 'id']) ||
+    extractStringByKeys(toRecord(payload.metadata) || {}, ['messageId', 'message_id']) ||
+    null
+  )
+}
+
+function getFeedbackValue(message: ChatMessage): FeedbackRating | undefined {
+  if (!message.backendMessageId) return undefined
+  return feedbackByMessageId.value[message.backendMessageId]
+}
+
+function getSuggestedQuestions(message: ChatMessage): string[] {
+  if (!message.backendMessageId) return []
+  return suggestedByMessageId.value[message.backendMessageId] || []
+}
+
+function isSuggestedLoading(message: ChatMessage): boolean {
+  if (!message.backendMessageId) return false
+  return Boolean(suggestedLoadingByMessageId.value[message.backendMessageId])
+}
+
+function collectStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toText(item))
+      .filter((item): item is string => Boolean(item && item.trim()))
+  }
+  const record = toRecord(value)
+  if (!record) return []
+  for (const key of ['questions', 'suggestions', 'list', 'items', 'records', 'data']) {
+    const result = collectStringList(record[key])
+    if (result.length > 0) return result
+  }
+  return []
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -1140,6 +1194,12 @@ function stopVoiceInput() {
   recorder.stop()
 }
 
+function resetMessageActionsState() {
+  feedbackByMessageId.value = {}
+  suggestedByMessageId.value = {}
+  suggestedLoadingByMessageId.value = {}
+}
+
 async function handleSelectApp(appId: number, forceReload = false) {
   if (!forceReload && appId === currentAppId.value) {
     return
@@ -1147,6 +1207,7 @@ async function handleSelectApp(appId: number, forceReload = false) {
 
   chatStore.setCurrentAppId(appId)
   chatStore.resetConversationState()
+  resetMessageActionsState()
   conversations.value = []
   inputValue.value = ''
 
@@ -1259,6 +1320,7 @@ async function loadMessages(conversationId: string) {
       limit: 100
     })
 
+    resetMessageActionsState()
     chatStore.setMessages(normalizeMessages(response))
     requestStickBottom('auto')
   } catch (error: unknown) {
@@ -1302,6 +1364,7 @@ function handleNewConversation() {
   chatStore.setMessages([])
   chatStore.setTaskId(null)
   chatStore.setUploadedFiles([])
+  resetMessageActionsState()
   inputValue.value = ''
   requestStickBottom('auto')
 }
@@ -1313,6 +1376,82 @@ function handleUsePrompt(prompt: string) {
     const textarea = document.querySelector<HTMLTextAreaElement>('.input-panel .el-textarea__inner')
     textarea?.focus()
   })
+}
+
+async function handleFeedback(message: ChatMessage, rating: FeedbackRating) {
+  if (!currentAppId.value || !message.backendMessageId) return
+  const backendMessageId = message.backendMessageId
+  if (feedbackByMessageId.value[backendMessageId] === rating) return
+  try {
+    feedbackByMessageId.value = { ...feedbackByMessageId.value, [backendMessageId]: rating }
+    await chatApi.feedback(currentAppId.value, backendMessageId, rating)
+    ElMessage.success('Feedback saved')
+  } catch (error: unknown) {
+    const rollback = { ...feedbackByMessageId.value }
+    if (rollback[backendMessageId] === rating) delete rollback[backendMessageId]
+    feedbackByMessageId.value = rollback
+    ElMessage.error(extractErrorMessage(error) || 'Feedback failed')
+  }
+}
+
+async function loadSuggestedQuestions(message: ChatMessage) {
+  if (!currentAppId.value || !message.backendMessageId) return
+  const backendMessageId = message.backendMessageId
+  if (
+    suggestedLoadingByMessageId.value[backendMessageId] ||
+    suggestedByMessageId.value[backendMessageId]?.length
+  ) {
+    return
+  }
+  suggestedLoadingByMessageId.value = {
+    ...suggestedLoadingByMessageId.value,
+    [backendMessageId]: true
+  }
+  try {
+    const payload = await chatApi.suggested(currentAppId.value, backendMessageId)
+    const questions = collectStringList(payload).slice(0, 6)
+    if (questions.length > 0) {
+      suggestedByMessageId.value = {
+        ...suggestedByMessageId.value,
+        [backendMessageId]: questions
+      }
+    }
+  } catch (error: unknown) {
+    ElMessage.warning(extractErrorMessage(error) || 'Failed to load suggestions')
+  } finally {
+    const next = { ...suggestedLoadingByMessageId.value }
+    delete next[backendMessageId]
+    suggestedLoadingByMessageId.value = next
+  }
+}
+
+function handlePickSuggestedQuestion(question: string) {
+  if (!question.trim()) return
+  inputValue.value = question
+  nextTick(() => {
+    const textarea = document.querySelector<HTMLTextAreaElement>('.input-panel .el-textarea__inner')
+    textarea?.focus()
+  })
+}
+
+async function handleStopGeneration() {
+  if (!canStop.value || !currentAppId.value || !chatStore.getTaskId) return
+  stopLoading.value = true
+  try {
+    await chatApi.stopGeneration(currentAppId.value, chatStore.getTaskId)
+  } catch (error: unknown) {
+    ElMessage.warning(extractErrorMessage(error) || 'Stop request failed')
+  } finally {
+    streamController.value?.abort()
+    streamController.value = null
+    chatStore.setGenerating(false)
+    chatStore.setTaskId(null)
+    if (activeAssistantMessageId.value) {
+      updateMessageById(activeAssistantMessageId.value, (msg) => ({ ...msg, isThinking: false }))
+    }
+    activeAssistantMessageId.value = null
+    stopLoading.value = false
+  }
 }
 
 function handleBackToAdmin() {
@@ -1356,7 +1495,8 @@ async function handleSend() {
     thought: '',
     content: '',
     isThinking: true,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    backendMessageId: undefined
   })
 
   requestStickBottom('smooth')
@@ -1365,6 +1505,7 @@ async function handleSend() {
   const controller = new AbortController()
 
   streamController.value = controller
+  activeAssistantMessageId.value = assistantMessageId
   chatStore.setGenerating(true)
   chatStore.setTaskId(null)
 
@@ -1387,6 +1528,7 @@ async function handleSend() {
             if (event.event === 'message') {
               const payload = normalizeStreamPayload(event.data)
               updateStreamMeta(payload)
+              const backendMessageId = extractBackendMessageId(payload)
 
               const chunkType = extractChunkType(payload)
 
@@ -1395,28 +1537,32 @@ async function handleSend() {
                 updateMessageById(assistantMessageId, (msg) => ({
                   ...msg,
                   thought: `${msg.thought}${thoughtDelta}`,
-                  isThinking: true
+                  isThinking: true,
+                  backendMessageId: backendMessageId || msg.backendMessageId
                 }))
               } else if (chunkType === 'thought') {
                 const thoughtDelta = extractThoughtText(payload)
                 updateMessageById(assistantMessageId, (msg) => ({
                   ...msg,
                   thought: `${msg.thought}${thoughtDelta}`,
-                  isThinking: true
+                  isThinking: true,
+                  backendMessageId: backendMessageId || msg.backendMessageId
                 }))
               } else if (chunkType === 'thought_end') {
                 const thoughtDelta = extractThoughtText(payload)
                 updateMessageById(assistantMessageId, (msg) => ({
                   ...msg,
                   thought: `${msg.thought}${thoughtDelta}`,
-                  isThinking: false
+                  isThinking: false,
+                  backendMessageId: backendMessageId || msg.backendMessageId
                 }))
               } else if (chunkType === 'text') {
                 const textDelta = extractContentText(payload)
                 updateMessageById(assistantMessageId, (msg) => ({
                   ...msg,
                   content: `${msg.content}${textDelta}`,
-                  isThinking: false
+                  isThinking: false,
+                  backendMessageId: backendMessageId || msg.backendMessageId
                 }))
               } else {
                 const fallbackText = extractContentText(payload)
@@ -1424,30 +1570,39 @@ async function handleSend() {
                   updateMessageById(assistantMessageId, (msg) => ({
                     ...msg,
                     content: `${msg.content}${fallbackText}`,
-                    isThinking: false
+                    isThinking: false,
+                    backendMessageId: backendMessageId || msg.backendMessageId
                   }))
                 }
               }
             } else if (event.event === 'message_replace') {
               const payload = normalizeStreamPayload(event.data)
               updateStreamMeta(payload)
+              const backendMessageId = extractBackendMessageId(payload)
               const content = extractContentText(payload)
               if (content) {
                 updateMessageById(assistantMessageId, (msg) => ({
                   ...msg,
                   content,
-                  isThinking: false
+                  isThinking: false,
+                  backendMessageId: backendMessageId || msg.backendMessageId
                 }))
               }
             } else if (event.event === 'message_end') {
               const payload = normalizeStreamPayload(event.data)
               updateStreamMeta(payload)
+              const backendMessageId = extractBackendMessageId(payload)
               const finalText = extractContentText(payload)
               updateMessageById(assistantMessageId, (msg) => ({
                 ...msg,
                 content: msg.content || finalText,
-                isThinking: false
+                isThinking: false,
+                backendMessageId: backendMessageId || msg.backendMessageId
               }))
+              const assistantMessage = getMessageById(assistantMessageId)
+              if (assistantMessage?.backendMessageId) {
+                void loadSuggestedQuestions(assistantMessage)
+              }
             } else if (event.event === 'error') {
               const payload = normalizeStreamPayload(event.data)
               const message = extractErrorMessage(payload)
@@ -1496,6 +1651,9 @@ async function handleSend() {
     if (streamController.value === controller) {
       streamController.value = null
     }
+    if (activeAssistantMessageId.value === assistantMessageId) {
+      activeAssistantMessageId.value = null
+    }
     chatStore.setGenerating(false)
     if (sendSucceeded && attachedFiles.length > 0) {
       chatStore.setUploadedFiles([])
@@ -1517,6 +1675,7 @@ onMounted(async () => {
   chatStore.setMessages([])
   chatStore.setTaskId(null)
   chatStore.setUploadedFiles([])
+  resetMessageActionsState()
   inputValue.value = ''
 
   await loadApps()
@@ -1528,6 +1687,8 @@ onBeforeUnmount(() => {
     streamController.value.abort()
     streamController.value = null
   }
+  activeAssistantMessageId.value = null
+  stopLoading.value = false
   releaseAudioResources()
   chatStore.setGenerating(false)
 })
@@ -1877,6 +2038,54 @@ onBeforeUnmount(() => {
                             class="assistant-content"
                             v-html="renderMarkdown(message.content)"
                           ></div>
+
+                          <div
+                            v-if="message.backendMessageId && !message.isThinking"
+                            class="assistant-action-row"
+                          >
+                            <div class="feedback-actions">
+                              <el-button
+                                text
+                                size="small"
+                                class="feedback-btn"
+                                :class="{ active: getFeedbackValue(message) === 'like' }"
+                                @click="handleFeedback(message, 'like')"
+                              >
+                                Like
+                              </el-button>
+                              <el-button
+                                text
+                                size="small"
+                                class="feedback-btn"
+                                :class="{ active: getFeedbackValue(message) === 'dislike' }"
+                                @click="handleFeedback(message, 'dislike')"
+                              >
+                                Dislike
+                              </el-button>
+                              <el-button
+                                text
+                                size="small"
+                                :loading="isSuggestedLoading(message)"
+                                @click="loadSuggestedQuestions(message)"
+                              >
+                                Suggestions
+                              </el-button>
+                            </div>
+                            <div
+                              v-if="getSuggestedQuestions(message).length > 0"
+                              class="suggested-question-list"
+                            >
+                              <button
+                                v-for="question in getSuggestedQuestions(message)"
+                                :key="`${message.id}-${question}`"
+                                type="button"
+                                class="suggested-question-chip"
+                                @click="handlePickSuggestedQuestion(question)"
+                              >
+                                {{ question }}
+                              </button>
+                            </div>
+                          </div>
                         </template>
 
                         <template v-else>
@@ -1974,11 +2183,11 @@ onBeforeUnmount(() => {
             <div class="input-actions-right">
               <span class="input-hint-text">Enter 发送 · Shift+Enter 换行</span>
               <el-button
-                type="primary"
+                :type="isGenerating ? 'danger' : 'primary'"
                 class="send-btn"
-                :loading="isGenerating"
-                :disabled="!canSend"
-                @click="handleSend"
+                :loading="isGenerating ? stopLoading : false"
+                :disabled="isGenerating ? !canStop : !canSend"
+                @click="isGenerating ? handleStopGeneration() : handleSend()"
               >
                 {{ isGenerating ? '生成中...' : '发送' }}
               </el-button>
@@ -3200,6 +3409,46 @@ onBeforeUnmount(() => {
   color: #64748b;
 }
 
+.assistant-action-row {
+  margin-top: 10px;
+}
+
+.feedback-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.feedback-btn.active {
+  color: #0ea5e9;
+  font-weight: 600;
+}
+
+.suggested-question-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggested-question-chip {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.suggested-question-chip:hover {
+  border-color: #0ea5e9;
+  background: rgba(14, 165, 233, 0.08);
+  color: #0369a1;
+}
+
 /* ═══════════════════════════════════════════════════
  * Input Panel
  * ═══════════════════════════════════════════════════ */
@@ -3383,6 +3632,12 @@ onBeforeUnmount(() => {
   transition: all 0.2s ease !important;
   position: relative;
   overflow: hidden;
+}
+
+.stop-btn {
+  border-radius: 8px !important;
+  padding: 8px 18px !important;
+  font-weight: 600 !important;
 }
 
 .input-actions :deep(.el-button--primary:hover:not(.is-disabled)) {

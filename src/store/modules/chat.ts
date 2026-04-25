@@ -31,6 +31,7 @@ export interface ChatMessage {
   isThinking: boolean
   createdAt?: string
   fileReferences?: ChatMessageFileReference[]
+  backendMessageId?: string
 }
 
 interface ChatState {
