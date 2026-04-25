@@ -61,31 +61,28 @@ async function handleLogout() {
   <el-container class="layout-container">
     <!-- ── Sidebar ── -->
     <el-aside width="220px" class="layout-aside">
+      <!-- 侧边栏顶部装饰线 -->
+      <div class="aside-top-line"></div>
+
       <div class="layout-logo">
         <div class="logo-icon-wrap">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z"
-              fill="url(#lg1)"
-            />
-            <path
-              d="M9 12l2 2 4-4"
-              stroke="#fff"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <defs>
-              <linearGradient id="lg1" x1="3" y1="2" x2="21" y2="24" gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stop-color="#818cf8" />
-                <stop offset="100%" stop-color="#a78bfa" />
-              </linearGradient>
-            </defs>
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#38bdf8"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+            <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
           </svg>
         </div>
         <div class="logo-text-wrap">
           <span class="logo-title">AI Hub</span>
-          <span class="logo-badge">Admin</span>
+          <span class="logo-badge">ADMIN CONSOLE</span>
         </div>
       </div>
 
@@ -100,14 +97,33 @@ async function handleLogout() {
         </el-menu>
       </el-scrollbar>
 
+      <!-- 系统状态（科技感细节） -->
+      <div class="sidebar-status">
+        <span class="status-indicator"></span>
+        <span class="status-label">SYSTEM ONLINE</span>
+        <span class="status-version">v1.0.0</span>
+      </div>
+
       <div class="sidebar-footer">
         <el-dropdown trigger="click" @command="handleLogout">
           <div class="user-profile">
-            <div class="user-avatar">{{ userInitial }}</div>
+            <div class="user-avatar">
+              <span class="avatar-text">{{ userInitial }}</span>
+              <span class="avatar-online-dot"></span>
+            </div>
             <div class="user-info">
               <div class="user-name">{{ displayName }}</div>
               <div class="user-role">管理员</div>
             </div>
+            <svg
+              class="user-chevron"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
           </div>
           <template #dropdown>
             <el-dropdown-menu>
@@ -122,7 +138,19 @@ async function handleLogout() {
     <el-container>
       <el-header class="layout-header" height="56px">
         <div class="header-left">
-          <span class="header-title">AI Hub 管理后台</span>
+          <div class="header-breadcrumb">
+            <svg
+              class="breadcrumb-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
+            </svg>
+            <span class="header-title">AI Hub 管理后台</span>
+          </div>
         </div>
         <div class="header-right">
           <div class="header-status">
@@ -145,122 +173,212 @@ async function handleLogout() {
   height: 100%;
 }
 
-/* ── Sidebar ──────────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Sidebar - 深蓝科技感侧边栏（对齐登录页 brand-side）
+ * ═══════════════════════════════════════════════════ */
 .layout-aside {
-  background: #111827;
+  position: relative;
+  background: linear-gradient(180deg, #0c1628 0%, #0f172a 100%);
   display: flex;
   flex-direction: column;
   border-right: none;
-  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 1px 0 0 rgba(56, 189, 248, 0.08);
   flex-shrink: 0;
 }
 
+/* 顶部细线 - 登录页同款青色装饰 */
+.aside-top-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(56, 189, 248, 0.4) 20%,
+    rgba(56, 189, 248, 0.6) 50%,
+    rgba(56, 189, 248, 0.4) 80%,
+    transparent 100%
+  );
+  z-index: 1;
+}
+
+/* ── Logo 区 ── */
 .layout-logo {
   height: 60px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 12px;
+  padding: 0 18px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.1);
   flex-shrink: 0;
 }
 
 .logo-icon-wrap {
   width: 34px;
   height: 34px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.5));
 }
 
 .logo-text-wrap {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .logo-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
-  color: #f9fafb;
+  color: #f1f5f9;
   line-height: 1;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.3px;
 }
 
 .logo-badge {
   font-size: 9px;
   font-weight: 600;
-  color: #a78bfa;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.25);
-  border-radius: 3px;
-  padding: 1px 4px;
-  line-height: 1.5;
-  letter-spacing: 0.8px;
+  color: #38bdf8;
+  letter-spacing: 1.2px;
+  line-height: 1;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
   text-transform: uppercase;
-  width: fit-content;
 }
 
+/* ── 菜单滚动区 ── */
 .sidebar-scroll {
   flex: 1;
   min-height: 0;
 }
 
-/* Override Element Plus menu for dark sidebar */
+.sidebar-menu {
+  padding: 12px 8px;
+}
+
+/* ── Element Plus 菜单深度覆写 - 科技蓝配色 ── */
 .layout-aside :deep(.el-menu) {
   background-color: transparent !important;
   border-right: none !important;
-  padding: 8px 0;
 }
 
-.layout-aside :deep(.el-menu-item) {
-  color: #9ca3af;
-  height: 40px;
-  line-height: 40px;
-  transition: all 0.18s ease;
-}
-
-.layout-aside :deep(.el-menu-item:hover) {
-  background-color: rgba(255, 255, 255, 0.06) !important;
-  color: #e5e7eb;
-}
-
-.layout-aside :deep(.el-menu-item.is-active) {
-  background-color: rgba(99, 102, 241, 0.14) !important;
-  color: #a5b4fc;
-  font-weight: 600;
-  border-left: 3px solid #6366f1;
-}
-
+.layout-aside :deep(.el-menu-item),
 .layout-aside :deep(.el-sub-menu__title) {
-  color: #9ca3af;
-  height: 40px;
-  line-height: 40px;
-  transition: all 0.18s ease;
+  color: #94a3b8;
+  height: 42px;
+  line-height: 42px;
+  border-radius: 6px;
+  margin: 2px 0;
+  padding-left: 14px !important;
+  padding-right: 14px !important;
+  transition: all 0.2s ease;
+  font-size: 14px;
 }
 
+.layout-aside :deep(.el-menu-item:hover),
 .layout-aside :deep(.el-sub-menu__title:hover) {
-  background-color: rgba(255, 255, 255, 0.06) !important;
-  color: #e5e7eb;
+  background-color: rgba(56, 189, 248, 0.08) !important;
+  color: #e2e8f0 !important;
+}
+
+/* 激活菜单 - 青色高亮 + 左侧指示条 */
+.layout-aside :deep(.el-menu-item.is-active) {
+  background: linear-gradient(
+    90deg,
+    rgba(14, 165, 233, 0.18) 0%,
+    rgba(14, 165, 233, 0.05) 100%
+  ) !important;
+  color: #38bdf8 !important;
+  font-weight: 600;
+  position: relative;
+  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.15);
+}
+
+.layout-aside :deep(.el-menu-item.is-active)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  background: #38bdf8;
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
 }
 
 .layout-aside :deep(.el-sub-menu__icon-arrow) {
-  color: #4b5563;
+  color: #64748b;
 }
 
 .layout-aside :deep(.el-menu-item .el-icon),
 .layout-aside :deep(.el-sub-menu__title .el-icon) {
   color: inherit;
+  font-size: 16px;
 }
 
-/* Sidebar footer */
+/* 子菜单背景透明 */
+.layout-aside :deep(.el-sub-menu .el-menu) {
+  background-color: rgba(0, 0, 0, 0.2) !important;
+  border-radius: 6px;
+  margin: 2px 0;
+}
+
+.layout-aside :deep(.el-sub-menu .el-menu-item) {
+  font-size: 13px;
+  padding-left: 32px !important;
+}
+
+/* ── 系统状态指示器 ── */
+.sidebar-status {
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #64748b;
+  border-top: 1px solid rgba(56, 189, 248, 0.08);
+  flex-shrink: 0;
+}
+
+.status-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+  animation: statusPulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.status-label {
+  flex: 1;
+  color: #94a3b8;
+}
+
+.status-version {
+  color: #475569;
+}
+
+@keyframes statusPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ── 用户信息区 ── */
 .sidebar-footer {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 10px 8px;
+  border-top: 1px solid rgba(56, 189, 248, 0.08);
+  padding: 10px 8px 12px;
   flex-shrink: 0;
 }
 
@@ -268,28 +386,50 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px;
+  padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.18s ease;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
 }
 
 .user-profile:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(56, 189, 248, 0.06);
+  border-color: rgba(56, 189, 248, 0.15);
 }
 
 .user-avatar {
-  width: 32px;
-  height: 32px;
+  position: relative;
+  width: 34px;
+  height: 34px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  box-shadow:
+    0 2px 8px rgba(14, 165, 233, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.avatar-text {
   font-size: 13px;
   font-weight: 700;
   color: #ffffff;
-  flex-shrink: 0;
+  letter-spacing: 0.02em;
+}
+
+.avatar-online-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  border: 2px solid #0c1628;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
 }
 
 .user-info {
@@ -300,27 +440,62 @@ async function handleLogout() {
 .user-name {
   font-size: 13px;
   font-weight: 600;
-  color: #e5e7eb;
+  color: #e2e8f0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.2;
 }
 
 .user-role {
   font-size: 11px;
-  color: #6b7280;
-  margin-top: 1px;
+  color: #64748b;
+  margin-top: 2px;
+  letter-spacing: 0.02em;
 }
 
-/* ── Header ───────────────────────────────────── */
+.user-chevron {
+  width: 14px;
+  height: 14px;
+  color: #475569;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.user-profile:hover .user-chevron {
+  color: #94a3b8;
+}
+
+/* ═══════════════════════════════════════════════════
+ * Header - 极简浅色 + 青色点缀
+ * ═══════════════════════════════════════════════════ */
 .layout-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
   background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+/* Header 顶部装饰细线 - 与侧边栏顶线呼应 */
+.layout-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(14, 165, 233, 0.3) 30%,
+    rgba(14, 165, 233, 0.5) 50%,
+    rgba(14, 165, 233, 0.3) 70%,
+    transparent 100%
+  );
 }
 
 .header-left {
@@ -328,10 +503,23 @@ async function handleLogout() {
   align-items: center;
 }
 
+.header-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.breadcrumb-icon {
+  width: 16px;
+  height: 16px;
+  color: #0ea5e9;
+}
+
 .header-title {
   font-size: 14px;
   font-weight: 600;
-  color: #374151;
+  color: #0f172a;
+  letter-spacing: 0.01em;
 }
 
 .header-right {
@@ -343,7 +531,11 @@ async function handleLogout() {
 .header-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 999px;
 }
 
 .status-dot {
@@ -357,24 +549,16 @@ async function handleLogout() {
 
 .status-text {
   font-size: 12px;
-  color: #6b7280;
+  color: #047857;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
-@keyframes statusPulse {
-  0%,
-  100% {
-    opacity: 1;
-    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
-  }
-  50% {
-    opacity: 0.6;
-    box-shadow: 0 0 3px rgba(16, 185, 129, 0.2);
-  }
-}
-
-/* ── Main content ─────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Main content - 浅冷灰（slate 系）
+ * ═══════════════════════════════════════════════════ */
 .layout-main {
-  background: #f3f4f8;
+  background: #f1f5f9;
   padding: 24px;
   overflow-y: auto;
 }

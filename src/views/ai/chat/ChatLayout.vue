@@ -38,6 +38,13 @@ interface ConversationItem {
   raw: Record<string, unknown>
 }
 
+interface PromptSuggestion {
+  icon: string
+  title: string
+  description: string
+  prompt: string
+}
+
 const md = new MarkdownIt({
   html: false,
   linkify: true,
@@ -103,9 +110,45 @@ const canUseVoice = computed(() =>
   )
 )
 
+// ═══════════════════════════════════════════════
+// 空状态下展示的提示词引导（可自由修改文案）
+// ═══════════════════════════════════════════════
+const promptSuggestions: PromptSuggestion[] = [
+  {
+    icon: 'spark',
+    title: '介绍一下你自己',
+    description: '了解 AI 助手的能力范围',
+    prompt: '你好，请介绍一下你的能力以及我可以如何使用你。'
+  },
+  {
+    icon: 'code',
+    title: '帮我写一段代码',
+    description: '生成、调试或优化代码片段',
+    prompt: '帮我写一个 Python 函数，用于计算斐波那契数列的第 n 项。'
+  },
+  {
+    icon: 'doc',
+    title: '分析文档内容',
+    description: '上传文件后基于内容提问',
+    prompt: '请帮我总结这份文档的核心观点，并列出三个关键要点。'
+  },
+  {
+    icon: 'idea',
+    title: '创意头脑风暴',
+    description: '为业务场景提供多样化思路',
+    prompt: '我想为一款面向企业的 AI 产品策划一次线上发布会，请给我 5 个创意方向。'
+  }
+]
+
 const currentConversation = computed(() =>
   conversations.value.find((item) => item.id === currentConversationId.value)
 )
+const currentApp = computed(() => apps.value.find((item) => item.id === currentAppId.value))
+// 是否展示空状态欢迎屏
+const showWelcome = computed(
+  () => !currentConversationId.value && messages.value.length === 0 && !messageLoading.value
+)
+
 const maxUploadSize = 20 * 1024 * 1024
 const allowedFileExtensions = new Set([
   'txt',
@@ -1047,14 +1090,12 @@ async function startVoiceInput() {
         return
       }
 
-      // 关键改动：使用 recorder 实际的 mimeType，并且用 File 而不是 Blob
       const mimeType = recorder.mimeType || 'audio/webm'
       const audioBlob = new Blob(chunks, { type: mimeType })
       if (!audioBlob.size) {
         return
       }
 
-      // 包装成 File，提供明确的文件名和扩展名
       const extension = mimeType.includes('webm')
         ? 'webm'
         : mimeType.includes('mp4')
@@ -1109,7 +1150,8 @@ async function handleSelectApp(appId: number, forceReload = false) {
   conversations.value = []
   inputValue.value = ''
 
-  await loadConversations()
+  // ★ 切换应用后仅加载历史列表，不自动进入某个会话，保持新对话状态
+  await loadConversations(undefined, false)
 }
 
 async function loadApps() {
@@ -1135,7 +1177,8 @@ async function loadApps() {
   }
 }
 
-async function loadConversations(preferredId?: string, autoLoadMessages = true) {
+// ★ 关键改动：默认不自动选中第一个会话，传 selectFirst 控制
+async function loadConversations(preferredId?: string, selectFirst = false) {
   if (!currentAppId.value) {
     conversations.value = []
     return
@@ -1160,18 +1203,33 @@ async function loadConversations(preferredId?: string, autoLoadMessages = true) 
       return
     }
 
-    const candidate =
-      (preferredId && conversations.value.some((item) => item.id === preferredId) && preferredId) ||
-      (currentConversationId.value &&
-        conversations.value.some((item) => item.id === currentConversationId.value) &&
-        currentConversationId.value) ||
-      conversations.value[0].id
-
-    chatStore.setCurrentConversationId(candidate)
-
-    if (autoLoadMessages) {
-      await loadMessages(candidate)
+    // 只有明确传了 preferredId（例如刚刚发送完消息拿到新的会话 id）才选中
+    if (preferredId && conversations.value.some((item) => item.id === preferredId)) {
+      chatStore.setCurrentConversationId(preferredId)
+      await loadMessages(preferredId)
+      return
     }
+
+    // 或者显式要求选中第一条
+    if (selectFirst) {
+      const first = conversations.value[0].id
+      chatStore.setCurrentConversationId(first)
+      await loadMessages(first)
+      return
+    }
+
+    // 默认：保持新对话状态（不选中任何一条历史）
+    // 如果之前已经选中了一条且仍然存在，则保留；否则置空
+    if (
+      currentConversationId.value &&
+      conversations.value.some((item) => item.id === currentConversationId.value)
+    ) {
+      // 保留当前选中
+      return
+    }
+
+    chatStore.setCurrentConversationId(null)
+    chatStore.setMessages([])
   } catch (error: unknown) {
     ElMessage.error(extractErrorMessage(error) || '对话列表加载失败')
   } finally {
@@ -1225,20 +1283,10 @@ async function handleDeleteConversation(conversationId: string) {
     conversations.value = previous.filter((item) => item.id !== conversationId)
 
     if (currentConversationId.value === conversationId) {
-      const candidate =
-        conversations.value[removedIndex] ||
-        conversations.value[removedIndex - 1] ||
-        conversations.value[0] ||
-        null
-
-      if (!candidate) {
-        chatStore.setCurrentConversationId(null)
-        chatStore.setMessages([])
-        chatStore.setTaskId(null)
-      } else {
-        chatStore.setCurrentConversationId(candidate.id)
-        await loadMessages(candidate.id)
-      }
+      // ★ 删除当前会话后回到新对话状态
+      chatStore.setCurrentConversationId(null)
+      chatStore.setMessages([])
+      chatStore.setTaskId(null)
     }
 
     ElMessage.success('会话删除成功')
@@ -1256,6 +1304,15 @@ function handleNewConversation() {
   chatStore.setUploadedFiles([])
   inputValue.value = ''
   requestStickBottom('auto')
+}
+
+// ★ 新增：点击提示词卡片时填入输入框并聚焦
+function handleUsePrompt(prompt: string) {
+  inputValue.value = prompt
+  nextTick(() => {
+    const textarea = document.querySelector<HTMLTextAreaElement>('.input-panel .el-textarea__inner')
+    textarea?.focus()
+  })
 }
 
 function handleBackToAdmin() {
@@ -1333,7 +1390,6 @@ async function handleSend() {
 
               const chunkType = extractChunkType(payload)
 
-              // 1) thought_start 2) thought 3) thought_end 4) text
               if (chunkType === 'thought_start') {
                 const thoughtDelta = extractThoughtText(payload)
                 updateMessageById(assistantMessageId, (msg) => ({
@@ -1420,6 +1476,7 @@ async function handleSend() {
 
     const latestConversationId = chatStore.getCurrentConversationId
     if (!previousConversationId && latestConversationId) {
+      // ★ 新会话发送成功后，刷新侧边栏列表（不切换）
       await loadConversations(latestConversationId, false)
     }
   } catch (error: unknown) {
@@ -1455,6 +1512,13 @@ function handleInputKeydown(event: KeyboardEvent) {
 
 onMounted(async () => {
   chatStore.setChatMode('dify')
+  // ★ 每次进入页面时先重置为新对话状态
+  chatStore.setCurrentConversationId(null)
+  chatStore.setMessages([])
+  chatStore.setTaskId(null)
+  chatStore.setUploadedFiles([])
+  inputValue.value = ''
+
   await loadApps()
   requestStickBottom('auto')
 })
@@ -1471,23 +1535,60 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="chat-page">
+    <!-- ═══ Top Header ═══ -->
     <header class="chat-header">
+      <div class="header-accent-line"></div>
       <div class="header-left">
-        <el-button text @click="handleBackToAdmin">
-          <el-icon><ArrowLeft /></el-icon>
-          返回管理后台
-        </el-button>
+        <button class="back-button" type="button" @click="handleBackToAdmin">
+          <span class="back-button-icon">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="19" y1="12" x2="5" y2="12" />
+              <polyline points="12 19 5 12 12 5" />
+            </svg>
+          </span>
+          <span class="back-button-text">
+            <span class="back-button-label">返回管理后台</span>
+            <span class="back-button-sub">Back to Console</span>
+          </span>
+        </button>
       </div>
-      <div class="header-center">AI Hub Chat</div>
-      <div class="header-right">{{ displayName }}</div>
+      <div class="header-center">
+        <svg
+          class="header-icon"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#0ea5e9"
+          stroke-width="2"
+        >
+          <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+          <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
+        </svg>
+        <span class="header-title-text">AI Hub Chat</span>
+      </div>
+      <div class="header-right">
+        <div class="header-user">
+          <span class="user-online-dot"></span>
+          <span class="user-display-name">{{ displayName }}</span>
+        </div>
+      </div>
     </header>
 
     <div class="chat-body">
+      <!-- ═══ Sidebar ═══ -->
       <aside class="chat-sidebar">
         <section class="sidebar-section app-section">
           <div class="section-header">
-            <span>应用列表</span>
-            <el-button text @click="loadApps">
+            <span class="section-title">应用列表</span>
+            <el-button text class="section-action" @click="loadApps">
               <el-icon><Refresh /></el-icon>
             </el-button>
           </div>
@@ -1502,20 +1603,23 @@ onBeforeUnmount(() => {
                 :class="{ active: app.id === currentAppId }"
                 @click="handleSelectApp(app.id)"
               >
-                <div class="item-title">{{ app.appName }}</div>
-                <div class="item-sub">{{ app.appCode }}</div>
+                <div class="app-item-indicator"></div>
+                <div class="app-item-body">
+                  <div class="item-title">{{ app.appName }}</div>
+                  <div class="item-sub">{{ app.appCode }}</div>
+                </div>
               </div>
-              <el-empty v-if="apps.length === 0" description="暂无可用应用" :image-size="72" />
+              <el-empty v-if="apps.length === 0" description="暂无可用应用" :image-size="60" />
             </template>
           </el-scrollbar>
         </section>
 
         <section class="sidebar-section conversation-section">
           <div class="section-header">
-            <span>对话列表</span>
-            <el-button text @click="handleNewConversation">
+            <span class="section-title">历史对话</span>
+            <el-button text class="section-action new-btn" @click="handleNewConversation">
               <el-icon><Plus /></el-icon>
-              新对话
+              <span>新对话</span>
             </el-button>
           </div>
 
@@ -1529,8 +1633,15 @@ onBeforeUnmount(() => {
                 :class="{ active: conversation.id === currentConversationId }"
                 @click="handleSelectConversation(conversation.id)"
               >
-                <div class="item-title">{{ conversation.name }}</div>
-                <div class="item-sub">{{ formatTime(conversation.updatedAt) }}</div>
+                <div class="conv-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                  </svg>
+                </div>
+                <div class="conv-body">
+                  <div class="item-title">{{ conversation.name }}</div>
+                  <div class="item-sub">{{ formatTime(conversation.updatedAt) }}</div>
+                </div>
                 <div class="conversation-action" @click.stop>
                   <el-popconfirm
                     title="确认删除该会话？"
@@ -1555,16 +1666,26 @@ onBeforeUnmount(() => {
               <el-empty
                 v-if="conversations.length === 0"
                 description="暂无历史对话"
-                :image-size="72"
+                :image-size="60"
               />
             </template>
           </el-scrollbar>
         </section>
       </aside>
 
+      <!-- ═══ Chat Main ═══ -->
       <main class="chat-main">
         <div class="chat-main-header">
-          {{ currentConversation?.name || '新对话' }}
+          <div class="main-header-left">
+            <span class="main-header-dot"></span>
+            <span class="main-header-title">
+              {{ currentConversation?.name || '新对话' }}
+            </span>
+            <span v-if="currentApp" class="main-header-app"> · {{ currentApp.appName }} </span>
+          </div>
+          <div v-if="!currentConversationId" class="main-header-status">
+            <span class="status-badge">NEW SESSION</span>
+          </div>
         </div>
 
         <div class="message-panel">
@@ -1573,20 +1694,129 @@ onBeforeUnmount(() => {
             class="message-scroll"
             @scroll="handleMessageScroll"
           >
-            <div ref="messageListRef">
-              <div v-if="messageLoading" class="tip-text">正在加载消息...</div>
+            <div ref="messageListRef" class="message-scroll-inner">
+              <!-- ═══ 空状态：欢迎屏 + 提示词 ═══ -->
+              <div v-if="showWelcome" class="welcome-screen">
+                <!-- 背景装饰 -->
+                <div class="welcome-bg-grid"></div>
+                <div class="welcome-bg-glow"></div>
+
+                <div class="welcome-content">
+                  <!-- Logo + 标题 -->
+                  <div class="welcome-logo">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="#0ea5e9" stroke-width="2">
+                      <path d="M24 4 L44 14 L44 34 L24 44 L4 34 L4 14 Z" />
+                      <path d="M24 4 L24 44 M4 14 L44 34 M44 14 L4 34" opacity="0.4" />
+                    </svg>
+                    <div class="welcome-logo-pulse"></div>
+                  </div>
+
+                  <h2 class="welcome-title">
+                    你好，<span class="welcome-title-accent">{{ displayName || '开发者' }}</span>
+                  </h2>
+                  <p class="welcome-subtitle">
+                    我是 AI Hub 智能助手，可以为你提供对话、分析、创作和代码生成等服务
+                  </p>
+
+                  <!-- 提示词卡片 -->
+                  <div v-if="currentAppId" class="prompt-grid">
+                    <div
+                      v-for="(item, idx) in promptSuggestions"
+                      :key="idx"
+                      class="prompt-card"
+                      :style="{ animationDelay: `${0.1 + idx * 0.06}s` }"
+                      @click="handleUsePrompt(item.prompt)"
+                    >
+                      <div class="prompt-icon-wrap" :class="`prompt-icon--${item.icon}`">
+                        <!-- spark -->
+                        <svg
+                          v-if="item.icon === 'spark'"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path
+                            d="M12 2v6m0 8v6M4.93 4.93l4.24 4.24m5.66 5.66l4.24 4.24M2 12h6m8 0h6M4.93 19.07l4.24-4.24m5.66-5.66l4.24-4.24"
+                          />
+                        </svg>
+                        <!-- code -->
+                        <svg
+                          v-else-if="item.icon === 'code'"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <polyline points="16 18 22 12 16 6" />
+                          <polyline points="8 6 2 12 8 18" />
+                        </svg>
+                        <!-- doc -->
+                        <svg
+                          v-else-if="item.icon === 'doc'"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="16" y1="13" x2="8" y2="13" />
+                          <line x1="16" y1="17" x2="8" y2="17" />
+                        </svg>
+                        <!-- idea -->
+                        <svg
+                          v-else
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path
+                            d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"
+                          />
+                        </svg>
+                      </div>
+                      <div class="prompt-body">
+                        <div class="prompt-title">{{ item.title }}</div>
+                        <div class="prompt-desc">{{ item.description }}</div>
+                      </div>
+                      <svg
+                        class="prompt-arrow"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <path d="M5 12h14M13 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <!-- 底部说明 -->
+                  <div class="welcome-hint">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="16" x2="12" y2="12" />
+                      <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    <span>在下方输入问题开始对话，支持文件上传与语音输入</span>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else-if="messageLoading" class="tip-text">正在加载消息...</div>
+
               <template v-else>
                 <el-empty v-if="!currentAppId" description="请先在左侧选择应用" :image-size="88" />
-                <el-empty
-                  v-else-if="!currentConversationId && messages.length === 0"
-                  description="新对话已创建，请在下方输入消息"
-                  :image-size="88"
-                />
-                <el-empty
-                  v-else-if="messages.length === 0"
-                  description="当前对话暂无消息"
-                  :image-size="88"
-                />
 
                 <div v-else class="message-list">
                   <div
@@ -1595,7 +1825,12 @@ onBeforeUnmount(() => {
                     class="message-row"
                     :class="`role-${message.role}`"
                   >
-                    <div v-if="message.role !== 'user'" class="message-avatar avatar-ai">AI</div>
+                    <div v-if="message.role !== 'user'" class="message-avatar avatar-ai">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+                        <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
+                      </svg>
+                    </div>
                     <div v-else class="message-avatar avatar-user">
                       {{ displayName ? displayName.charAt(0).toUpperCase() : 'U' }}
                     </div>
@@ -1616,10 +1851,10 @@ onBeforeUnmount(() => {
                             <summary class="thought-summary">
                               <span class="thinking-icon" :class="{ active: message.isThinking }">
                                 <svg viewBox="0 0 48 48" aria-hidden="true">
-                                  <circle class="ring ring-blue" cx="24" cy="24" r="16" />
-                                  <circle class="ring ring-red" cx="24" cy="24" r="16" />
-                                  <circle class="ring ring-yellow" cx="24" cy="24" r="16" />
-                                  <circle class="ring ring-green" cx="24" cy="24" r="16" />
+                                  <circle class="ring ring-1" cx="24" cy="24" r="16" />
+                                  <circle class="ring ring-2" cx="24" cy="24" r="16" />
+                                  <circle class="ring ring-3" cx="24" cy="24" r="16" />
+                                  <circle class="ring ring-4" cx="24" cy="24" r="16" />
                                   <path
                                     class="star-core"
                                     d="M24 13L27.4 20.6L35 24L27.4 27.4L24 35L20.6 27.4L13 24L20.6 20.6Z"
@@ -1665,10 +1900,6 @@ onBeforeUnmount(() => {
                         </template>
                       </div>
                     </div>
-
-                    <!-- <div v-if="message.role === 'user'" class="message-avatar avatar-user">
-                      {{ displayName ? displayName.charAt(0).toUpperCase() : 'U' }}
-                    </div> -->
                   </div>
                 </div>
               </template>
@@ -1676,6 +1907,7 @@ onBeforeUnmount(() => {
           </el-scrollbar>
         </div>
 
+        <!-- ═══ Input Panel ═══ -->
         <div class="input-panel">
           <input
             ref="fileInputRef"
@@ -1688,6 +1920,16 @@ onBeforeUnmount(() => {
 
           <div v-if="uploadedFiles.length > 0" class="uploaded-file-list">
             <div v-for="file in uploadedFiles" :key="file.fileId" class="file-chip">
+              <svg
+                class="file-chip-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
               <span class="file-chip-name">{{ file.fileName }}</span>
               <el-button text class="file-chip-remove" @click="removeUploadedFile(file.fileId)">
                 <el-icon><Close /></el-icon>
@@ -1695,14 +1937,17 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <el-input
-            v-model="inputValue"
-            type="textarea"
-            :rows="3"
-            resize="none"
-            placeholder="输入问题，Enter 发送，Shift+Enter 换行"
-            @keydown="handleInputKeydown"
-          />
+          <div class="input-wrapper">
+            <el-input
+              v-model="inputValue"
+              type="textarea"
+              :rows="3"
+              resize="none"
+              placeholder="输入问题，Enter 发送，Shift+Enter 换行"
+              @keydown="handleInputKeydown"
+            />
+          </div>
+
           <div class="input-actions">
             <div class="input-actions-left">
               <el-button text :loading="uploadLoading" @click="triggerFileSelect">
@@ -1726,14 +1971,18 @@ onBeforeUnmount(() => {
               </el-button>
             </div>
 
-            <el-button
-              type="primary"
-              :loading="isGenerating"
-              :disabled="!canSend"
-              @click="handleSend"
-            >
-              {{ isGenerating ? '生成中...' : '发送' }}
-            </el-button>
+            <div class="input-actions-right">
+              <span class="input-hint-text">Enter 发送 · Shift+Enter 换行</span>
+              <el-button
+                type="primary"
+                class="send-btn"
+                :loading="isGenerating"
+                :disabled="!canSend"
+                @click="handleSend"
+              >
+                {{ isGenerating ? '生成中...' : '发送' }}
+              </el-button>
+            </div>
           </div>
         </div>
       </main>
@@ -1742,55 +1991,285 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* ── Page Shell ─────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Page Shell
+ * ═══════════════════════════════════════════════════ */
 .chat-page {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #f3f4f8;
+  background: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
 }
 
-/* ── Top Header ─────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Top Header - 科技感极简顶栏
+ * ═══════════════════════════════════════════════════ */
 .chat-header {
+  position: relative;
   height: 56px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 0 16px;
+  padding: 0 20px;
   background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
   flex-shrink: 0;
 }
 
+/* 顶部青色装饰细线 */
+.header-accent-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(14, 165, 233, 0.3) 30%,
+    rgba(14, 165, 233, 0.5) 50%,
+    rgba(14, 165, 233, 0.3) 70%,
+    transparent 100%
+  );
+}
+
+/* ═══════════════════════════════════════════════════
+ * Back Button - 显眼的返回管理后台按钮
+ * ═══════════════════════════════════════════════════ */
+.back-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px 6px 12px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.08) 0%, rgba(56, 189, 248, 0.04) 100%);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+/* 左侧青色指示条 */
+.back-button::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 2px;
+  background: #0ea5e9;
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 6px rgba(14, 165, 233, 0.6);
+  transition: all 0.22s ease;
+}
+
+/* 内部流光条（hover 时出现） */
+.back-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.15), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.6s ease;
+  pointer-events: none;
+}
+
+.back-button:hover {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.14) 0%, rgba(56, 189, 248, 0.08) 100%);
+  border-color: rgba(14, 165, 233, 0.5);
+  box-shadow:
+    0 4px 14px rgba(14, 165, 233, 0.18),
+    0 0 0 3px rgba(14, 165, 233, 0.08);
+  transform: translateX(-2px);
+}
+
+.back-button:hover::before {
+  top: 10%;
+  bottom: 10%;
+  background: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+}
+
+.back-button:hover::after {
+  left: 120%;
+}
+
+.back-button:active {
+  transform: translateX(-2px) scale(0.98);
+}
+
+.back-button:focus-visible {
+  box-shadow:
+    0 0 0 3px rgba(14, 165, 233, 0.25),
+    0 4px 14px rgba(14, 165, 233, 0.2);
+}
+
+/* 箭头图标 */
+.back-button-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0ea5e9;
+  flex-shrink: 0;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.back-button-icon svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.back-button:hover .back-button-icon {
+  background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.4);
+}
+
+.back-button:hover .back-button-icon svg {
+  transform: translateX(-3px);
+}
+
+/* 文字区 */
+.back-button-text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  line-height: 1;
+}
+
+.back-button-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0369a1;
+  letter-spacing: 0.01em;
+}
+
+.back-button-sub {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 9px;
+  color: #0ea5e9;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+}
+
+/* 窄屏下隐藏副标题 */
+@media (max-width: 720px) {
+  .back-button {
+    padding: 6px 14px 6px 10px;
+    gap: 8px;
+  }
+  .back-button-sub {
+    display: none;
+  }
+  .back-button-icon {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+/* 极窄屏下只保留图标 */
+@media (max-width: 520px) {
+  .back-button-text {
+    display: none;
+  }
+  .back-button {
+    padding: 6px;
+  }
+}
+
 .header-center {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: center;
+}
+
+.header-icon {
+  filter: drop-shadow(0 0 6px rgba(14, 165, 233, 0.4));
+}
+
+.header-title-text {
   font-size: 15px;
   font-weight: 700;
-  color: #111827;
-  letter-spacing: 0.2px;
+  color: #0f172a;
+  letter-spacing: 0.02em;
 }
 
 .header-right {
   justify-self: end;
-  font-size: 13px;
-  color: #6b7280;
 }
 
-/* ── Body ───────────────────────────────────── */
+.header-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: rgba(14, 165, 233, 0.06);
+  border: 1px solid rgba(14, 165, 233, 0.15);
+  border-radius: 999px;
+}
+
+.user-online-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 5px rgba(16, 185, 129, 0.6);
+  animation: onlinePulse 2.5s ease-in-out infinite;
+}
+
+@keyframes onlinePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.user-display-name {
+  font-size: 12px;
+  color: #0369a1;
+  font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════════════
+ * Body
+ * ═══════════════════════════════════════════════════ */
 .chat-body {
   flex: 1;
   min-height: 0;
   display: flex;
 }
 
-/* ── Sidebar ────────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Sidebar - 浅色但带品牌感
+ * ═══════════════════════════════════════════════════ */
 .chat-sidebar {
   width: 280px;
   display: flex;
   flex-direction: column;
   background: #ffffff;
-  border-right: 1px solid #e5e7eb;
+  border-right: 1px solid #e2e8f0;
   flex-shrink: 0;
 }
 
@@ -1802,7 +2281,7 @@ onBeforeUnmount(() => {
 
 .app-section {
   height: 42%;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .conversation-section {
@@ -1811,52 +2290,154 @@ onBeforeUnmount(() => {
 
 .section-header {
   height: 44px;
-  padding: 0 12px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.9px;
-  text-transform: uppercase;
-  color: #9ca3af;
-  background: #fafafa;
-  border-bottom: 1px solid #f1f3f5;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
   flex-shrink: 0;
+}
+
+.section-title {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.section-action {
+  color: #64748b !important;
+  font-size: 12px;
+}
+
+.section-action :deep(.el-icon) {
+  margin-right: 2px;
+}
+
+.section-action.new-btn :deep(span + span) {
+  margin-left: 2px;
+}
+
+:deep(.section-action.is-text:not(.is-disabled):hover) {
+  color: #0ea5e9 !important;
+  background: rgba(14, 165, 233, 0.08) !important;
 }
 
 .section-scroll {
   flex: 1;
   min-height: 0;
-  padding: 8px;
+  padding: 6px 8px;
 }
 
-.app-item,
-.conversation-item {
+/* ── App Item ── */
+.app-item {
   position: relative;
   padding: 10px 12px;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
   border-radius: 8px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.2s ease;
   background: transparent;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.app-item:hover,
-.conversation-item:hover {
-  background: #f3f4f8;
-  border-color: #e5e7eb;
+.app-item-indicator {
+  width: 3px;
+  height: 26px;
+  border-radius: 2px;
+  background: #cbd5e1;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
-.app-item.active,
-.conversation-item.active {
-  background: rgba(99, 102, 241, 0.06);
-  border-color: rgba(99, 102, 241, 0.25);
+.app-item:hover {
+  background: #f1f5f9;
 }
 
+.app-item:hover .app-item-indicator {
+  background: #0ea5e9;
+}
+
+.app-item.active {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.1), rgba(14, 165, 233, 0.02));
+  border-color: rgba(14, 165, 233, 0.25);
+}
+
+.app-item.active .app-item-indicator {
+  background: #0ea5e9;
+  box-shadow: 0 0 6px rgba(14, 165, 233, 0.5);
+}
+
+.app-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Conversation Item ── */
 .conversation-item {
-  padding-right: 40px;
+  position: relative;
+  padding: 10px 12px;
+  margin-bottom: 3px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 36px;
+}
+
+.conv-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.conv-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.conversation-item:hover {
+  background: #f1f5f9;
+}
+
+.conversation-item:hover .conv-icon {
+  background: rgba(14, 165, 233, 0.08);
+  border-color: rgba(14, 165, 233, 0.2);
+  color: #0ea5e9;
+}
+
+.conversation-item.active {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.1), rgba(14, 165, 233, 0.02));
+  border-color: rgba(14, 165, 233, 0.25);
+}
+
+.conversation-item.active .conv-icon {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.3);
+  color: #0ea5e9;
+}
+
+.conv-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .conversation-action {
@@ -1879,52 +2460,388 @@ onBeforeUnmount(() => {
 .item-title {
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: #334155;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.3;
 }
 
 .app-item.active .item-title,
 .conversation-item.active .item-title {
-  color: #6366f1;
+  color: #0369a1;
 }
 
 .item-sub {
   margin-top: 3px;
   font-size: 11px;
-  color: #9ca3af;
-  word-break: break-all;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* ── Chat Main ──────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Chat Main
+ * ═══════════════════════════════════════════════════ */
 .chat-main {
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #f3f4f8;
+  background: #f8fafc;
 }
 
 .chat-main-header {
   height: 46px;
   display: flex;
   align-items: center;
-  padding: 0 20px;
-  border-bottom: 1px solid #e5e7eb;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid #e2e8f0;
   background: #ffffff;
-  font-size: 14px;
-  font-weight: 600;
-  color: #374151;
   flex-shrink: 0;
 }
 
-/* ── Message Panel ──────────────────────────── */
+.main-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.main-header-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  box-shadow: 0 0 6px rgba(14, 165, 233, 0.5);
+  flex-shrink: 0;
+}
+
+.main-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main-header-app {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.status-badge {
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-size: 10px;
+  color: #0ea5e9;
+  letter-spacing: 0.15em;
+  padding: 3px 10px;
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+  border-radius: 4px;
+}
+
+/* ═══════════════════════════════════════════════════
+ * Welcome Screen - 新对话空状态欢迎屏
+ * ═══════════════════════════════════════════════════ */
+.welcome-screen {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  overflow: hidden;
+}
+
+/* 超大浅色网格背景 */
+.welcome-bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(14, 165, 233, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(14, 165, 233, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
+  pointer-events: none;
+}
+
+.welcome-bg-glow {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.1) 0%, transparent 70%);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+.welcome-content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 720px;
+  text-align: center;
+  animation: welcomeFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes welcomeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.welcome-logo {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.welcome-logo svg {
+  width: 48px;
+  height: 48px;
+  filter: drop-shadow(0 0 12px rgba(14, 165, 233, 0.5));
+  position: relative;
+  z-index: 1;
+  animation: logoFloat 4s ease-in-out infinite;
+}
+
+@keyframes logoFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.welcome-logo-pulse {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.3) 0%, transparent 70%);
+  animation: logoPulse 3s ease-in-out infinite;
+}
+
+@keyframes logoPulse {
+  0%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+.welcome-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+
+.welcome-title-accent {
+  background: linear-gradient(135deg, #0ea5e9 0%, #22d3ee 50%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.welcome-subtitle {
+  font-size: 14px;
+  color: #64748b;
+  line-height: 1.6;
+  margin-bottom: 32px;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ── 提示词网格 ── */
+.prompt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 28px;
+  text-align: left;
+}
+
+@media (max-width: 720px) {
+  .prompt-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.prompt-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  opacity: 0;
+  animation: cardFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes cardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.prompt-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #0ea5e9, transparent);
+  opacity: 0;
+  transition: opacity 0.25s;
+  border-radius: 12px 12px 0 0;
+}
+
+.prompt-card:hover {
+  border-color: #0ea5e9;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(14, 165, 233, 0.12);
+}
+
+.prompt-card:hover::before {
+  opacity: 1;
+}
+
+.prompt-icon-wrap {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+
+.prompt-icon-wrap svg {
+  width: 18px;
+  height: 18px;
+}
+
+.prompt-icon--spark {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(56, 189, 248, 0.05));
+  color: #0ea5e9;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+.prompt-icon--code {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(103, 232, 249, 0.05));
+  color: #0891b2;
+  border: 1px solid rgba(34, 211, 238, 0.2);
+}
+
+.prompt-icon--doc {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(52, 211, 153, 0.05));
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.prompt-icon--idea {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(251, 191, 36, 0.05));
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.prompt-card:hover .prompt-icon-wrap {
+  transform: scale(1.05);
+}
+
+.prompt-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.prompt-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 2px;
+  letter-spacing: -0.01em;
+}
+
+.prompt-desc {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.prompt-arrow {
+  width: 16px;
+  height: 16px;
+  color: #cbd5e1;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+
+.prompt-card:hover .prompt-arrow {
+  color: #0ea5e9;
+  transform: translateX(3px);
+}
+
+/* 底部说明 */
+.welcome-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(14, 165, 233, 0.04);
+  border: 1px solid rgba(14, 165, 233, 0.12);
+  border-radius: 999px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.welcome-hint svg {
+  width: 14px;
+  height: 14px;
+  color: #0ea5e9;
+}
+
+/* ═══════════════════════════════════════════════════
+ * Message Panel
+ * ═══════════════════════════════════════════════════ */
 .message-panel {
   flex: 1;
   min-height: 0;
-  padding: 20px;
 }
 
 .message-scroll {
@@ -1932,17 +2849,25 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
+.message-scroll-inner {
+  min-height: 100%;
+}
+
 .message-list {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  padding-bottom: 8px;
+  padding: 24px 24px 8px;
+  max-width: 960px;
+  margin: 0 auto;
 }
 
-/* ── Message Row ────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Message Row
+ * ═══════════════════════════════════════════════════ */
 .message-row {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-start;
   max-width: 82%;
 }
@@ -1962,44 +2887,51 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* ── Avatars ────────────────────────────────── */
+/* ── Avatars ── */
 .message-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.02em;
   flex-shrink: 0;
   margin-top: 22px;
 }
 
 .avatar-ai {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #ffffff;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, #0c1628 0%, #0f172a 50%, #1e293b 100%);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
+}
+
+.avatar-ai svg {
+  width: 18px;
+  height: 18px;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.4));
 }
 
 .avatar-user {
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
+  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%);
   color: #ffffff;
-  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.3);
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.35);
 }
 
-/* ── Message Meta ───────────────────────────── */
+/* ── Message Meta ── */
 .message-meta {
   font-size: 11px;
-  color: #9ca3af;
+  color: #94a3b8;
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
   white-space: nowrap;
   line-height: 1;
-  gap: 6px;
-  margin-bottom: 5px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .message-meta-role,
@@ -2009,34 +2941,39 @@ onBeforeUnmount(() => {
   line-height: 1;
 }
 
+.message-meta-role {
+  font-weight: 600;
+  color: #64748b;
+}
+
 .message-row.role-user .message-meta {
   justify-content: flex-end;
   text-align: right;
 }
 
-/* ── Message Bubble ─────────────────────────── */
+/* ── Message Bubble ── */
 .message-bubble {
-  line-height: 1.65;
+  line-height: 1.7;
   font-size: 14px;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border-radius: 12px;
   background: #ffffff;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
 
 .role-user .message-bubble {
-  background: linear-gradient(135deg, #6366f1, #7c3aed);
+  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
   border-color: transparent;
   color: #ffffff;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 2px 10px rgba(14, 165, 233, 0.3);
 }
 
 .plain-content {
   white-space: pre-wrap;
 }
 
-/* ── File references ────────────────────────── */
+/* ── File references ── */
 .user-file-reference-list {
   display: flex;
   flex-wrap: wrap;
@@ -2075,23 +3012,25 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.95);
   font-weight: 600;
 }
 
 .user-file-reference-ext {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
-  font-family: Menlo, Monaco, Consolas, 'Courier New', monospace;
+  color: rgba(255, 255, 255, 0.75);
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
   white-space: nowrap;
 }
 
-/* ── Thought Panel ──────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Thought Panel - 思考过程面板（科技蓝）
+ * ═══════════════════════════════════════════════════ */
 .thought-panel {
   margin-bottom: 10px;
   border-radius: 8px;
-  background: #f8f9ff;
-  border: 1px solid #e0e4ff;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 1px solid rgba(14, 165, 233, 0.2);
 }
 
 .thought-summary {
@@ -2101,7 +3040,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  color: #6366f1;
+  color: #0284c7;
   font-size: 13px;
   font-weight: 500;
   user-select: none;
@@ -2114,17 +3053,17 @@ onBeforeUnmount(() => {
 .thought-content {
   margin: 0 12px 10px;
   padding: 10px 12px 10px 16px;
-  border-left: 3px solid #818cf8;
-  background: #eef0ff;
+  border-left: 3px solid #0ea5e9;
+  background: #ffffff;
   border-radius: 6px;
   animation: fadeIn 0.26s ease;
   overflow-wrap: anywhere;
   word-break: break-all;
   font-size: 13px;
-  color: #4b5563;
+  color: #475569;
 }
 
-/* ── Thinking Icon ──────────────────────────── */
+/* ── Thinking Icon - 青色系思考中动画 ── */
 .thinking-icon {
   width: 18px;
   height: 18px;
@@ -2132,7 +3071,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #ffffff 0%, #eef3ff 72%, #dfe8ff 100%);
+  background: radial-gradient(circle at 30% 30%, #ffffff 0%, #f0f9ff 72%, #e0f2fe 100%);
 }
 
 .thinking-icon svg {
@@ -2153,29 +3092,29 @@ onBeforeUnmount(() => {
   transform-origin: 24px 24px;
 }
 
-.ring-blue {
-  stroke: #6366f1;
+.ring-1 {
+  stroke: #0ea5e9;
   transform: rotate(0deg);
 }
 
-.ring-red {
-  stroke: #8b5cf6;
+.ring-2 {
+  stroke: #22d3ee;
   transform: rotate(90deg);
 }
 
-.ring-yellow {
-  stroke: #a78bfa;
+.ring-3 {
+  stroke: #38bdf8;
   transform: rotate(180deg);
 }
 
-.ring-green {
-  stroke: #c4b5fd;
+.ring-4 {
+  stroke: #67e8f9;
   transform: rotate(270deg);
 }
 
 .star-core {
   fill: #ffffff;
-  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.55));
+  filter: drop-shadow(0 0 4px rgba(14, 165, 233, 0.6));
   animation: breathe 1.3s ease-in-out infinite;
   transform-origin: 24px 24px;
 }
@@ -2188,12 +3127,14 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* ── Assistant content ──────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Assistant content
+ * ═══════════════════════════════════════════════════ */
 .assistant-content {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
-  color: #1f2937;
+  color: #1e293b;
 }
 
 .assistant-content :deep(p) {
@@ -2211,26 +3152,28 @@ onBeforeUnmount(() => {
 }
 
 .assistant-content :deep(.hljs) {
-  background: #1e1e2e;
+  background: #0f172a;
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 14px 16px;
+  color: #e2e8f0;
 }
 
 .assistant-content :deep(code) {
-  font-family: Menlo, Monaco, Consolas, 'Courier New', monospace;
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, 'Courier New', monospace;
   font-size: 13px;
 }
 
 .assistant-content :deep(:not(pre) > code) {
-  background: rgba(99, 102, 241, 0.08);
-  color: #6366f1;
-  padding: 1px 5px;
+  background: rgba(14, 165, 233, 0.08);
+  color: #0369a1;
+  padding: 1px 6px;
   border-radius: 4px;
   font-size: 13px;
+  border: 1px solid rgba(14, 165, 233, 0.15);
 }
 
 .assistant-content :deep(a) {
-  color: #6366f1;
+  color: #0ea5e9;
   text-decoration: none;
 }
 
@@ -2250,18 +3193,21 @@ onBeforeUnmount(() => {
 
 .assistant-content :deep(blockquote) {
   margin: 8px 0;
-  padding: 8px 12px;
-  border-left: 3px solid #818cf8;
-  background: rgba(99, 102, 241, 0.04);
+  padding: 8px 14px;
+  border-left: 3px solid #0ea5e9;
+  background: rgba(14, 165, 233, 0.04);
   border-radius: 0 6px 6px 0;
-  color: #6b7280;
+  color: #64748b;
 }
 
-/* ── Input Panel ────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Input Panel
+ * ═══════════════════════════════════════════════════ */
 .input-panel {
-  border-top: 1px solid #e5e7eb;
+  position: relative;
+  border-top: 1px solid #e2e8f0;
   background: #ffffff;
-  padding: 14px 20px;
+  padding: 14px 24px 16px;
   flex-shrink: 0;
 }
 
@@ -2274,30 +3220,75 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .file-chip {
   height: 28px;
-  max-width: 360px;
+  max-width: 320px;
   padding: 0 4px 0 10px;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   border-radius: 14px;
-  background: rgba(99, 102, 241, 0.06);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(14, 165, 233, 0.06);
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+.file-chip-icon {
+  width: 12px;
+  height: 12px;
+  color: #0369a1;
+  flex-shrink: 0;
 }
 
 .file-chip-name {
   font-size: 12px;
-  color: #4338ca;
+  color: #0369a1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
 }
 
 .file-chip-remove {
   margin-left: 4px;
   padding: 2px;
+}
+
+.input-wrapper {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+/* Input textarea */
+.input-panel :deep(.el-textarea__inner) {
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 14px;
+  resize: none;
+  transition: all 0.2s;
+  padding: 12px 14px;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+.input-panel :deep(.el-textarea__inner::placeholder) {
+  color: #94a3b8;
+}
+
+.input-panel :deep(.el-textarea__inner:hover) {
+  border-color: #cbd5e1;
+  background: #ffffff;
+}
+
+.input-panel :deep(.el-textarea__inner:focus) {
+  border-color: #0ea5e9;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
 }
 
 .input-actions {
@@ -2306,19 +3297,23 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .input-actions-left {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
   min-width: 0;
 }
 
 .input-actions-left :deep(.el-button) {
   margin-left: 0;
-  color: #6b7280;
+  color: #64748b;
+  font-size: 13px;
 }
 
 .input-actions-left :deep(.el-button + .el-button) {
@@ -2326,27 +3321,40 @@ onBeforeUnmount(() => {
 }
 
 .input-actions-left :deep(.el-button.is-text:not(.is-disabled):hover) {
-  background: rgba(99, 102, 241, 0.06);
-  color: #6366f1;
+  background: rgba(14, 165, 233, 0.08);
+  color: #0ea5e9;
 }
 
-.input-actions > .el-button {
-  margin-left: auto;
+.input-actions-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.input-hint-text {
+  font-size: 11px;
+  color: #cbd5e1;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  letter-spacing: 0.02em;
 }
 
 @media (max-width: 960px) {
+  .input-hint-text {
+    display: none;
+  }
   .input-actions {
     flex-direction: column;
     align-items: stretch;
   }
-
   .input-actions-left {
     justify-content: flex-start;
   }
-
-  .input-actions > .el-button {
+  .input-actions-right {
     width: 100%;
-    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .send-btn {
+    width: 100%;
   }
 }
 
@@ -2358,51 +3366,50 @@ onBeforeUnmount(() => {
   margin-right: 0;
 }
 
-/* Input textarea */
-.input-panel :deep(.el-textarea__inner) {
-  border-radius: 10px;
-  border-color: #e5e7eb;
-  background: #fafafa;
-  font-size: 14px;
-  resize: none;
-  transition: border-color 0.18s;
-}
-
-.input-panel :deep(.el-textarea__inner:focus) {
-  border-color: #6366f1;
-  background: #ffffff;
-}
-
-/* Send button */
+/* Send button - 对齐登录页主按钮 */
+.send-btn,
 .input-actions :deep(.el-button--primary) {
-  background: linear-gradient(135deg, #6366f1, #7c3aed);
-  border: none;
-  border-radius: 8px;
-  padding: 8px 20px;
-  font-weight: 600;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
-  transition: all 0.18s ease;
+  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%) !important;
+  background-size: 200% 200% !important;
+  border: none !important;
+  border-radius: 8px !important;
+  padding: 8px 24px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.05em;
+  color: #f0f9ff !important;
+  box-shadow:
+    0 4px 12px rgba(14, 165, 233, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+  transition: all 0.2s ease !important;
+  position: relative;
+  overflow: hidden;
 }
 
 .input-actions :deep(.el-button--primary:hover:not(.is-disabled)) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  box-shadow:
+    0 6px 18px rgba(14, 165, 233, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
 }
 
 .input-actions :deep(.el-button--primary.is-disabled) {
   opacity: 0.5;
-  box-shadow: none;
+  box-shadow: none !important;
 }
 
-/* ── Tip text ───────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Tip text
+ * ═══════════════════════════════════════════════════ */
 .tip-text {
-  padding: 12px;
+  padding: 24px 12px;
   text-align: center;
   font-size: 12px;
-  color: #9ca3af;
+  color: #94a3b8;
 }
 
-/* ── Keyframes ──────────────────────────────── */
+/* ═══════════════════════════════════════════════════
+ * Keyframes
+ * ═══════════════════════════════════════════════════ */
 @keyframes orbit {
   from {
     transform: rotate(0deg);

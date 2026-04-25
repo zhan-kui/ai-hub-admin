@@ -1,51 +1,95 @@
 :root {
-  --login-bg-color: #0f1422;
+  /* ================================================
+   * AI Hub · Tech Theme（深蓝青色系，对齐登录页）
+   * 主色逻辑：
+   *   - 深蓝作为结构/导航色（sidebar、logo、深色区域）
+   *   - 青色作为强调色（高亮、激活、数据可视化、交互焦点）
+   *   - 浅冷灰作为内容区背景（slate 系，搭配深蓝更和谐）
+   * ================================================ */
 
-  /* Sidebar */
+  /* 登录页背景（保持与登录组件一致） */
+  --login-bg-color: #0f172a;
+
+  /* ===== Sidebar（侧边栏）===== */
   --left-menu-max-width: 220px;
   --left-menu-min-width: 64px;
-  --left-menu-bg-color: #111827;
-  --left-menu-bg-light-color: #1f2937;
-  --left-menu-bg-active-color: rgba(99, 102, 241, 0.15);
-  --left-menu-text-color: #9ca3af;
-  --left-menu-text-active-color: #ffffff;
-  --left-menu-collapse-bg-active-color: #6366f1;
 
-  /* Logo */
+  /* 侧边栏深蓝背景，与登录页 brand-side 同色系 */
+  --left-menu-bg-color: #0c1628;
+  --left-menu-bg-light-color: #0f172a;
+
+  /* 激活态用青色（登录页主强调色） */
+  --left-menu-bg-active-color: rgba(14, 165, 233, 0.12);
+  --left-menu-text-color: #94a3b8;
+  --left-menu-text-active-color: #38bdf8;
+  --left-menu-collapse-bg-active-color: #0ea5e9;
+
+  /* ===== Logo ===== */
   --logo-height: 60px;
-  --logo-title-text-color: #ffffff;
+  --logo-title-text-color: #f1f5f9;
 
-  /* Header */
-  --top-header-bg-color: '#ffffff';
-  --top-header-text-color: '#111827';
-  --top-header-hover-color: #f9fafb;
+  /* ===== Header（顶部）===== */
+  --top-header-bg-color: #ffffff;
+  --top-header-text-color: #0f172a;
+  --top-header-hover-color: #f8fafc;
   --top-tool-height: var(--logo-height);
   --top-tool-p-x: 0;
   --tags-view-height: 35px;
 
-  /* Tab menu */
+  /* ===== Tab Menu ===== */
   --tab-menu-max-width: 80px;
   --tab-menu-min-width: 30px;
   --tab-menu-collapse-height: 36px;
 
-  /* Content */
+  /* ===== Content（内容区）===== */
   --app-content-padding: 24px;
-  --app-content-bg-color: #f3f4f8;
+  /* 使用 slate 浅冷灰，和深蓝侧边栏搭配更协调 */
+  --app-content-bg-color: #f1f5f9;
   --app-footer-height: 50px;
 
-  /* Brand */
-  --brand-primary: #6366f1;
-  --brand-primary-dark: #4f46e5;
-  --brand-primary-light: #818cf8;
-  --brand-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  /* ===== Brand（品牌色 - 对齐登录页科技蓝）===== */
+  --brand-primary: #0ea5e9; /* sky-500 主色 */
+  --brand-primary-dark: #0284c7; /* sky-600 深色 */
+  --brand-primary-light: #38bdf8; /* sky-400 浅色 */
+  --brand-primary-lighter: #7dd3fc; /* sky-300 更浅 */
+  --brand-accent: #22d3ee; /* cyan-400 辅助青 */
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 1px rgba(0, 0, 0, 0.04);
+  /* 登录页同款渐变按钮 */
+  --brand-gradient: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%);
 
+  /* 深色面板色（用于侧边栏/深色卡片） */
+  --surface-dark: #0f172a;
+  --surface-dark-elevated: #1e293b;
+  --surface-dark-border: rgba(56, 189, 248, 0.15);
+
+  /* 文字层级（对应浅色内容区） */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+  --text-muted: #cbd5e1;
+
+  /* 边框 */
+  --border-subtle: #e2e8f0;
+  --border-default: #cbd5e1;
+
+  /* 状态色 */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-info: #0ea5e9;
+
+  /* ===== Shadows ===== */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.12);
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06), 0 0 1px rgba(15, 23, 42, 0.04);
+  --shadow-brand: 0 4px 16px rgba(14, 165, 233, 0.25);
+
+  /* ===== Motion ===== */
   --transition-time-02: 0.2s;
+
+  /* ===== Typography ===== */
+  --font-mono: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
 }
 
 .dark {
