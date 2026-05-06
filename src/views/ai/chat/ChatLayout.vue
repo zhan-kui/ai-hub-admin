@@ -1,17 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import {
-  ArrowLeft,
-  Close,
-  Delete,
-  Microphone,
-  Paperclip,
-  Plus,
-  Refresh
-} from '@element-plus/icons-vue'
+import { Close, Delete, Microphone, Paperclip, Plus, Refresh } from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
@@ -61,7 +52,6 @@ const md = new MarkdownIt({
   }
 })
 
-const router = useRouter()
 const chatStore = useChatStore()
 const userStore = useUserStore()
 
@@ -1454,10 +1444,6 @@ async function handleStopGeneration() {
   }
 }
 
-function handleBackToAdmin() {
-  router.push('/')
-}
-
 async function handleSend() {
   if (!canSend.value || !currentAppId.value) {
     return
@@ -1699,27 +1685,6 @@ onBeforeUnmount(() => {
     <!-- ═══ Top Header ═══ -->
     <header class="chat-header">
       <div class="header-accent-line"></div>
-      <div class="header-left">
-        <button class="back-button" type="button" @click="handleBackToAdmin">
-          <span class="back-button-icon">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <line x1="19" y1="12" x2="5" y2="12" />
-              <polyline points="12 19 5 12 12 5" />
-            </svg>
-          </span>
-          <span class="back-button-text">
-            <span class="back-button-label">返回管理后台</span>
-            <span class="back-button-sub">Back to Console</span>
-          </span>
-        </button>
-      </div>
       <div class="header-center">
         <svg
           class="header-icon"
@@ -1734,12 +1699,6 @@ onBeforeUnmount(() => {
           <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
         </svg>
         <span class="header-title-text">AI Hub Chat</span>
-      </div>
-      <div class="header-right">
-        <div class="header-user">
-          <span class="user-online-dot"></span>
-          <span class="user-display-name">{{ displayName }}</span>
-        </div>
       </div>
     </header>
 
@@ -2219,8 +2178,7 @@ onBeforeUnmount(() => {
 .chat-header {
   position: relative;
   height: 56px;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
   align-items: center;
   padding: 0 20px;
   background: #ffffff;
@@ -2408,7 +2366,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  justify-self: center;
+  justify-content: flex-start;
 }
 
 .header-icon {

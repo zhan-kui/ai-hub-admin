@@ -188,39 +188,165 @@ export interface AppConfigVO {
   appName: string
   appCode: string
   appType: string
+  difyApiKey?: string
+  difyAppId?: string
+  difyBaseUrl?: string
   description?: string
   icon?: string
   sort: number
   enabled: boolean
   createdAt: string
+}
+
+export type KnowledgeId = string | number
+export type IndexingTechnique = 'high_quality' | 'economy'
+export type KnowledgePermission = 'only_me' | 'all_team_members' | 'partial_members'
+export type KnowledgeDocForm = 'text_model' | 'hierarchical_model' | 'qa_model'
+export type ProcessRuleMode = 'automatic' | 'custom'
+
+export interface ProcessRulePayload {
+  mode: ProcessRuleMode
+  rules?: Record<string, any>
 }
 
 export interface CreateKnowledgeBaseRequest {
   kbName: string
   kbCode: string
   difyApiKey: string
-  difyDatasetId?: string
+  difyDatasetId: string
   difyBaseUrl?: string
   description?: string
   icon?: string
   indexingTechnique?: string
   embeddingModel?: string
   sort?: number
+  enabled?: boolean
 }
 
 export interface KnowledgeBaseVO {
-  id: number
+  id: KnowledgeId
   kbName: string
-  kbCode: string
+  kbCode?: string
+  difyApiKey?: string
+  difyDatasetId?: string
+  difyBaseUrl?: string
   description?: string
   icon?: string
-  documentCount: number
-  wordCount: number
+  documentCount?: number
+  wordCount?: number
   indexingTechnique?: string
   embeddingModel?: string
-  sort: number
-  enabled: boolean
-  createdAt: string
+  sort?: number
+  enabled?: boolean
+  createdAt?: string
+  updatedAt?: string
+
+  // 兼容透传字段（列表/文档接口中可能出现）
+  name?: string
+  provider?: string
+  permission?: KnowledgePermission | string
+  indexing_technique?: string
+  app_count?: number
+  document_count?: number
+  word_count?: number
+  author_name?: string
+  created_at?: number
+  updated_at?: number
+  embedding_model?: string
+  embedding_model_provider?: string
+  embedding_available?: boolean
+  tags?: Record<string, any>[]
+  doc_form?: KnowledgeDocForm | string
+  is_published?: boolean
+  total_documents?: number
+  total_available_documents?: number
+  enable_api?: boolean
+}
+
+export interface KnowledgePagedResult<T> {
+  data: T[]
+  has_more?: boolean
+  limit?: number
+  total?: number
+  page?: number
+}
+
+export interface KnowledgeDocumentVO {
+  id: string
+  position?: number
+  data_source_type?: string
+  data_source_info?: Record<string, any>
+  data_source_detail_dict?: Record<string, any>
+  dataset_process_rule_id?: string
+  name?: string
+  created_from?: string
+  created_by?: string
+  created_at?: number
+  tokens?: number
+  indexing_status?: string
+  error?: string | null
+  enabled?: boolean
+  disabled_at?: number | null
+  disabled_by?: string | null
+  archived?: boolean
+  display_status?: string
+  word_count?: number
+  hit_count?: number
+  doc_form?: KnowledgeDocForm | string
+  doc_metadata?: Record<string, any>[] | null
+  summary_index_status?: string | null
+  need_summary?: boolean
+}
+
+export interface KnowledgeSegmentVO {
+  id: string
+  position?: number
+  document_id?: string
+  content?: string
+  sign_content?: string
+  answer?: string
+  word_count?: number
+  tokens?: number
+  keywords?: string[]
+  index_node_id?: string
+  index_node_hash?: string
+  hit_count?: number
+  enabled?: boolean
+  status?: string
+  created_at?: number
+  updated_at?: number
+  indexing_at?: number
+  completed_at?: number
+  error?: string | null
+  child_chunks?: KnowledgeChildChunkVO[]
+  attachments?: Record<string, any>[]
+  summary?: string | null
+}
+
+export interface KnowledgeChildChunkVO {
+  id: string
+  segment_id?: string
+  content?: string
+  position?: number
+  word_count?: number
+  type?: string
+  created_at?: number
+  updated_at?: number
+}
+
+export interface CreateKnowledgeDocumentByTextRequest {
+  name: string
+  text: string
+  indexing_technique: IndexingTechnique
+  process_rule: ProcessRulePayload
+  doc_form?: KnowledgeDocForm
+}
+
+export interface CreateKnowledgeDocumentByFileRequest {
+  indexing_technique: IndexingTechnique
+  processRule: string
+  doc_form?: KnowledgeDocForm
+  doc_language?: string
 }
 
 export interface GrantRequest {
@@ -331,7 +457,8 @@ export function setStaticToken(token?: string | null): void {
 async function unwrap<T>(promise: Promise<AxiosResponse<R<T>>>): Promise<T> {
   const resp = await promise
   const body = resp.data
-  if (body.code !== 200) {
+  const isSuccess = body?.code === 0 || body?.code === 200
+  if (!isSuccess) {
     throw new Error(body.message || `API Error: ${body.code}`)
   }
   return body.data
@@ -788,48 +915,91 @@ export const conversationApi = {
   }
 }
 
+const KNOWLEDGE_BASE_PATH = ((import.meta as any)?.env?.VITE_KNOWLEDGE_BASE_PATH || '/knowledge')
+  .trim()
+  .replace(/\/$/, '')
+
 export const knowledgeApi = {
   list(config?: AxiosRequestConfig) {
-    return unwrap<KnowledgeBaseVO[]>(apiClient.get('/knowledge/list', config))
+    return unwrap<KnowledgeBaseVO[]>(apiClient.get(`${KNOWLEDGE_BASE_PATH}/list`, config))
   },
 
-  detail(id: number, config?: AxiosRequestConfig) {
-    return unwrap<KnowledgeBaseVO>(apiClient.get(`/knowledge/${id}`, config))
+  detail(id: KnowledgeId, config?: AxiosRequestConfig) {
+    return unwrap<KnowledgeBaseVO>(apiClient.get(`${KNOWLEDGE_BASE_PATH}/${id}`, config))
   },
 
   create(payload: CreateKnowledgeBaseRequest, config?: AxiosRequestConfig) {
-    return unwrap<KnowledgeBaseVO>(apiClient.post('/knowledge/create', payload, config))
+    return unwrap<KnowledgeBaseVO>(apiClient.post(`${KNOWLEDGE_BASE_PATH}/create`, payload, config))
   },
 
-  update(id: number, payload: CreateKnowledgeBaseRequest, config?: AxiosRequestConfig) {
-    return unwrap<KnowledgeBaseVO>(apiClient.put(`/knowledge/${id}`, payload, config))
+  update(id: KnowledgeId, payload: CreateKnowledgeBaseRequest, config?: AxiosRequestConfig) {
+    return unwrap<KnowledgeBaseVO>(apiClient.put(`${KNOWLEDGE_BASE_PATH}/${id}`, payload, config))
   },
 
-  delete(id: number, config?: AxiosRequestConfig) {
-    return unwrap<void>(apiClient.delete(`/knowledge/${id}`, config))
+  delete(id: KnowledgeId, config?: AxiosRequestConfig) {
+    return unwrap<void>(apiClient.delete(`${KNOWLEDGE_BASE_PATH}/${id}`, config))
+  },
+
+  retrieve(
+    id: KnowledgeId,
+    payload: {
+      query: string
+      retrieval_model?: {
+        search_method?: 'semantic_search' | 'keyword_search' | 'full_text_search' | 'hybrid_search'
+        reranking_enable?: boolean
+        top_k?: number
+        score_threshold_enabled?: boolean
+        score_threshold?: number
+      }
+    },
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<AnyObject>(
+      apiClient.post(`${KNOWLEDGE_BASE_PATH}/${id}/retrieve`, payload, config)
+    )
   },
 
   listDocuments(
-    id: number,
-    params?: { keyword?: string; page?: number; limit?: number },
+    id: KnowledgeId,
+    params?: {
+      keyword?: string
+      page?: number
+      limit?: number
+      status?: string | string[]
+    },
     config?: AxiosRequestConfig
   ) {
-    return unwrap<AnyObject>(apiClient.get(`/knowledge/${id}/documents`, { ...config, params }))
+    return unwrap<KnowledgePagedResult<KnowledgeDocumentVO>>(
+      apiClient.get(`${KNOWLEDGE_BASE_PATH}/${id}/documents`, { ...config, params })
+    )
   },
 
-  createDocumentByText(id: number, payload: AnyObject, config?: AxiosRequestConfig) {
-    return unwrap<AnyObject>(apiClient.post(`/knowledge/${id}/documents/text`, payload, config))
+  createDocumentByText(
+    id: KnowledgeId,
+    payload: CreateKnowledgeDocumentByTextRequest,
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<AnyObject>(
+      apiClient.post(`${KNOWLEDGE_BASE_PATH}/${id}/documents/text`, payload, config)
+    )
   },
 
   createDocumentByFile(
-    id: number,
+    id: KnowledgeId,
     file: File | Blob,
-    processRule?: string,
+    options: CreateKnowledgeDocumentByFileRequest,
     config?: AxiosRequestConfig
   ) {
-    const form = toFormData({ file, processRule })
+    const form = toFormData({
+      file,
+      indexing_technique: options.indexing_technique,
+      doc_form: options.doc_form,
+      doc_language: options.doc_language,
+      processRule: options.processRule
+    })
+
     return unwrap<AnyObject>(
-      apiClient.post(`/knowledge/${id}/documents/file`, form, {
+      apiClient.post(`${KNOWLEDGE_BASE_PATH}/${id}/documents/file`, form, {
         ...config,
         headers: {
           ...(config?.headers ?? {}),
@@ -839,47 +1009,121 @@ export const knowledgeApi = {
     )
   },
 
-  updateDocumentByText(id: number, docId: string, payload: AnyObject, config?: AxiosRequestConfig) {
+  deleteDocument(id: KnowledgeId, docId: string, config?: AxiosRequestConfig) {
     return unwrap<AnyObject>(
-      apiClient.put(`/knowledge/${id}/documents/${docId}/text`, payload, config)
+      apiClient.delete(`${KNOWLEDGE_BASE_PATH}/${id}/documents/${docId}`, config)
     )
   },
 
-  updateDocumentByFile(
-    id: number,
+  indexingStatus(id: KnowledgeId, batch: string, config?: AxiosRequestConfig) {
+    return unwrap<AnyObject>(
+      apiClient.get(`${KNOWLEDGE_BASE_PATH}/${id}/documents/${batch}/indexing-status`, config)
+    )
+  },
+
+  async downloadDocumentsZip(id: KnowledgeId, documentIds: string[], config?: AxiosRequestConfig) {
+    const response = await apiClient.post(
+      `${KNOWLEDGE_BASE_PATH}/${id}/documents/download-zip`,
+      { document_ids: documentIds },
+      { ...config, responseType: 'blob' }
+    )
+    return {
+      blob: response.data as Blob,
+      headers: response.headers
+    }
+  },
+
+  listSegments(
+    id: KnowledgeId,
     docId: string,
-    file: File | Blob,
-    processRule?: string,
+    params?: { page?: number; limit?: number; keyword?: string; status?: string | string[] },
     config?: AxiosRequestConfig
   ) {
-    const form = toFormData({ file, processRule })
-    return unwrap<AnyObject>(
-      apiClient.put(`/knowledge/${id}/documents/${docId}/file`, form, {
+    return unwrap<KnowledgePagedResult<KnowledgeSegmentVO>>(
+      apiClient.get(`${KNOWLEDGE_BASE_PATH}/${id}/documents/${docId}/segments`, {
         ...config,
-        headers: {
-          ...(config?.headers ?? {}),
-          'Content-Type': 'multipart/form-data'
-        }
+        params
       })
     )
   },
 
-  deleteDocument(id: number, docId: string, config?: AxiosRequestConfig) {
-    return unwrap<AnyObject>(apiClient.delete(`/knowledge/${id}/documents/${docId}`, config))
-  },
-
-  indexingStatus(id: number, batch: string, config?: AxiosRequestConfig) {
+  createSegments(
+    id: KnowledgeId,
+    docId: string,
+    segments: Array<{ content: string; answer?: string; keywords?: string[] }>,
+    config?: AxiosRequestConfig
+  ) {
     return unwrap<AnyObject>(
-      apiClient.get(`/knowledge/${id}/documents/indexing-status`, { ...config, params: { batch } })
+      apiClient.post(
+        `${KNOWLEDGE_BASE_PATH}/${id}/documents/${docId}/segments`,
+        { segments },
+        config
+      )
     )
   },
 
-  listSegments(id: number, docId: string, config?: AxiosRequestConfig) {
-    return unwrap<AnyObject>(apiClient.get(`/knowledge/${id}/documents/${docId}/segments`, config))
+  updateSegment(
+    id: KnowledgeId,
+    docId: string,
+    segmentId: string,
+    segment: {
+      content: string
+      answer?: string
+      keywords?: string[]
+      enabled?: boolean
+      regenerate_child_chunks?: boolean
+    },
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<KnowledgeSegmentVO>(
+      apiClient.patch(
+        `${KNOWLEDGE_BASE_PATH}/${id}/documents/${docId}/segments/${segmentId}`,
+        { segment },
+        config
+      )
+    )
   },
 
-  retrieve(id: number, payload: AnyObject, config?: AxiosRequestConfig) {
-    return unwrap<AnyObject>(apiClient.post(`/knowledge/${id}/retrieve`, payload, config))
+  deleteSegment(id: KnowledgeId, docId: string, segmentId: string, config?: AxiosRequestConfig) {
+    return unwrap<AnyObject>(
+      apiClient.delete(
+        `${KNOWLEDGE_BASE_PATH}/${id}/documents/${docId}/segments/${segmentId}`,
+        config
+      )
+    )
+  },
+
+  createChildChunk(
+    id: KnowledgeId,
+    docId: string,
+    segmentId: string,
+    payload: { content: string },
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<KnowledgeChildChunkVO>(
+      apiClient.post(
+        `${KNOWLEDGE_BASE_PATH}/${id}/documents/${docId}/segments/${segmentId}/child-chunks`,
+        payload,
+        config
+      )
+    )
+  },
+
+  updateChildChunk(
+    id: KnowledgeId,
+    docId: string,
+    segmentId: string,
+    chunkId: string,
+    payload: { content: string },
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<KnowledgeChildChunkVO>(
+      apiClient.patch(
+        `${KNOWLEDGE_BASE_PATH}/${id}/documents/${docId}/segments/${segmentId}/child-chunks/${chunkId}`,
+        payload,
+        config
+      )
+    )
   }
 }
 

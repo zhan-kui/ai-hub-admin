@@ -17,13 +17,29 @@ function resolvePath(parentPath: string, path: string | undefined, id: number): 
     return path
   }
 
-  if (path && path.startsWith('/')) {
-    return path
+  const normalize = (value: string) => {
+    const normalized = value.split('/').filter(Boolean).join('/')
+    return normalized ? `/${normalized}` : '/'
   }
 
-  const current = (path || `menu-${id}`).replace(/^\/+/, '')
-  const base = (parentPath || '').replace(/\/+$/, '')
-  const fullPath = `${base}/${current}`.replace(/\/{2,}/g, '/')
+  const base = normalize(parentPath || '/')
+  const fallback = `menu-${id}`
+  const rawPath = path || fallback
+
+  if (!parentPath) {
+    return normalize(rawPath)
+  }
+
+  let current = rawPath
+  if (rawPath.startsWith('/')) {
+    const absolute = normalize(rawPath)
+    if (absolute.startsWith(`${base}/`)) {
+      return absolute
+    }
+    current = absolute.slice(1)
+  }
+
+  const fullPath = `${base}/${current.replace(/^\/+/, '')}`.replace(/\/{2,}/g, '/')
   return fullPath.startsWith('/') ? fullPath : `/${fullPath}`
 }
 

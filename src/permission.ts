@@ -52,7 +52,17 @@ export function setupAuthGuard(router: Router): void {
         })
 
         isLoadingDynamicRoutes = false
-        return to.fullPath
+        const redirectedFrom = to.redirectedFrom?.fullPath
+        if (to.path === '/404' && redirectedFrom && redirectedFrom !== '/404') {
+          return {
+            path: redirectedFrom,
+            replace: true
+          }
+        }
+        return {
+          path: to.fullPath,
+          replace: true
+        }
       }
 
       return true
