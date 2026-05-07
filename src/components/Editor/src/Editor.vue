@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, computed, PropType, unref, nextTick, ref, watch, shallowRef } from 'vue'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
-import { IDomEditor, IEditorConfig, i18nChangeLanguage } from '@wangeditor/editor'
+import { IDomEditor, IEditorConfig, IToolbarConfig, i18nChangeLanguage } from '@wangeditor/editor'
 import { propTypes } from '@/utils/propTypes'
 import { isNumber } from '@/utils/is'
 import { ElMessage } from 'element-plus'
@@ -20,6 +20,11 @@ const props = defineProps({
     type: Object as PropType<IEditorConfig>,
     default: () => undefined
   },
+  toolbarConfig: {
+    type: Object as PropType<Partial<IToolbarConfig>>,
+    default: () => undefined
+  },
+  showToolbar: propTypes.bool.def(true),
   modelValue: propTypes.string.def('')
 })
 
@@ -83,6 +88,16 @@ const editorConfig = computed((): IEditorConfig => {
   )
 })
 
+const toolbarConfig = computed((): Partial<IToolbarConfig> => {
+  return Object.assign(
+    {
+      excludeKeys: [],
+      modalAppendToBody: true
+    },
+    props.toolbarConfig || {}
+  )
+})
+
 const editorStyle = computed(() => {
   return {
     height: isNumber(props.height) ? `${props.height}px` : props.height
@@ -116,8 +131,10 @@ defineExpose({
   <div class="border-1 border-solid border-[var(--el-border-color)] z-10">
     <!-- 工具栏 -->
     <Toolbar
+      v-if="showToolbar"
       :editor="editorRef"
       :editorId="editorId"
+      :defaultConfig="toolbarConfig"
       class="border-0 b-b-1 border-solid border-[var(--el-border-color)]"
     />
     <!-- 编辑器 -->

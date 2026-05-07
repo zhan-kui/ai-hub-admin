@@ -57,14 +57,12 @@
           <div v-else class="ai-dialog__content-inner">
             <div class="ai-dialog__text-wrapper">
               <span class="ai-dialog__text">{{ displayText }}</span>
-              <!-- 去掉文字 |，改用纯 CSS 绘制光标，更真实 -->
               <span v-if="isStreaming" class="ai-dialog__cursor"></span>
             </div>
 
-            <!-- Google AI Studio 风格的思考状态 -->
             <div v-if="isStreaming" class="ai-dialog__loading">
               <Icon icon="ph:sparkle-fill" class="ai-dialog__loading-icon" />
-              <span class="ai-dialog__loading-text">AI 正在思考并生成...</span>
+              <span class="ai-dialog__loading-text">AI 正在生成中...</span>
             </div>
           </div>
         </div>
@@ -112,9 +110,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, toRaw, watch } from 'vue'
 import { Icon } from '@iconify/vue'
-import { ElButton, ElMessage, ElOption, ElSelect } from 'element-plus'
+import { ElButton, ElOption, ElSelect } from 'element-plus'
 import { useWritingStream } from '../composables/useWritingStream'
 import {
   LENGTH_MAP,
@@ -157,7 +155,7 @@ const { isStreaming, start, stop, reset } = useWritingStream()
 
 const canApply = computed(() => !isStreaming.value && !!displayText.value && !errorMsg.value)
 
-const DIALOG_WIDTH = 540 // 稍微加宽一点点，比例更协调
+const DIALOG_WIDTH = 540
 const DIALOG_MAX_HEIGHT = 500
 const GAP = 12
 
@@ -165,6 +163,9 @@ const dialogStyle = ref<{ left: string; top: string }>({
   left: '0px',
   top: '0px'
 })
+
+const cloneSnapshot = (snapshot: SelectionSnapshot): SelectionSnapshot =>
+  JSON.parse(JSON.stringify(toRaw(snapshot))) as SelectionSnapshot
 
 const scrollContentToBottom = () => {
   nextTick(() => {
@@ -234,7 +235,7 @@ const buildPayload = (): WritingStreamPayload | null => {
 
   return {
     action: 'polish',
-    query: `请对选中文本进行润色，要求：${styleDescription}。保留原意和关键事实，输出长度与原文尽量接近。`,
+    query: `请对选中文本进行润色，要求：${styleDescription}。保留原意和关键信息，输出长度与原文字数尽量接近。`,
     inputs: {
       selected_text: snapshot.text,
       prefix_context: snapshot.prefix,
@@ -256,7 +257,6 @@ const fire = async () => {
 
   await start(payload, {
     onChunk: (text) => {
-      // 核心修复：把前面的空格和换行符全部过滤掉，防止弹框前面空几行
       displayText.value = (displayText.value + text).replace(/^\s+/, '')
       scrollContentToBottom()
     },
@@ -287,15 +287,13 @@ const handleParamChange = () => {
 
 const handleInsert = () => {
   if (!canApply.value || !props.snapshot) return
-  emit('insert', displayText.value, props.snapshot)
-  ElMessage.success('已插入')
+  emit('insert', displayText.value, cloneSnapshot(props.snapshot))
   void handleClose()
 }
 
 const handleReplace = () => {
   if (!canApply.value || !props.snapshot) return
-  emit('replace', displayText.value, props.snapshot)
-  ElMessage.success('已替换，可使用 Ctrl+Z 撤销')
+  emit('replace', displayText.value, cloneSnapshot(props.snapshot))
   void handleClose()
 }
 
@@ -352,7 +350,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="less" scoped>
-/* 弹窗基础容器 */
 .ai-dialog {
   position: fixed;
   z-index: 2999;
@@ -361,15 +358,13 @@ onBeforeUnmount(() => {
   width: 540px;
   max-height: 500px;
   overflow: hidden;
-  background: #ffffff;
+  background: #fff;
   border-radius: 12px;
-  /* 优化了阴影效果，更具悬浮立体感 */
   box-shadow:
     0 8px 32px rgba(0, 0, 0, 0.08),
     0 0 0 1px rgba(0, 0, 0, 0.04);
 }
 
-/* 头部样式 */
 .ai-dialog__header {
   display: flex;
   flex-shrink: 0;
@@ -394,8 +389,7 @@ onBeforeUnmount(() => {
   width: 18px;
   height: 18px;
   margin-right: 8px;
-  /* 更高科技感的渐变紫色/蓝色 */
-  color: #6366f1;
+  color: #3b82f6;
 }
 
 .ai-dialog__select {
@@ -417,12 +411,11 @@ onBeforeUnmount(() => {
   transition: all 0.2s ease;
 
   &:hover {
-    background: #f1f5f9;
     color: #0f172a;
+    background: #f1f5f9;
   }
 }
 
-/* 内容区 */
 .ai-dialog__content {
   flex: 1;
   min-height: 140px;
@@ -430,15 +423,14 @@ onBeforeUnmount(() => {
   padding: 16px 20px;
   overflow-y: auto;
   font-size: 14px;
-  /* 增加行高，阅读体验更好 */
   line-height: 1.8;
   color: #334155;
 }
 
 .ai-dialog__content-inner {
-  min-height: 100%;
   display: flex;
   flex-direction: column;
+  min-height: 100%;
 }
 
 .ai-dialog__text-wrapper {
@@ -451,14 +443,13 @@ onBeforeUnmount(() => {
   display: inline;
 }
 
-/* ★ 优化：原生质感光标 */
 .ai-dialog__cursor {
   display: inline-block;
   width: 2px;
-  height: 1.2em; /* 贴合字体高度 */
-  background-color: #3b82f6; /* 光标颜色 */
-  vertical-align: middle;
+  height: 1.2em;
   margin-left: 4px;
+  vertical-align: middle;
+  background-color: #3b82f6;
   border-radius: 2px;
   transform: translateY(-1px);
   animation: cursor-blink 1s step-end infinite;
@@ -469,76 +460,65 @@ onBeforeUnmount(() => {
   100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0;
   }
 }
 
-/* ★ 优化：Google AI Studio 风格的加载态 */
 .ai-dialog__loading {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: 8px;
   margin-top: 16px;
   padding: 10px 16px;
-  background: linear-gradient(145deg, #f5f3ff 0%, #eff6ff 100%);
+  background: linear-gradient(145deg, #eff6ff 0%, #f8fbff 100%);
+  border: 1px solid #dbeafe;
   border-radius: 8px;
-  border: 1px solid #e0e7ff;
-  align-self: flex-start; /* 让 loading 框贴左侧靠拢 */
 }
 
 .ai-dialog__loading-icon {
   font-size: 18px;
-  color: #8b5cf6;
+  color: #3b82f6;
   animation: ai-pulse-spin 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 .ai-dialog__loading-text {
   font-size: 13px;
   font-weight: 500;
-  /* 科技感流光文字渐变 */
-  background: linear-gradient(90deg, #6366f1, #a855f7, #3b82f6, #6366f1);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: ai-gradient-shimmer 2.5s linear infinite;
-  letter-spacing: 0.5px;
+  color: #2563eb;
+  letter-spacing: 0.2px;
 }
 
 @keyframes ai-pulse-spin {
   0% {
+    opacity: 0.8;
     transform: scale(0.9) rotate(0deg);
-    opacity: 0.8;
   }
+
   50% {
-    transform: scale(1.1) rotate(180deg);
     opacity: 1;
+    transform: scale(1.08) rotate(180deg);
   }
+
   100% {
-    transform: scale(0.9) rotate(360deg);
     opacity: 0.8;
+    transform: scale(0.9) rotate(360deg);
   }
 }
 
-@keyframes ai-gradient-shimmer {
-  to {
-    background-position: 200% center;
-  }
-}
-
-/* 报错区域 */
 .ai-dialog__error {
   display: flex;
   gap: 6px;
   align-items: center;
+  padding: 12px;
   color: #ef4444;
   background: #fef2f2;
-  padding: 12px;
-  border-radius: 8px;
   border: 1px solid #fecaca;
+  border-radius: 8px;
 }
 
-/* 底部提示 */
 .ai-dialog__tip {
   display: flex;
   flex-shrink: 0;
@@ -551,15 +531,14 @@ onBeforeUnmount(() => {
   border-top: 1px solid #f1f5f9;
 }
 
-/* 底部按钮 */
 .ai-dialog__footer {
   display: flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
+  background: #fff;
   border-top: 1px solid #f1f5f9;
-  background: #ffffff;
 }
 
 .ai-dialog__footer-right {
@@ -571,12 +550,12 @@ onBeforeUnmount(() => {
   margin-right: 4px;
 }
 
-/* 弹窗出入动画 */
 .ai-dialog-enter-active {
   transition:
     opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1),
     transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 .ai-dialog-leave-active {
   transition:
     opacity 0.2s ease,

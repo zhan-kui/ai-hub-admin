@@ -1,164 +1,114 @@
-import { ref, type Ref } from 'vue'
+import { ref, toRaw, type Ref } from 'vue'
+import { SlateEditor, SlateRange, type IDomEditor } from '@wangeditor/editor'
 import type { SelectionSnapshot } from '../types'
 
-export function useTextSelection(containerRef: Ref<HTMLElement | null>) {
-  const currentSnapshot = ref<SelectionSnapshot | null>(null)
+type EditorSelection = NonNullable<IDomEditor['selection']>
 
-  const isTextarea = (element: EventTarget | null): element is HTMLTextAreaElement =>
-    element instanceof HTMLTextAreaElement
-
-  const extractContext = (
-    container: HTMLElement,
-    range: Range,
-    prefixChars: number,
-    suffixChars: number
-  ) => {
-    const beforeRange = document.createRange()
-    beforeRange.setStart(container, 0)
-    beforeRange.setEnd(range.startContainer, range.startOffset)
-    const prefix = beforeRange.toString().slice(-prefixChars)
-
-    const afterRange = document.createRange()
-    afterRange.setStart(range.endContainer, range.endOffset)
-    afterRange.setEnd(container, container.childNodes.length)
-    const suffix = afterRange.toString().slice(0, suffixChars)
-
-    return { prefix, suffix }
+function cloneSlateSelection(
+  selection: EditorSelection | null | undefined
+): EditorSelection | null {
+  if (!selection) {
+    return null
   }
+
+  return JSON.parse(JSON.stringify(selection)) as EditorSelection
+}
+
+function getSelectionRect(container: HTMLElement): DOMRect | null {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) {
+    return container.getBoundingClientRect()
+  }
+
+  const range = selection.getRangeAt(0)
+  const rect = range.getBoundingClientRect()
+  if (rect.width === 0 && rect.height === 0) {
+    return container.getBoundingClientRect()
+  }
+
+  return rect
+}
+
+function normalizeGeneratedHtml(html: string): string {
+  return html.trim()
+}
+
+function getRawSelection(selection: SelectionSnapshot['slateSelection']): EditorSelection | null {
+  return cloneSlateSelection(toRaw(selection) as EditorSelection | null | undefined)
+}
+
+export function useTextSelection(
+  containerRef: Ref<HTMLElement | null>,
+  getEditor: () => IDomEditor | null
+) {
+  const currentSnapshot = ref<SelectionSnapshot | null>(null)
 
   const snapshot = (
     options: { prefixChars?: number; suffixChars?: number } = {}
   ): SelectionSnapshot | null => {
     const { prefixChars = 500, suffixChars = 200 } = options
     const container = containerRef.value
-    if (!container) return null
+    const editor = getEditor()
 
-    const activeElement = document.activeElement
-    if (isTextarea(activeElement) && container.contains(activeElement)) {
-      const start = activeElement.selectionStart ?? 0
-      const end = activeElement.selectionEnd ?? 0
-      if (start === end) return null
-
-      const fullText = activeElement.value
-      const selectedText = fullText.slice(start, end)
-      const prefix = fullText.slice(Math.max(0, start - prefixChars), start)
-      const suffix = fullText.slice(end, Math.min(fullText.length, end + suffixChars))
-
-      const nextSnapshot: SelectionSnapshot = {
-        text: selectedText,
-        prefix,
-        suffix,
-        range: null,
-        textareaStart: start,
-        textareaEnd: end,
-        rect: activeElement.getBoundingClientRect()
-      }
-
-      currentSnapshot.value = nextSnapshot
-      return nextSnapshot
-    }
-
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    if (!container || !editor || !editor.selection) {
       return null
     }
 
-    const range = selection.getRangeAt(0).cloneRange()
-    if (!container.contains(range.commonAncestorContainer)) {
+    const currentSelection = cloneSlateSelection(editor.selection)
+    if (!currentSelection || SlateRange.isCollapsed(currentSelection)) {
       return null
     }
 
-    const selectedText = selection.toString()
-    if (!selectedText) {
+    const selectedText = editor.getSelectionText()
+    if (!selectedText.trim()) {
       return null
     }
 
-    const { prefix, suffix } = extractContext(container, range, prefixChars, suffixChars)
+    const selectionStart = SlateRange.start(currentSelection)
+    const selectionEnd = SlateRange.end(currentSelection)
+    const editorStart = SlateEditor.start(editor, [])
+    const editorEnd = SlateEditor.end(editor, [])
 
-    let rect = range.getBoundingClientRect()
-    if (rect.width === 0 && rect.height === 0) {
-      rect = container.getBoundingClientRect()
-    }
+    const prefix =
+      SlateEditor.string(editor, { anchor: editorStart, focus: selectionStart }).slice(
+        -prefixChars
+      ) || ''
+    const suffix =
+      SlateEditor.string(editor, { anchor: selectionEnd, focus: editorEnd }).slice(
+        0,
+        suffixChars
+      ) || ''
 
     const nextSnapshot: SelectionSnapshot = {
       text: selectedText,
       prefix,
       suffix,
-      range,
-      rect
+      slateSelection: currentSelection,
+      rect: getSelectionRect(container)
     }
 
     currentSnapshot.value = nextSnapshot
     return nextSnapshot
   }
 
-  const findTextarea = (): HTMLTextAreaElement | null => {
-    const container = containerRef.value
-    if (!container) return null
-    return container.querySelector('textarea')
-  }
+  const replaceSelection = (selectionSnapshot: SelectionSnapshot, html: string): boolean => {
+    const normalizedHtml = normalizeGeneratedHtml(html)
+    const editor = getEditor()
 
-  const triggerInput = () => {
-    const container = containerRef.value
-    if (!container) return
-    container.dispatchEvent(new Event('input', { bubbles: true }))
-  }
-
-  const normalizeGeneratedText = (text: string): string => {
-    const normalizedLineBreaks = text.replace(/\r\n/g, '\n')
-    return normalizedLineBreaks.replace(/^\n+/, '').replace(/\n+$/, '')
-  }
-
-  const replaceSelection = (selectionSnapshot: SelectionSnapshot, newText: string): boolean => {
-    const normalizedText = normalizeGeneratedText(newText)
-    if (!normalizedText) return false
-
-    if (
-      selectionSnapshot.textareaStart !== undefined &&
-      selectionSnapshot.textareaEnd !== undefined
-    ) {
-      const textarea = findTextarea()
-      if (!textarea) return false
-
-      textarea.focus()
-      textarea.setRangeText(
-        normalizedText,
-        selectionSnapshot.textareaStart,
-        selectionSnapshot.textareaEnd,
-        'end'
-      )
-      textarea.dispatchEvent(new Event('input', { bubbles: true }))
-      return true
-    }
-
-    if (!selectionSnapshot.range) {
+    if (!normalizedHtml || !editor || !selectionSnapshot.slateSelection) {
       return false
     }
 
     try {
-      const selection = window.getSelection()
-      selection?.removeAllRanges()
-      selection?.addRange(selectionSnapshot.range)
-
-      if (document.queryCommandSupported?.('insertText')) {
-        const inserted = document.execCommand('insertText', false, normalizedText)
-        if (inserted) {
-          triggerInput()
-          return true
-        }
+      const rawSelection = getRawSelection(selectionSnapshot.slateSelection)
+      if (!rawSelection) {
+        return false
       }
 
-      selectionSnapshot.range.deleteContents()
-      const textNode = document.createTextNode(normalizedText)
-      selectionSnapshot.range.insertNode(textNode)
-
-      const nextRange = document.createRange()
-      nextRange.setStartAfter(textNode)
-      nextRange.collapse(true)
-
-      selection?.removeAllRanges()
-      selection?.addRange(nextRange)
-      triggerInput()
+      editor.focus()
+      editor.select(rawSelection)
+      editor.deleteFragment()
+      editor.dangerouslyInsertHtml(normalizedHtml)
       return true
     } catch (error) {
       console.error('[replaceSelection] failed', error)
@@ -166,58 +116,24 @@ export function useTextSelection(containerRef: Ref<HTMLElement | null>) {
     }
   }
 
-  const insertAfterSelection = (selectionSnapshot: SelectionSnapshot, newText: string): boolean => {
-    const normalizedText = normalizeGeneratedText(newText)
-    if (!normalizedText) return false
+  const insertAfterSelection = (selectionSnapshot: SelectionSnapshot, html: string): boolean => {
+    const normalizedHtml = normalizeGeneratedHtml(html)
+    const editor = getEditor()
 
-    if (
-      selectionSnapshot.textareaStart !== undefined &&
-      selectionSnapshot.textareaEnd !== undefined
-    ) {
-      const textarea = findTextarea()
-      if (!textarea) return false
-
-      textarea.focus()
-      textarea.setRangeText(
-        normalizedText,
-        selectionSnapshot.textareaEnd,
-        selectionSnapshot.textareaEnd,
-        'end'
-      )
-      textarea.dispatchEvent(new Event('input', { bubbles: true }))
-      return true
-    }
-
-    if (!selectionSnapshot.range) {
+    if (!normalizedHtml || !editor || !selectionSnapshot.slateSelection) {
       return false
     }
 
     try {
-      const insertRange = selectionSnapshot.range.cloneRange()
-      insertRange.collapse(false)
-
-      const selection = window.getSelection()
-      selection?.removeAllRanges()
-      selection?.addRange(insertRange)
-
-      if (document.queryCommandSupported?.('insertText')) {
-        const inserted = document.execCommand('insertText', false, normalizedText)
-        if (inserted) {
-          triggerInput()
-          return true
-        }
+      const rawSelection = getRawSelection(selectionSnapshot.slateSelection)
+      if (!rawSelection) {
+        return false
       }
 
-      const textNode = document.createTextNode(normalizedText)
-      insertRange.insertNode(textNode)
-
-      const nextRange = document.createRange()
-      nextRange.setStartAfter(textNode)
-      nextRange.collapse(true)
-
-      selection?.removeAllRanges()
-      selection?.addRange(nextRange)
-      triggerInput()
+      const selectionEnd = SlateRange.end(rawSelection)
+      editor.focus()
+      editor.select({ anchor: selectionEnd, focus: selectionEnd })
+      editor.dangerouslyInsertHtml(normalizedHtml)
       return true
     } catch (error) {
       console.error('[insertAfterSelection] failed', error)

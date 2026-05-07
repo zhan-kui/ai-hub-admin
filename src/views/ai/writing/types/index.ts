@@ -1,3 +1,4 @@
+import type { IDomEditor } from '@wangeditor/editor'
 import type { WritingActionType, WritingGeneratePayload } from '@/api/ai/writing'
 
 export type WritingAction = WritingActionType
@@ -10,9 +11,7 @@ export interface SelectionSnapshot {
   text: string
   prefix: string
   suffix: string
-  range: Range | null
-  textareaStart?: number
-  textareaEnd?: number
+  slateSelection: NonNullable<IDomEditor['selection']> | null
   rect: DOMRect | null
 }
 
