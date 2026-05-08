@@ -69,7 +69,7 @@
                 {{ item.title || '无标题文档' }}
               </div>
               <div class="writing-page__doc-item-meta">
-                <span>{{ item.updateTime }}</span>
+                <span>{{ formatRelativeTime(item.updateTime) }}</span>
                 <span class="writing-page__doc-item-dot">·</span>
                 <span>{{ item.wordCount }} 字</span>
               </div>
@@ -112,7 +112,9 @@
             <el-button :icon="Delete" :disabled="isEditorEmpty" @click="handleClear">
               清空
             </el-button>
-            <el-button type="primary" :icon="Promotion" @click="handleSave"> 保存 </el-button>
+            <el-button type="primary" :icon="Promotion" @click="() => handleSave()">
+              保存
+            </el-button>
           </div>
         </div>
 
@@ -120,7 +122,7 @@
           <div class="writing-page__meta-left">
             <span class="writing-page__meta-item">
               <el-icon><Calendar /></el-icon>
-              最后更新 {{ lastSaveTime }}
+              最后更新：{{ lastSaveTime }}
             </span>
             <span class="writing-page__meta-item">
               <el-icon><EditPen /></el-icon>
@@ -141,7 +143,12 @@
       </header>
 
       <div class="writing-page__doc-wrap">
-        <div ref="editorContainerRef" class="writing-page__doc" @contextmenu="handleContextMenu">
+        <div
+          ref="editorContainerRef"
+          v-loading="switchingDocLoading"
+          class="writing-page__doc"
+          @contextmenu="handleContextMenu"
+        >
           <Editor
             ref="editorComponentRef"
             v-model="docContent"
@@ -174,7 +181,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
+import { debounce } from 'lodash-es'
+import { onBeforeRouteLeave } from 'vue-router'
 import { Editor, type EditorExpose } from '@/components/Editor'
 import {
   ElButton,
@@ -211,6 +221,14 @@ import {
 import AIResultDialog from './components/AIResultDialog.vue'
 import ContextMenu from './components/ContextMenu.vue'
 import { useTextSelection } from './composables/useTextSelection'
+import {
+  deleteDoc,
+  duplicateDoc,
+  getDocDetail,
+  getDocList,
+  renameDoc,
+  saveDoc
+} from '@/api/ai/writing'
 import type { ContinueLength, PolishStyle, SelectionSnapshot, WritingAction } from './types'
 
 defineOptions({ name: 'WritingLayout' })
@@ -224,7 +242,7 @@ const docTitle = ref('')
 const docContent = ref('')
 const currentDocId = ref<string | number>('')
 const lastSaveTime = ref('刚刚')
-const saveStatus = ref<'saved' | 'unsaved' | 'saving'>('saved')
+const saveStatus = ref<'saved' | 'unsaved' | 'saving'>('unsaved')
 
 const saveStatusText = computed(() => {
   const map = { saved: '已保存', unsaved: '未保存', saving: '保存中...' }
@@ -232,158 +250,428 @@ const saveStatusText = computed(() => {
 })
 
 const saveStatusClass = computed(() => `is-${saveStatus.value}`)
+const lastSavedFingerprint = ref('')
+const pauseStatusSync = ref(false)
 
-// ============= 历史文档列表（写死的假数据，后续接接口替换） =============
+const buildFingerprint = () => `${docTitle.value.trim()}\n${docContent.value}`
+
+const syncSavedBaseline = () => {
+  lastSavedFingerprint.value = buildFingerprint()
+  saveStatus.value = 'saved'
+}
+
+const runWithoutStatusSync = (fn: () => void) => {
+  pauseStatusSync.value = true
+  try {
+    fn()
+  } finally {
+    pauseStatusSync.value = false
+  }
+}
+
 interface DocItem {
   id: string | number
   title: string
   updateTime: string
   wordCount: number
-  groupKey: 'today' | 'week' | 'earlier'
 }
+
+type DocGroupKey = 'today' | 'week' | 'earlier'
 
 const sidebarCollapsed = ref(false)
 const searchKeyword = ref('')
+const switchingDocLoading = ref(false)
+const savingInProgress = ref(false)
+const docList = ref<DocItem[]>([])
 
-const docList = ref<DocItem[]>([
-  {
-    id: 1,
-    title: '产品需求分析报告',
-    updateTime: '今天 14:32',
-    wordCount: 1280,
-    groupKey: 'today'
-  },
-  {
-    id: 2,
-    title: '关于AI写作的一些思考',
-    updateTime: '今天 10:15',
-    wordCount: 856,
-    groupKey: 'today'
-  },
-  {
-    id: 3,
-    title: '会议纪要 - 项目周会',
-    updateTime: '昨天 18:42',
-    wordCount: 524,
-    groupKey: 'week'
-  },
-  { id: 4, title: '年度总结草稿', updateTime: '3天前', wordCount: 2340, groupKey: 'week' },
-  { id: 5, title: '无标题文档', updateTime: '5天前', wordCount: 102, groupKey: 'week' },
-  {
-    id: 6,
-    title: '技术调研：大语言模型对比',
-    updateTime: '2周前',
-    wordCount: 3120,
-    groupKey: 'earlier'
-  },
-  {
-    id: 7,
-    title: '读书笔记 - 《认知觉醒》',
-    updateTime: '1个月前',
-    wordCount: 1680,
-    groupKey: 'earlier'
+const getErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
+const toDate = (value: unknown): Date | null => {
+  if (typeof value === 'number') {
+    const ts = value > 1e12 ? value : value * 1000
+    const date = new Date(ts)
+    return Number.isNaN(date.getTime()) ? null : date
   }
-])
+  if (typeof value === 'string') {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+  return null
+}
+
+const toIsoString = (value: unknown) => {
+  const date = toDate(value)
+  return date ? date.toISOString() : new Date().toISOString()
+}
+
+const getDocGroup = (updateTime: string): DocGroupKey => {
+  const date = toDate(updateTime)
+  if (!date) return 'earlier'
+
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (date >= startOfToday) return 'today'
+
+  const startOfWeek = new Date(startOfToday)
+  const weekday = startOfWeek.getDay()
+  const diffToMonday = weekday === 0 ? 6 : weekday - 1
+  startOfWeek.setDate(startOfWeek.getDate() - diffToMonday)
+  return date >= startOfWeek ? 'week' : 'earlier'
+}
+
+const padZero = (value: number) => String(value).padStart(2, '0')
+
+const formatRelativeTime = (iso: string): string => {
+  const date = toDate(iso)
+  if (!date) return '-'
+
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfTarget = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const diffDays = Math.floor((startOfToday.getTime() - startOfTarget.getTime()) / 86400000)
+  const clock = `${padZero(date.getHours())}:${padZero(date.getMinutes())}`
+
+  if (diffDays <= 0) return `今天 ${clock}`
+  if (diffDays === 1) return `昨天 ${clock}`
+  if (diffDays < 7) return `${diffDays}天前`
+
+  const diffWeeks = Math.max(1, Math.floor(diffDays / 7))
+  return `${diffWeeks}周前`
+}
+
+const extractDocId = (payload: unknown): string | number | '' => {
+  if (!payload || typeof payload !== 'object') return ''
+  const source = payload as Record<string, unknown>
+  const directId = source.id ?? source.docId ?? source.documentId
+  if (directId !== undefined && directId !== null && directId !== '') {
+    return directId as string | number
+  }
+
+  const nested = source.data
+  if (!nested || typeof nested !== 'object') return ''
+  const nestedSource = nested as Record<string, unknown>
+  const nestedId = nestedSource.id ?? nestedSource.docId ?? nestedSource.documentId
+  return nestedId !== undefined && nestedId !== null && nestedId !== ''
+    ? (nestedId as string | number)
+    : ''
+}
+
+const extractDocListRows = (payload: unknown): Record<string, unknown>[] => {
+  if (Array.isArray(payload)) return payload as Record<string, unknown>[]
+  if (!payload || typeof payload !== 'object') return []
+
+  const source = payload as Record<string, unknown>
+  const keys = ['list', 'records', 'items', 'rows']
+  for (const key of keys) {
+    if (Array.isArray(source[key])) {
+      return source[key] as Record<string, unknown>[]
+    }
+  }
+
+  const nested = source.data
+  if (!nested || typeof nested !== 'object') return []
+  const nestedSource = nested as Record<string, unknown>
+  for (const key of keys) {
+    if (Array.isArray(nestedSource[key])) {
+      return nestedSource[key] as Record<string, unknown>[]
+    }
+  }
+  return []
+}
+
+const normalizeDocItem = (row: Record<string, unknown>): DocItem | null => {
+  const id = row.id ?? row.docId ?? row.documentId
+  if (id === undefined || id === null || id === '') return null
+
+  const titleValue = row.title ?? row.name ?? row.docTitle ?? ''
+  const contentValue = row.content ?? row.docContent
+  const updateTimeValue =
+    row.updateTime ?? row.updatedAt ?? row.update_at ?? row.gmtModified ?? row.createTime
+  const wordCountValue =
+    row.wordCount ?? row.word_count ?? row.words ?? row.contentLength ?? row.tokenCount
+  const contentText = typeof contentValue === 'string' ? extractPlainTextFromHtml(contentValue) : ''
+
+  return {
+    id: id as string | number,
+    title: String(titleValue || ''),
+    updateTime: toIsoString(updateTimeValue),
+    wordCount: Number(wordCountValue || 0) || contentText.length
+  }
+}
+
+const normalizeDocDetail = (payload: unknown, fallback: DocItem) => {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      id: fallback.id,
+      title: fallback.title,
+      content: '',
+      updateTime: fallback.updateTime
+    }
+  }
+
+  const source = payload as Record<string, unknown>
+  const nested = source.data && typeof source.data === 'object' ? source.data : source
+  const detail = nested as Record<string, unknown>
+
+  const id = (detail.id ?? detail.docId ?? detail.documentId ?? fallback.id) as string | number
+  const title = String(detail.title ?? detail.name ?? detail.docTitle ?? fallback.title ?? '')
+  const content = String(detail.content ?? detail.docContent ?? detail.text ?? '')
+  const updateTime = toIsoString(
+    detail.updateTime ??
+      detail.updatedAt ??
+      detail.update_at ??
+      detail.gmtModified ??
+      fallback.updateTime
+  )
+  return { id, title, content, updateTime }
+}
+
+const refreshDocList = async () => {
+  try {
+    const result = await getDocList({
+      page: 1,
+      size: 50,
+      keyword: searchKeyword.value.trim() || undefined
+    })
+    const rows = extractDocListRows(result)
+    const normalized = rows.map((row) => normalizeDocItem(row)).filter(Boolean) as DocItem[]
+    docList.value = normalized
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '加载文档列表失败'))
+  }
+}
+
+const debouncedRefreshDocList = debounce(() => {
+  void refreshDocList()
+}, 300)
+
+watch(searchKeyword, () => {
+  debouncedRefreshDocList()
+})
 
 const filteredDocGroups = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase()
-  const filtered = keyword
-    ? docList.value.filter((d) => d.title.toLowerCase().includes(keyword))
-    : docList.value
-
-  const groupMap: Record<string, { label: string; items: DocItem[] }> = {
+  const groupMap: Record<DocGroupKey, { label: string; items: DocItem[] }> = {
     today: { label: '今天', items: [] },
     week: { label: '本周', items: [] },
     earlier: { label: '更早', items: [] }
   }
 
-  filtered.forEach((item) => {
-    groupMap[item.groupKey]?.items.push(item)
+  docList.value.forEach((item) => {
+    groupMap[getDocGroup(item.updateTime)].items.push(item)
   })
-
-  return Object.values(groupMap).filter((g) => g.items.length > 0)
+  return Object.values(groupMap).filter((group) => group.items.length > 0)
 })
 
-// ============= 文档操作（先写死交互，后续对接接口） =============
 const handleNewDoc = () => {
-  docTitle.value = ''
-  docContent.value = ''
-  currentDocId.value = ''
-  saveStatus.value = 'saved'
-  ElMessage.success('已创建新文档')
+  ;(debouncedAutoSave as { cancel?: () => void }).cancel?.()
+  runWithoutStatusSync(() => {
+    docTitle.value = ''
+    docContent.value = ''
+    currentDocId.value = ''
+  })
+  lastSaveTime.value = '保存时间'
+  lastSavedFingerprint.value = buildFingerprint()
+  saveStatus.value = 'unsaved'
+}
+
+const doSwitch = async (item: DocItem) => {
+  if (switchingDocLoading.value) return
+  switchingDocLoading.value = true
+  try {
+    const detail = await getDocDetail(item.id)
+    const normalized = normalizeDocDetail(detail, item)
+    runWithoutStatusSync(() => {
+      currentDocId.value = normalized.id
+      docTitle.value = normalized.title
+      docContent.value = normalized.content
+    })
+    lastSaveTime.value = formatRelativeTime(normalized.updateTime)
+    syncSavedBaseline()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, '出错了'))
+  } finally {
+    switchingDocLoading.value = false
+  }
 }
 
 const handleSwitchDoc = (item: DocItem) => {
-  if (saveStatus.value === 'unsaved') {
-    ElMessageBox.confirm('当前文档尚未保存，是否切换？', '提示', {
+  if (shouldPromptUnsaved.value) {
+    ElMessageBox.confirm('当前文档未保存，需手动保存后再切换，是否继续切换？', '提示', {
       confirmButtonText: '切换',
       cancelButtonText: '取消',
       type: 'warning'
     })
-      .then(() => doSwitch(item))
+      .then(() => {
+        void doSwitch(item)
+      })
       .catch(() => {})
     return
   }
-  doSwitch(item)
+  void doSwitch(item)
 }
 
-const doSwitch = (item: DocItem) => {
-  currentDocId.value = item.id
-  docTitle.value = item.title
-  docContent.value = `<p>这是【${item.title}】的内容示例，后续接入接口后会加载真实数据。</p>`
-  saveStatus.value = 'saved'
-  lastSaveTime.value = item.updateTime
-}
-
-const handleDocCommand = (cmd: string, item: DocItem) => {
+const handleDocCommand = async (cmd: string, item: DocItem) => {
   if (cmd === 'rename') {
-    ElMessageBox.prompt('请输入新名称', '重命名', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      inputValue: item.title
-    })
-      .then(({ value }) => {
-        item.title = value
-        if (currentDocId.value === item.id) {
-          docTitle.value = value
+    try {
+      const { value } = await ElMessageBox.prompt('请输入新名称', '重命名', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputValue: item.title
+      })
+      const nextTitle = value.trim()
+      if (!nextTitle || nextTitle === item.title) return
+
+      await renameDoc({ id: item.id, title: nextTitle })
+      const idx = docList.value.findIndex((doc) => String(doc.id) === String(item.id))
+      if (idx > -1) {
+        docList.value[idx] = { ...docList.value[idx], title: nextTitle }
+      }
+      if (String(currentDocId.value) === String(item.id)) {
+        const wasUnsaved = saveStatus.value === 'unsaved'
+        docTitle.value = nextTitle
+        if (wasUnsaved) {
+          refreshSaveStatusByDiff()
+        } else {
+          syncSavedBaseline()
         }
-        ElMessage.success('已重命名')
+      }
+      ElMessage.success('已重命名')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(getErrorMessage(error, '重命名失败'))
+      }
+    }
+    return
+  }
+
+  if (cmd === 'delete') {
+    try {
+      await ElMessageBox.confirm(`确定删除「${item.title || '无标题文档'}」吗？`, '提示', {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
       })
-      .catch(() => {})
-  } else if (cmd === 'duplicate') {
-    ElMessage.success('已创建副本（待接入接口）')
-  } else if (cmd === 'delete') {
-    ElMessageBox.confirm(`确定删除「${item.title}」吗？`, '提示', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-      .then(() => {
-        const idx = docList.value.findIndex((d) => d.id === item.id)
-        if (idx > -1) docList.value.splice(idx, 1)
-        ElMessage.success('已删除')
-      })
-      .catch(() => {})
+
+      await deleteDoc(item.id)
+      const isCurrentDoc = String(currentDocId.value) === String(item.id)
+      const idx = docList.value.findIndex((doc) => String(doc.id) === String(item.id))
+      if (idx > -1) {
+        docList.value.splice(idx, 1)
+      }
+      if (isCurrentDoc) {
+        handleNewDoc()
+      }
+      ElMessage.success('已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(getErrorMessage(error, '删除失败'))
+      }
+    }
+    return
+  }
+
+  if (cmd === 'duplicate') {
+    try {
+      const result = await duplicateDoc(item.id)
+      const duplicatedId = extractDocId(result)
+      await refreshDocList()
+
+      if (duplicatedId !== '') {
+        const duplicated = docList.value.find((doc) => String(doc.id) === String(duplicatedId))
+        if (duplicated) {
+          await doSwitch(duplicated)
+        }
+      }
+      ElMessage.success('已创建副本')
+    } catch (error) {
+      ElMessage.error(getErrorMessage(error, '创建副本失败'))
+    }
   }
 }
 
-const handleSave = () => {
+const handleSave = async (silent = false) => {
+  if (savingInProgress.value) return false
+  if (isTitleEmpty.value) {
+    saveStatus.value = 'unsaved'
+    if (!silent) {
+      ElMessage.warning('标题为空，未保存文档需要手动保存')
+    }
+    return false
+  }
+
+  savingInProgress.value = true
+  const prevStatus = saveStatus.value
   saveStatus.value = 'saving'
-  setTimeout(() => {
-    saveStatus.value = 'saved'
+
+  try {
+    const prevId = currentDocId.value
+    const result = await saveDoc({
+      id: currentDocId.value || undefined,
+      title: docTitle.value,
+      content: docContent.value
+    })
+
+    if (!prevId) {
+      const newId = extractDocId(result)
+      if (newId !== '') {
+        currentDocId.value = newId
+      }
+    }
+
+    syncSavedBaseline()
     lastSaveTime.value = '刚刚'
-    ElMessage.success('保存成功')
-  }, 600)
+    await refreshDocList()
+    if (!silent) {
+      ElMessage.success('保存成功')
+    }
+    return true
+  } catch (error) {
+    saveStatus.value = prevStatus === 'saving' ? 'unsaved' : prevStatus
+    if (saveStatus.value === 'saved') {
+      saveStatus.value = 'unsaved'
+    }
+    ElMessage.error(getErrorMessage(error, '出错了'))
+    return false
+  } finally {
+    savingInProgress.value = false
+  }
 }
 
-// ============= 编辑器核心逻辑（保留原有） =============
+const debouncedAutoSave = useDebounceFn(() => {
+  if (saveStatus.value !== 'unsaved' || savingInProgress.value || isTitleEmpty.value) return
+  void handleSave(true)
+}, 3000)
+
+const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+  if (!shouldPromptUnsaved.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onBeforeRouteLeave(async () => {
+  if (!shouldPromptUnsaved.value) return true
+  try {
+    await ElMessageBox.confirm('当前文档未保存，需手动保存后再离开，是否继续离开？', '提示', {
+      confirmButtonText: '离开',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    return true
+  } catch {
+    return false
+  }
+})
+
 const editorComponentRef = ref<(typeof Editor & EditorExpose) | null>(null)
 const editorContainerRef = ref<HTMLElement | null>(null)
 const editableElementRef = ref<HTMLElement | null>(null)
 const domEditorRef = shallowRef<IDomEditor | null>(null)
 
 const editorConfig: IEditorConfig = {
-  placeholder: '在这里开始写作，选中文本后右键可调用 AI续写 或 AI润色。',
+  placeholder: '在这里开始写作，选中文本后右键可调用 AI 续写 或 AI 润色。',
   autoFocus: false,
   scroll: true,
   readOnly: false,
@@ -411,7 +699,19 @@ const extractPlainTextFromHtml = (html: string): string => {
 }
 
 const isEditorEmpty = computed(() => !extractPlainTextFromHtml(docContent.value))
+const isTitleEmpty = computed(() => !docTitle.value.trim())
 const wordCount = computed(() => extractPlainTextFromHtml(docContent.value).length)
+
+const refreshSaveStatusByDiff = () => {
+  if (pauseStatusSync.value || saveStatus.value === 'saving') return
+  if (isTitleEmpty.value) {
+    saveStatus.value = 'unsaved'
+    return
+  }
+  saveStatus.value = buildFingerprint() === lastSavedFingerprint.value ? 'saved' : 'unsaved'
+}
+
+const shouldPromptUnsaved = computed(() => saveStatus.value === 'unsaved')
 
 const handleClear = () => {
   if (isEditorEmpty.value) return
@@ -422,7 +722,8 @@ const handleClear = () => {
   })
     .then(() => {
       docContent.value = ''
-      saveStatus.value = 'unsaved'
+      refreshSaveStatusByDiff()
+      debouncedAutoSave()
     })
     .catch(() => {})
 }
@@ -443,10 +744,19 @@ const defaultStyle = ref<PolishStyle>('default')
 
 const handleEditorChange = (editor: IDomEditor) => {
   domEditorRef.value = editor
-  if (saveStatus.value === 'saved') {
-    saveStatus.value = 'unsaved'
-  }
+  refreshSaveStatusByDiff()
+  if (saveStatus.value !== 'unsaved') return
+  debouncedAutoSave()
 }
+
+watch(
+  () => docTitle.value,
+  () => {
+    refreshSaveStatusByDiff()
+    if (saveStatus.value !== 'unsaved') return
+    debouncedAutoSave()
+  }
+)
 
 const escapeHtml = (value: string): string =>
   value
@@ -625,10 +935,22 @@ onMounted(async () => {
   domEditorRef.value = editor ?? null
   domEditorRef.value?.focus(true)
   bindEditableKeydown()
+
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  await refreshDocList()
+  if (currentDocId.value) {
+    syncSavedBaseline()
+  } else {
+    lastSavedFingerprint.value = buildFingerprint()
+    saveStatus.value = 'unsaved'
+  }
 })
 
 onBeforeUnmount(() => {
   editableElementRef.value?.removeEventListener('keydown', handleEditableKeydown, true)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  ;(debouncedAutoSave as { cancel?: () => void }).cancel?.()
+  debouncedRefreshDocList.cancel()
   ctxVisible.value = false
   dialogVisible.value = false
 })
