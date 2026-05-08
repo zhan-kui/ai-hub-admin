@@ -1055,6 +1055,7 @@ onBeforeUnmount(() => {
   width: 100%;
   max-width: 960px;
   height: 100%;
+  min-height: 0;
   background: #fff;
   border: 1px solid #e4e9f0;
   border-radius: 16px;
@@ -1070,6 +1071,15 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   border-radius: 16px;
+  overflow: hidden;
+}
+
+.writing-page__editor :deep([data-w-e-textarea='true']) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  height: auto !important;
 }
 
 /* wangEditor 内部：让它撑满外层，并保留内部滚动条 */
@@ -1087,53 +1097,26 @@ onBeforeUnmount(() => {
   border-radius: 8px;
 }
 
-// .writing-page__editor :deep(.w-e-text-container) {
-//   flex: 1;
-//   min-height: 0 !important;
-//   height: auto !important;
-//   background: #fff;
-//   /* 关键：让 text-container 自身可以滚动，作为兜底 */
-//   overflow: hidden;
-// }
-
-// .writing-page__editor :deep(.w-e-scroll) {
-//   /* 关键：限定高度并开启垂直滚动 */
-//   height: 100%;
-//   max-height: 100%;
-//   padding: 32px 48px 48px;
-//   overflow-x: hidden;
-//   overflow-y: auto !important;
-
-//   &::-webkit-scrollbar {
-//     width: 8px;
-//   }
-//   &::-webkit-scrollbar-track {
-//     background: transparent;
-//   }
-//   &::-webkit-scrollbar-thumb {
-//     background: rgba(148, 163, 184, 0.35);
-//     border-radius: 4px;
-//   }
-//   &::-webkit-scrollbar-thumb:hover {
-//     background: rgba(148, 163, 184, 0.55);
-//   }
-// }
-
-/* =============== 修改后 =============== */
 .writing-page__editor :deep(.w-e-text-container) {
-  flex: 1;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0 !important;
-  height: 100% !important; /* 关键点1: 不要用 auto，改为 100% 以严格继承父级 Flex 的高度 */
+  height: 100% !important;
   background: #fff;
   overflow: hidden;
 }
 
 .writing-page__editor :deep(.w-e-scroll) {
-  height: 100% !important;
-  box-sizing: border-box; /* 关键点2: 加入 border-box，确保 padding 不会让实际高度超出 100% */
-  padding: 32px 48px 48px;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto !important;
+  max-height: none;
+  padding: 32px 48px 64px;
+  box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: auto !important;
+  scrollbar-gutter: stable;
 
   &::-webkit-scrollbar {
     width: 8px;
@@ -1161,8 +1144,10 @@ onBeforeUnmount(() => {
   display: none !important;
 }
 
+.writing-page__editor :deep(.w-e-text-container [data-slate-editor]),
 .writing-page__editor :deep(.w-e-text-container [contenteditable='true']) {
-  min-height: auto !important;
+  min-height: 100% !important;
+  box-sizing: border-box;
   padding: 0;
   font-size: 16px;
   line-height: 2;

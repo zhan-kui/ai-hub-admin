@@ -318,7 +318,7 @@ onMounted(() => {
             <el-input v-model="formData.icon" />
           </el-form-item>
         </el-col>
-        <el-col :span="12"></el-col>
+        <el-col :span="12" />
       </el-row>
 
       <el-form-item label="描述">
