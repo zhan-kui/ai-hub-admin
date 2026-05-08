@@ -25,3 +25,21 @@ All source files in this project must remain:
 ```text
 UTF-8 without BOM + CRLF
 ```
+
+## 3. Windows encoding and file editing rules
+
+This project is developed on Windows 11 with Simplified Chinese locale.
+
+All source files must remain UTF-8 without BOM.
+
+Preserve each file's existing line endings:
+
+- If a file originally uses CRLF, keep CRLF.
+- If a file originally uses LF, keep LF.
+- Do not convert line endings unless explicitly requested.
+
+When reading source files that may contain Chinese text, do not use:
+
+```powershell
+Get-Content -Path file -Raw
+```
