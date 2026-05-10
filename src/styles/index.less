@@ -1,7 +1,193 @@
 @import './var.css';
 @import 'element-plus/theme-chalk/dark/css-vars.css';
 
-// 解决抽屉弹出时，body宽度变化的问题
+// ── Fix Element Plus body width shift on drawer/dialog open ──────
 .el-popup-parent--hidden {
   width: 100% !important;
+}
+
+// ── Global scrollbar ─────────────────────────────────────────────
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 3px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+// ── Element Plus overrides ───────────────────────────────────────
+
+// Cards
+.el-card {
+  border-radius: var(--radius-md) !important;
+  border-color: #f0f0f3 !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: box-shadow var(--transition-base), border-color var(--transition-base) !important;
+
+  &:hover {
+    box-shadow: var(--shadow-hover) !important;
+  }
+
+  .el-card__header {
+    border-bottom-color: #f0f0f3;
+    padding: 16px 20px;
+    font-weight: 600;
+    font-size: 14px;
+    color: #374151;
+  }
+
+  .el-card__body {
+    padding: 20px;
+  }
+}
+
+// Buttons
+.el-button {
+  border-radius: var(--radius-sm) !important;
+  font-weight: 500 !important;
+  transition: all var(--transition-base) !important;
+
+  &--primary {
+    background: var(--brand-primary) !important;
+    border-color: var(--brand-primary) !important;
+
+    &:hover {
+      background: var(--brand-primary-dark) !important;
+      border-color: var(--brand-primary-dark) !important;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35) !important;
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+  }
+}
+
+// Tables
+.el-table {
+  border-radius: var(--radius-md) !important;
+
+  th.el-table__cell {
+    background: #f9fafb !important;
+    color: #6b7280 !important;
+    font-weight: 600 !important;
+    font-size: 12px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .el-table__row {
+    transition: background var(--transition-fast) !important;
+  }
+}
+
+// Tags
+.el-tag {
+  border-radius: 6px !important;
+  font-weight: 500 !important;
+  font-size: 12px !important;
+}
+
+// Inputs
+.el-input__wrapper {
+  border-radius: var(--radius-sm) !important;
+  transition: border-color var(--transition-base), box-shadow var(--transition-base) !important;
+}
+
+// Dialog
+.el-dialog {
+  border-radius: var(--radius-lg) !important;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg) !important;
+
+  .el-dialog__header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #f0f0f3;
+    margin: 0;
+
+    .el-dialog__title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #111827;
+    }
+  }
+
+  .el-dialog__body {
+    padding: 20px 24px;
+  }
+
+  .el-dialog__footer {
+    padding: 12px 24px 20px;
+    border-top: 1px solid #f0f0f3;
+  }
+}
+
+// Dropdown menu
+.el-dropdown-menu {
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border-color: #f0f0f3 !important;
+  padding: 4px !important;
+  min-width: 140px;
+
+  .el-dropdown-menu__item {
+    border-radius: 6px !important;
+    font-size: 13px !important;
+    transition: background var(--transition-fast) !important;
+    padding: 8px 12px !important;
+
+    &:hover {
+      background: #f3f4f6 !important;
+      color: #111827 !important;
+    }
+  }
+}
+
+// Breadcrumb
+.el-breadcrumb__separator {
+  color: #d1d5db !important;
+}
+
+// Page transition (used in AppView)
+.v-page-slide-enter-active {
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.v-page-slide-leave-active {
+  transition: opacity 0.14s ease, transform 0.14s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.v-page-slide-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.v-page-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+// ── Layout border utilities ──────────────────────────────────────
+.layout-border__right {
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.layout-border__bottom {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.layout-border__top {
+  border-top: 1px solid #e5e7eb;
 }
