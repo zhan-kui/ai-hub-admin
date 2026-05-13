@@ -4,6 +4,7 @@ import { setStaticToken } from '@/api/frontend-api'
 import { usePermissionStoreWithOut } from '@/store/modules/permission'
 import { useUserStoreWithOut } from '@/store/modules/user'
 import { resetRouter } from '@/router'
+import { useNProgress } from '@/hooks/web/useNProgress'
 
 const PLATFORM = 'pc'
 const WHITE_LIST = new Set<string>(['/login', '/404'])
@@ -11,7 +12,13 @@ const WHITE_LIST = new Set<string>(['/login', '/404'])
 let isLoadingDynamicRoutes = false
 
 export function setupAuthGuard(router: Router): void {
-  router.beforeEach(async (to) => {
+  const { start, done } = useNProgress()
+
+  router.beforeEach(async (to, from) => {
+    if (to.fullPath !== from.fullPath) {
+      start()
+    }
+
     const userStore = useUserStoreWithOut()
     const permissionStore = usePermissionStoreWithOut()
 
@@ -77,5 +84,13 @@ export function setupAuthGuard(router: Router): void {
         query: { redirect: to.fullPath }
       }
     }
+  })
+
+  router.afterEach(() => {
+    done()
+  })
+
+  router.onError(() => {
+    done()
   })
 }

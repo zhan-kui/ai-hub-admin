@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
@@ -19,8 +19,11 @@ const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 
 const loading = ref(false)
+const loginTransition = ref(false)
 const captchaRaw = ref('')
 const formRef = ref<FormInstance>()
+
+const LOGIN_TRANSITION_DELAY = 720
 
 const form = reactive<LoginForm>({
   username: 'admin',
@@ -49,6 +52,10 @@ async function refreshCaptcha() {
   captchaRaw.value = data.imageBase64
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
 async function submit() {
   if (!formRef.value) return
   await formRef.value.validate()
@@ -64,10 +71,18 @@ async function submit() {
     userStore.setUserInfo(null)
     userStore.setPermissions([])
     permissionStore.resetRoutesState()
-    ElMessage.success('登录成功')
+    loginTransition.value = true
+    ElMessage({
+      type: 'success',
+      message: '登录成功，正在进入控制台',
+      duration: 1800,
+      customClass: 'login-success-message'
+    })
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-    router.replace(redirect)
+    await delay(LOGIN_TRANSITION_DELAY)
+    await router.replace(redirect)
   } catch (error: any) {
+    loginTransition.value = false
     ElMessage.error(error?.message || '登录失败，请重试')
     await refreshCaptcha()
   } finally {
@@ -82,6 +97,22 @@ onMounted(async () => {
 
 <template>
   <div class="login-page">
+    <Transition name="login-gateway">
+      <div v-if="loginTransition" class="login-gateway-mask">
+        <div class="gateway-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+            <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
+          </svg>
+        </div>
+        <div class="gateway-title">正在进入 AI Hub</div>
+        <div class="gateway-subtitle">同步权限与菜单配置</div>
+        <div class="gateway-progress">
+          <span></span>
+        </div>
+      </div>
+    </Transition>
+
     <!-- ========== 左侧品牌展示区 ========== -->
     <aside class="brand-side">
       <!-- 背景层 -->
@@ -283,62 +314,201 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* ========== 科技风格 - 深蓝青色系，左右分栏 ========== */
+@keyframes gatewaySpin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+
+  55% {
+    transform: rotate(220deg) scale(1.08);
+  }
+
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+@keyframes gatewayProgress {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* 响应式 */
+@media (width <= 960px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-side {
+    display: none;
+  }
+
+  .form-side {
+    min-height: 100vh;
+  }
+}
+
 .login-page {
+  display: grid;
   width: 100%;
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: 1.1fr 1fr;
-  background: #0f172a;
+  overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', sans-serif;
+  background: #0f172a;
+  grid-template-columns: 1.1fr 1fr;
+}
+
+.login-gateway-mask {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  color: #e2e8f0;
+  background: radial-gradient(circle at 50% 45%, rgb(56 189 248 / 20%), transparent 34%),
+    linear-gradient(135deg, rgb(12 22 40 / 98%), rgb(10 18 32 / 98%));
+  inset: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(12px);
+}
+
+:global(.login-success-message) {
+  min-width: 240px;
+  background: rgb(15 23 42 / 90%) !important;
+  border: 1px solid rgb(56 189 248 / 24%) !important;
+  border-radius: 10px !important;
+  box-shadow:
+    0 16px 40px rgb(2 8 23 / 22%),
+    0 0 0 1px rgb(255 255 255 / 4%) inset !important;
+  backdrop-filter: blur(14px);
+}
+
+:global(.login-success-message .el-message__content) {
+  font-weight: 600;
+  color: #e2e8f0 !important;
+}
+
+:global(.login-success-message .el-message__icon) {
+  color: #38bdf8 !important;
+}
+
+.gateway-logo {
+  width: 68px;
+  height: 68px;
+  color: #38bdf8;
+  filter: drop-shadow(0 0 18px rgb(56 189 248 / 65%));
+  animation: gatewaySpin 1.2s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.gateway-logo svg {
+  width: 100%;
+  height: 100%;
+}
+
+.gateway-title {
+  margin-top: 22px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.gateway-subtitle {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.gateway-progress {
+  width: 180px;
+  height: 3px;
+  margin-top: 26px;
   overflow: hidden;
+  background: rgb(148 163 184 / 18%);
+  border-radius: 999px;
+}
+
+.gateway-progress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #38bdf8, #67e8f9);
+  border-radius: inherit;
+  animation: gatewayProgress 1.05s ease-in-out infinite;
+}
+
+.login-gateway-enter-active,
+.login-gateway-leave-active {
+  transition:
+    opacity 0.32s ease,
+    transform 0.32s ease;
+}
+
+.login-gateway-enter-from,
+.login-gateway-leave-to {
+  opacity: 0;
+  transform: scale(1.02);
 }
 
 /* ===== 左侧品牌展示 ===== */
 .brand-side {
   position: relative;
-  padding: 56px 64px;
-  background: linear-gradient(135deg, #0c1628 0%, #0f172a 50%, #0a1426 100%);
-  color: #e2e8f0;
   display: flex;
+  padding: 56px 64px;
+  overflow: hidden;
+  color: #e2e8f0;
+  background: linear-gradient(135deg, #0c1628 0%, #0f172a 50%, #0a1426 100%);
   flex-direction: column;
   justify-content: space-between;
-  overflow: hidden;
 }
 
 .brand-grid {
   position: absolute;
-  inset: 0;
-  background-image: linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 189, 248, 0.06) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(ellipse at 30% 50%, black 30%, transparent 80%);
-  -webkit-mask-image: radial-gradient(ellipse at 30% 50%, black 30%, transparent 80%);
   pointer-events: none;
+  background-image: linear-gradient(rgb(56 189 248 / 6%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(56 189 248 / 6%) 1px, transparent 1px);
+  background-size: 48px 48px;
+  inset: 0;
+  mask-image: radial-gradient(ellipse at 30% 50%, black 30%, transparent 80%);
 }
 
 .brand-glow {
   position: absolute;
-  width: 700px;
-  height: 700px;
-  background: radial-gradient(circle, rgba(14, 165, 233, 0.25) 0%, transparent 60%);
   top: 50%;
   left: -200px;
-  transform: translateY(-50%);
-  filter: blur(40px);
+  width: 700px;
+  height: 700px;
   pointer-events: none;
+  background: radial-gradient(circle, rgb(14 165 233 / 25%) 0%, transparent 60%);
+  filter: blur(40px);
+  transform: translateY(-50%);
 }
 
 .brand-viz {
   position: absolute;
-  right: -100px;
   top: 50%;
-  transform: translateY(-50%);
+  right: -100px;
   width: 580px;
   height: 580px;
-  opacity: 0.45;
   pointer-events: none;
+  opacity: 0.45;
+  transform: translateY(-50%);
 }
 
 /* 品牌 LOGO */
@@ -354,16 +524,19 @@ onMounted(async () => {
   gap: 12px;
   margin-bottom: 80px;
 }
+
 .logo-icon {
   width: 36px;
   height: 36px;
   color: #38bdf8;
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.5));
+  filter: drop-shadow(0 0 8px rgb(56 189 248 / 50%));
 }
+
 .logo-icon svg {
   width: 100%;
   height: 100%;
 }
+
 .logo-text {
   font-size: 16px;
   font-weight: 700;
@@ -373,117 +546,115 @@ onMounted(async () => {
 
 /* 大标题 */
 .brand-headline {
+  margin: 0 0 24px;
   font-size: 48px;
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: -0.02em;
-  margin: 0 0 24px;
   color: #f8fafc;
 }
+
 .brand-headline .accent {
   background: linear-gradient(135deg, #38bdf8 0%, #22d3ee 50%, #67e8f9 100%);
-  -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .brand-desc {
-  font-size: 15px;
-  color: #94a3b8;
-  line-height: 1.7;
   margin: 0 0 48px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #94a3b8;
 }
 
 /* 特性列表 */
 .feature-list {
-  list-style: none;
+  display: flex;
   padding: 0;
   margin: 0;
-  display: flex;
+  list-style: none;
   flex-direction: column;
   gap: 20px;
 }
+
 .feature-list li {
   display: flex;
   align-items: flex-start;
   gap: 14px;
 }
+
 .feature-dot {
-  flex-shrink: 0;
+  position: relative;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   margin-top: 8px;
   background: #38bdf8;
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.7);
-  position: relative;
-}
-.feature-dot::before {
-  content: '';
-  position: absolute;
-  inset: -4px;
   border-radius: 50%;
-  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 12px rgb(56 189 248 / 70%);
+  flex-shrink: 0;
 }
+
+.feature-dot::before {
+  position: absolute;
+  border: 1px solid rgb(56 189 248 / 40%);
+  border-radius: 50%;
+  content: '';
+  inset: -4px;
+}
+
 .feature-title {
+  margin-bottom: 2px;
   font-size: 14px;
   font-weight: 600;
   color: #e2e8f0;
-  margin-bottom: 2px;
 }
+
 .feature-desc {
   font-size: 12px;
-  color: #64748b;
   letter-spacing: 0.02em;
+  color: #64748b;
 }
 
 /* 左下状态 */
 .brand-footer {
   position: relative;
   z-index: 2;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-  font-size: 11px;
-  color: #64748b;
-  letter-spacing: 0.15em;
   display: flex;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: #64748b;
   align-items: center;
   gap: 8px;
 }
+
 .status-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   background: #22c55e;
+  border-radius: 50%;
   box-shadow: 0 0 8px #22c55e;
   animation: pulse 2s ease-in-out infinite;
-}
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
 }
 
 /* ===== 右侧表单区 ===== */
 .form-side {
   position: relative;
-  background: #0a1220;
   display: flex;
+  padding: 40px;
+  background: #0a1220;
   align-items: center;
   justify-content: center;
-  padding: 40px;
 }
+
 .form-side::before {
-  content: '';
   position: absolute;
-  left: 0;
   top: 0;
   bottom: 0;
+  left: 0;
   width: 1px;
-  background: linear-gradient(to bottom, transparent, rgba(56, 189, 248, 0.3), transparent);
+  background: linear-gradient(to bottom, transparent, rgb(56 189 248 / 30%), transparent);
+  content: '';
 }
 
 .form-container {
@@ -494,29 +665,32 @@ onMounted(async () => {
 .form-header {
   margin-bottom: 40px;
 }
+
 .form-tag {
   display: inline-block;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  padding: 4px 10px;
+  margin-bottom: 20px;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 11px;
   letter-spacing: 0.2em;
   color: #38bdf8;
-  padding: 4px 10px;
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: rgb(56 189 248 / 8%);
+  border: 1px solid rgb(56 189 248 / 25%);
   border-radius: 4px;
-  margin-bottom: 20px;
 }
+
 .form-title {
+  margin: 0 0 8px;
   font-size: 28px;
   font-weight: 700;
-  color: #f1f5f9;
   letter-spacing: -0.01em;
-  margin: 0 0 8px;
+  color: #f1f5f9;
 }
+
 .form-hint {
+  margin: 0;
   font-size: 14px;
   color: #64748b;
-  margin: 0;
 }
 
 /* ===== Element Plus 重写：科技风 ===== */
@@ -525,41 +699,46 @@ onMounted(async () => {
 }
 
 :deep(.el-form-item__label) {
-  color: #94a3b8 !important;
+  padding-bottom: 8px !important;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 12px !important;
   font-weight: 500 !important;
-  padding-bottom: 8px !important;
   letter-spacing: 0.05em !important;
+  color: #94a3b8 !important;
   text-transform: uppercase;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
 }
 
 :deep(.el-input__wrapper) {
-  background-color: rgba(15, 23, 42, 0.6) !important;
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.15) inset !important;
-  border-radius: 6px !important;
-  padding: 2px 14px !important;
-  transition: all 0.2s ease;
   height: 44px;
+  padding: 2px 14px !important;
+  background-color: rgb(15 23 42 / 60%) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 0 0 1px rgb(56 189 248 / 15%) inset !important;
+  transition: all 0.2s ease;
 }
+
 :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35) inset !important;
-  background-color: rgba(15, 23, 42, 0.9) !important;
+  background-color: rgb(15 23 42 / 90%) !important;
+  box-shadow: 0 0 0 1px rgb(56 189 248 / 35%) inset !important;
 }
+
 :deep(.el-input__wrapper.is-focus) {
-  background-color: rgba(15, 23, 42, 1) !important;
+  background-color: rgb(15 23 42 / 100%) !important;
   box-shadow:
     0 0 0 1px #38bdf8 inset,
-    0 0 0 3px rgba(56, 189, 248, 0.15),
-    0 0 20px rgba(56, 189, 248, 0.15) !important;
+    0 0 0 3px rgb(56 189 248 / 15%),
+    0 0 20px rgb(56 189 248 / 15%) !important;
 }
+
 :deep(.el-input__inner) {
-  color: #e2e8f0 !important;
   font-size: 14px !important;
+  color: #e2e8f0 !important;
 }
+
 :deep(.el-input__inner::placeholder) {
   color: #475569 !important;
 }
+
 :deep(.el-input__suffix),
 :deep(.el-input__clear) {
   color: #64748b !important;
@@ -572,77 +751,85 @@ onMounted(async () => {
   gap: 10px;
   width: 100%;
 }
+
 .captcha-box {
+  position: relative;
   width: 124px;
   height: 44px;
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  border-radius: 6px;
   overflow: hidden;
   cursor: pointer;
-  background: rgba(15, 23, 42, 0.6);
+  background: rgb(15 23 42 / 60%);
+  border: 1px solid rgb(56 189 248 / 25%);
+  border-radius: 6px;
   transition: all 0.2s ease;
-  position: relative;
 }
+
 .captcha-box:hover {
   border-color: #38bdf8;
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 12px rgb(56 189 248 / 30%);
 }
+
 .captcha-box img {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: fill;
-  display: block;
   filter: brightness(0.95) contrast(1.1);
+  object-fit: fill;
 }
 
 /* 登录按钮 */
 .login-btn {
+  position: relative;
+  display: flex;
   width: 100%;
   height: 48px !important;
   margin-top: 16px;
-  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%) !important;
-  border: none !important;
-  border-radius: 6px !important;
+  overflow: hidden;
   font-size: 14px !important;
   font-weight: 600 !important;
   letter-spacing: 0.15em;
   color: #f0f9ff !important;
-  display: flex;
+  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%) !important;
+  border: none !important;
+  border-radius: 6px !important;
+  box-shadow:
+    0 4px 16px rgb(14 165 233 / 30%),
+    inset 0 1px 0 rgb(255 255 255 / 20%);
+  transition: all 0.25s ease;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.25s ease;
-  box-shadow:
-    0 4px 16px rgba(14, 165, 233, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
+
 .login-btn::before {
-  content: '';
   position: absolute;
   top: 0;
   left: -100%;
   width: 60%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 25%), transparent);
+  content: '';
   transform: skewX(-20deg);
   transition: left 0.6s;
 }
+
 .login-btn:hover {
   transform: translateY(-1px);
   box-shadow:
-    0 8px 24px rgba(14, 165, 233, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    0 8px 24px rgb(14 165 233 / 50%),
+    inset 0 1px 0 rgb(255 255 255 / 30%);
 }
+
 .login-btn:hover::before {
   left: 150%;
 }
+
 .login-btn svg {
   width: 16px;
   height: 16px;
   transition: transform 0.2s;
 }
+
 .login-btn:hover svg {
   transform: translateX(3px);
 }
@@ -650,35 +837,27 @@ onMounted(async () => {
 /* 表单底部 */
 .form-footer {
   margin-top: 32px;
-  text-align: center;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 12px;
-  color: #475569;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
   letter-spacing: 0.03em;
+  color: #475569;
+  text-align: center;
 }
+
 .form-footer a {
   color: #64748b;
   text-decoration: none;
   transition: color 0.15s;
 }
+
 .form-footer a:hover {
   color: #38bdf8;
 }
+
 .form-footer .sep {
   margin: 0 10px;
   color: #334155;
 }
 
-/* 响应式 */
-@media (max-width: 960px) {
-  .login-page {
-    grid-template-columns: 1fr;
-  }
-  .brand-side {
-    display: none;
-  }
-  .form-side {
-    min-height: 100vh;
-  }
-}
+/* ========== 科技风格 - 深蓝青色系，左右分栏 ========== */
 </style>

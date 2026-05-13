@@ -2385,7 +2385,9 @@ onBeforeUnmount(() => {
 .chat-page {
   display: flex;
   width: 100%;
-  height: 100%;
+  height: calc(100dvh - 104px);
+  min-height: 0;
+  overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', sans-serif;
   background: #f1f5f9;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { MenuVO } from '@/api/frontend-api'
@@ -12,6 +12,8 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
+const pageSwitching = ref(false)
+let pageSwitchTimer: number | undefined
 
 const fallbackMenus: MenuVO[] = [
   {
@@ -47,6 +49,31 @@ const userInitial = computed(() => {
   const name = displayName.value
   return name ? name.charAt(0).toUpperCase() : 'U'
 })
+
+function finishPageSwitch() {
+  window.clearTimeout(pageSwitchTimer)
+  pageSwitchTimer = window.setTimeout(() => {
+    pageSwitching.value = false
+  }, 260)
+}
+
+function handleMenuSelect(index: string) {
+  if (!index || index === route.path || /^https?:\/\//.test(index)) return
+  pageSwitching.value = true
+  window.clearTimeout(pageSwitchTimer)
+  pageSwitchTimer = window.setTimeout(() => {
+    pageSwitching.value = false
+  }, 4200)
+}
+
+watch(
+  () => route.fullPath,
+  () => {
+    if (pageSwitching.value) {
+      finishPageSwitch()
+    }
+  }
+)
 
 async function handleLogout() {
   await userStore.logout()
@@ -87,7 +114,13 @@ async function handleLogout() {
       </div>
 
       <el-scrollbar class="sidebar-scroll">
-        <el-menu :default-active="activeMenu" router unique-opened class="sidebar-menu">
+        <el-menu
+          :default-active="activeMenu"
+          router
+          unique-opened
+          class="sidebar-menu"
+          @select="handleMenuSelect"
+        >
           <SidebarMenuItem
             v-for="menu in visibleMenus"
             :key="menu.id"
@@ -160,14 +193,67 @@ async function handleLogout() {
         </div>
       </el-header>
 
-      <el-main class="layout-main">
-        <router-view />
+      <el-main class="layout-main" :class="{ 'is-switching': pageSwitching }">
+        <div class="route-loading-bar" :class="{ 'is-active': pageSwitching }"></div>
+        <router-view v-slot="{ Component, route: currentRoute }">
+          <Transition name="page-fade" mode="out-in">
+            <div :key="currentRoute.fullPath" class="route-page-shell">
+              <component :is="Component" />
+            </div>
+          </Transition>
+        </router-view>
+        <Transition name="route-mask">
+          <div v-if="pageSwitching" class="route-switch-mask">
+            <div class="route-spinner">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+                <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.45" />
+              </svg>
+            </div>
+            <span>页面加载中</span>
+          </div>
+        </Transition>
       </el-main>
     </el-container>
   </el-container>
 </template>
 
 <style scoped>
+@keyframes statusPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes routeLoading {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(270%);
+  }
+}
+
+@keyframes routeSpin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+
+  60% {
+    transform: rotate(230deg) scale(1.05);
+  }
+
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
 .layout-container {
   width: 100%;
   height: 100%;
@@ -178,11 +264,11 @@ async function handleLogout() {
  * ═══════════════════════════════════════════════════ */
 .layout-aside {
   position: relative;
-  background: linear-gradient(180deg, #0c1628 0%, #0f172a 100%);
   display: flex;
-  flex-direction: column;
+  background: linear-gradient(180deg, #0c1628 0%, #0f172a 100%);
   border-right: none;
-  box-shadow: 1px 0 0 rgba(56, 189, 248, 0.08);
+  box-shadow: 1px 0 0 rgb(56 189 248 / 8%);
+  flex-direction: column;
   flex-shrink: 0;
 }
 
@@ -190,39 +276,39 @@ async function handleLogout() {
 .aside-top-line {
   position: absolute;
   top: 0;
-  left: 0;
   right: 0;
+  left: 0;
+  z-index: 1;
   height: 1px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(56, 189, 248, 0.4) 20%,
-    rgba(56, 189, 248, 0.6) 50%,
-    rgba(56, 189, 248, 0.4) 80%,
+    rgb(56 189 248 / 40%) 20%,
+    rgb(56 189 248 / 60%) 50%,
+    rgb(56 189 248 / 40%) 80%,
     transparent 100%
   );
-  z-index: 1;
 }
 
 /* ── Logo 区 ── */
 .layout-logo {
-  height: 60px;
   display: flex;
+  height: 60px;
+  padding: 0 18px;
+  border-bottom: 1px solid rgb(56 189 248 / 10%);
   align-items: center;
   gap: 12px;
-  padding: 0 18px;
-  border-bottom: 1px solid rgba(56, 189, 248, 0.1);
   flex-shrink: 0;
 }
 
 .logo-icon-wrap {
+  display: flex;
   width: 34px;
   height: 34px;
-  display: flex;
+  filter: drop-shadow(0 0 8px rgb(56 189 248 / 50%));
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.5));
 }
 
 .logo-text-wrap {
@@ -235,18 +321,18 @@ async function handleLogout() {
 .logo-title {
   font-size: 16px;
   font-weight: 700;
-  color: #f1f5f9;
   line-height: 1;
   letter-spacing: 0.3px;
+  color: #f1f5f9;
 }
 
 .logo-badge {
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 9px;
   font-weight: 600;
-  color: #38bdf8;
-  letter-spacing: 1.2px;
   line-height: 1;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  letter-spacing: 1.2px;
+  color: #38bdf8;
   text-transform: uppercase;
 }
 
@@ -268,46 +354,46 @@ async function handleLogout() {
 
 .layout-aside :deep(.el-menu-item),
 .layout-aside :deep(.el-sub-menu__title) {
-  color: #94a3b8;
   height: 42px;
-  line-height: 42px;
-  border-radius: 6px;
-  margin: 2px 0;
-  padding-left: 14px !important;
   padding-right: 14px !important;
-  transition: all 0.2s ease;
+  padding-left: 14px !important;
+  margin: 2px 0;
   font-size: 14px;
+  line-height: 42px;
+  color: #94a3b8;
+  border-radius: 6px;
+  transition: all 0.2s ease;
 }
 
 .layout-aside :deep(.el-menu-item:hover),
 .layout-aside :deep(.el-sub-menu__title:hover) {
-  background-color: rgba(56, 189, 248, 0.08) !important;
   color: #e2e8f0 !important;
+  background-color: rgb(56 189 248 / 8%) !important;
 }
 
 /* 激活菜单 - 青色高亮 + 左侧指示条 */
 .layout-aside :deep(.el-menu-item.is-active) {
+  position: relative;
+  font-weight: 600;
+  color: #38bdf8 !important;
   background: linear-gradient(
     90deg,
-    rgba(14, 165, 233, 0.18) 0%,
-    rgba(14, 165, 233, 0.05) 100%
+    rgb(14 165 233 / 18%) 0%,
+    rgb(14 165 233 / 5%) 100%
   ) !important;
-  color: #38bdf8 !important;
-  font-weight: 600;
-  position: relative;
-  box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.15);
+  box-shadow: inset 0 0 0 1px rgb(56 189 248 / 15%);
 }
 
 .layout-aside :deep(.el-menu-item.is-active)::before {
-  content: '';
   position: absolute;
-  left: 0;
   top: 20%;
   bottom: 20%;
+  left: 0;
   width: 3px;
   background: #38bdf8;
   border-radius: 0 2px 2px 0;
-  box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+  content: '';
+  box-shadow: 0 0 8px rgb(56 189 248 / 60%);
 }
 
 .layout-aside :deep(.el-sub-menu__icon-arrow) {
@@ -316,41 +402,41 @@ async function handleLogout() {
 
 .layout-aside :deep(.el-menu-item .el-icon),
 .layout-aside :deep(.el-sub-menu__title .el-icon) {
-  color: inherit;
   font-size: 16px;
+  color: inherit;
 }
 
 /* 子菜单背景透明 */
 .layout-aside :deep(.el-sub-menu .el-menu) {
-  background-color: rgba(0, 0, 0, 0.2) !important;
-  border-radius: 6px;
   margin: 2px 0;
+  background-color: rgb(0 0 0 / 20%) !important;
+  border-radius: 6px;
 }
 
 .layout-aside :deep(.el-sub-menu .el-menu-item) {
-  font-size: 13px;
   padding-left: 32px !important;
+  font-size: 13px;
 }
 
 /* ── 系统状态指示器 ── */
 .sidebar-status {
-  padding: 10px 18px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  padding: 10px 18px;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 10px;
   letter-spacing: 0.1em;
   color: #64748b;
-  border-top: 1px solid rgba(56, 189, 248, 0.08);
+  border-top: 1px solid rgb(56 189 248 / 8%);
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 
 .status-indicator {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   background: #10b981;
+  border-radius: 50%;
   box-shadow: 0 0 6px #10b981;
   animation: statusPulse 2s ease-in-out infinite;
   flex-shrink: 0;
@@ -365,59 +451,49 @@ async function handleLogout() {
   color: #475569;
 }
 
-@keyframes statusPulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
 /* ── 用户信息区 ── */
 .sidebar-footer {
-  border-top: 1px solid rgba(56, 189, 248, 0.08);
   padding: 10px 8px 12px;
+  border-top: 1px solid rgb(56 189 248 / 8%);
   flex-shrink: 0;
 }
 
 .user-profile {
   display: flex;
+  padding: 8px 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition: all 0.2s ease;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: 1px solid transparent;
 }
 
 .user-profile:hover {
-  background: rgba(56, 189, 248, 0.06);
-  border-color: rgba(56, 189, 248, 0.15);
+  background: rgb(56 189 248 / 6%);
+  border-color: rgb(56 189 248 / 15%);
 }
 
 .user-avatar {
   position: relative;
+  display: flex;
   width: 34px;
   height: 34px;
-  border-radius: 8px;
   background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%);
-  display: flex;
+  border-radius: 8px;
+  box-shadow:
+    0 2px 8px rgb(14 165 233 / 35%),
+    inset 0 1px 0 rgb(255 255 255 / 20%);
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  box-shadow:
-    0 2px 8px rgba(14, 165, 233, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .avatar-text {
   font-size: 13px;
   font-weight: 700;
-  color: #ffffff;
   letter-spacing: 0.02em;
+  color: #fff;
 }
 
 .avatar-online-dot {
@@ -426,10 +502,10 @@ async function handleLogout() {
   bottom: -2px;
   width: 10px;
   height: 10px;
-  border-radius: 50%;
   background: #10b981;
   border: 2px solid #0c1628;
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgb(16 185 129 / 60%);
 }
 
 .user-info {
@@ -438,20 +514,20 @@ async function handleLogout() {
 }
 
 .user-name {
+  overflow: hidden;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.2;
   color: #e2e8f0;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.2;
 }
 
 .user-role {
-  font-size: 11px;
-  color: #64748b;
   margin-top: 2px;
+  font-size: 11px;
   letter-spacing: 0.02em;
+  color: #64748b;
 }
 
 .user-chevron {
@@ -475,27 +551,27 @@ async function handleLogout() {
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  background: #ffffff;
+  background: #fff;
   border-bottom: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 4%);
 }
 
 /* Header 顶部装饰细线 - 与侧边栏顶线呼应 */
 .layout-header::before {
-  content: '';
   position: absolute;
   top: 0;
-  left: 0;
   right: 0;
+  left: 0;
   height: 1px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(14, 165, 233, 0.3) 30%,
-    rgba(14, 165, 233, 0.5) 50%,
-    rgba(14, 165, 233, 0.3) 70%,
+    rgb(14 165 233 / 30%) 30%,
+    rgb(14 165 233 / 50%) 50%,
+    rgb(14 165 233 / 30%) 70%,
     transparent 100%
   );
+  content: '';
 }
 
 .header-left {
@@ -518,8 +594,8 @@ async function handleLogout() {
 .header-title {
   font-size: 14px;
   font-weight: 600;
-  color: #0f172a;
   letter-spacing: 0.01em;
+  color: #0f172a;
 }
 
 .header-right {
@@ -533,33 +609,138 @@ async function handleLogout() {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: rgba(16, 185, 129, 0.08);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgb(16 185 129 / 8%);
+  border: 1px solid rgb(16 185 129 / 20%);
   border-radius: 999px;
 }
 
 .status-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   background: #10b981;
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgb(16 185 129 / 50%);
   animation: statusPulse 2.5s ease-in-out infinite;
 }
 
 .status-text {
   font-size: 12px;
-  color: #047857;
   font-weight: 500;
   letter-spacing: 0.02em;
+  color: #047857;
 }
 
 /* ═══════════════════════════════════════════════════
  * Main content - 浅冷灰（slate 系）
  * ═══════════════════════════════════════════════════ */
 .layout-main {
-  background: #f1f5f9;
+  position: relative;
   padding: 24px;
   overflow-y: auto;
+  background: #f1f5f9;
+}
+
+.layout-main.is-switching {
+  cursor: progress;
+}
+
+.route-page-shell {
+  width: 100%;
+}
+
+.route-loading-bar {
+  position: sticky;
+  top: -24px;
+  left: 0;
+  z-index: 20;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  background: rgb(14 165 233 / 12%);
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.route-loading-bar::before {
+  display: block;
+  width: 38%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #0ea5e9, #67e8f9);
+  border-radius: inherit;
+  content: '';
+  transform: translateX(-120%);
+}
+
+.route-loading-bar.is-active {
+  opacity: 1;
+}
+
+.route-loading-bar.is-active::before {
+  animation: routeLoading 0.95s ease-in-out infinite;
+}
+
+.route-switch-mask {
+  position: absolute;
+  z-index: 15;
+  display: flex;
+  color: #0f172a;
+  pointer-events: none;
+  background: rgb(241 245 249 / 68%);
+  border-radius: 10px;
+  inset: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  backdrop-filter: blur(6px);
+}
+
+.route-switch-mask span {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.route-spinner {
+  width: 24px;
+  height: 24px;
+  color: #0ea5e9;
+  filter: drop-shadow(0 0 8px rgb(14 165 233 / 35%));
+  animation: routeSpin 0.95s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.route-spinner svg {
+  width: 100%;
+  height: 100%;
+}
+
+.page-fade-enter-active,
+.page-fade-leave-active {
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease,
+    filter 0.22s ease;
+}
+
+.page-fade-enter-from {
+  opacity: 0;
+  filter: blur(2px);
+  transform: translateY(10px);
+}
+
+.page-fade-leave-to {
+  opacity: 0;
+  filter: blur(2px);
+  transform: translateY(-6px);
+}
+
+.route-mask-enter-active,
+.route-mask-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.route-mask-enter-from,
+.route-mask-leave-to {
+  opacity: 0;
 }
 </style>
