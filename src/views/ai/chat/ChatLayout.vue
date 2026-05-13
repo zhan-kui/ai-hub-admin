@@ -6,6 +6,7 @@ import { Close, Delete, Microphone, Paperclip, Plus, Refresh } from '@element-pl
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
+import { CaretTop, CaretBottom } from '@element-plus/icons-vue'
 import {
   appApi,
   chatApi,
@@ -1091,6 +1092,9 @@ function releaseAudioResources() {
   isRecording.value = false
 }
 
+// 1. 增加一个记录开始时间的变量
+const recordStartTimeRef = ref<number>(0)
+
 async function startVoiceInput() {
   if (!currentAppId.value) {
     ElMessage.warning('请先选择应用')
@@ -1106,14 +1110,21 @@ async function startVoiceInput() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const recorder = new MediaRecorder(stream)
+    // 指定更稳妥的 mimeType
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm'
+
+    const recorder = new MediaRecorder(stream, { mimeType })
 
     mediaStreamRef.value = stream
     mediaRecorderRef.value = recorder
     audioChunksRef.value = []
+    recordStartTimeRef.value = Date.now() // 记录开始时间
 
     recorder.ondataavailable = (recorderEvent: BlobEvent) => {
-      if (recorderEvent.data?.size) {
+      // 只有当数据大小大于 0 时才推入
+      if (recorderEvent.data && recorderEvent.data.size > 0) {
         audioChunksRef.value.push(recorderEvent.data)
       }
     }
@@ -1121,45 +1132,51 @@ async function startVoiceInput() {
     recorder.onstop = async () => {
       isRecording.value = false
 
+      // 关键修复 1：计算录音时长
+      const duration = Date.now() - recordStartTimeRef.value
+      if (duration < 800) {
+        // 如果录音短于 0.8 秒，视为无效点击
+        ElMessage.warning('录音时间太短')
+        releaseAudioResources()
+        return
+      }
+
       const chunks = [...audioChunksRef.value]
       audioChunksRef.value = []
 
+      // 释放资源
       if (mediaStreamRef.value) {
         mediaStreamRef.value.getTracks().forEach((track) => track.stop())
         mediaStreamRef.value = null
       }
       mediaRecorderRef.value = null
 
-      if (!currentAppId.value || chunks.length === 0) {
-        return
-      }
+      if (!currentAppId.value || chunks.length === 0) return
 
-      const mimeType = recorder.mimeType || 'audio/webm'
       const audioBlob = new Blob(chunks, { type: mimeType })
-      if (!audioBlob.size) {
+
+      // 关键修复 2：检查最终生成的 Blob 大小 (正常 1秒 WebM 至少 4-6KB 以上)
+      console.log('最终录音大小:', audioBlob.size)
+      if (audioBlob.size < 3000) {
+        ElMessage.warning('未检测到有效语音，请按住说话')
         return
       }
 
-      const extension = mimeType.includes('webm')
-        ? 'webm'
-        : mimeType.includes('mp4')
-          ? 'mp4'
-          : mimeType.includes('wav')
-            ? 'wav'
-            : 'webm'
+      const extension = 'webm'
       const audioFile = new File([audioBlob], `recording-${Date.now()}.${extension}`, {
         type: mimeType
       })
 
       audioRecognizing.value = true
       try {
-        const response = await chatApi.audioToText(currentAppId.value, audioBlob)
+        // 注意：这里传的是 audioBlob 还是 audioFile 取决于你后端 chatApi.audioToText 的实现
+        // 建议传 audioFile，因为它带有文件名后缀，方便后端 FFmpeg 识别格式
+        const response = await chatApi.audioToText(currentAppId.value, audioFile)
         const recognizedText = parseAudioToTextResult(response)
         if (recognizedText) {
           appendTextToInput(recognizedText)
-          ElMessage.success('语音识别完成')
         } else {
-          ElMessage.warning('语音识别结果为空')
+          ElMessage.warning('未能识别出文字')
         }
       } catch (error: unknown) {
         ElMessage.error(extractErrorMessage(error) || '语音识别失败')
@@ -1168,14 +1185,15 @@ async function startVoiceInput() {
       }
     }
 
-    recorder.start()
+    // 关键修复 3：设置 timeslice (每 200ms 触发一次 ondataavailable)
+    // 这样可以确保数据是持续写入 chunks 的，而不是在 stop 时才尝试一次性写入
+    recorder.start(200)
     isRecording.value = true
   } catch (error: unknown) {
     releaseAudioResources()
-    ElMessage.error(extractErrorMessage(error) || '无法启动录音')
+    ElMessage.error('无法启动录音，请检查麦克风权限')
   }
 }
-
 function stopVoiceInput() {
   const recorder = mediaRecorderRef.value
   if (!recorder || recorder.state === 'inactive') {
@@ -1228,14 +1246,19 @@ async function loadApps() {
   }
 }
 
-// ★ 关键改动：默认不自动选中第一个会话，传 selectFirst 控制
-async function loadConversations(preferredId?: string, selectFirst = false) {
+// ★ 修复抖动：新增 silent 参数
+// silent=true 时跳过 conversationLoading 置 true，直接用新数据原地替换列表，不清空再重建
+async function loadConversations(preferredId?: string, selectFirst = false, silent = false) {
   if (!currentAppId.value) {
     conversations.value = []
     return
   }
 
-  conversationLoading.value = true
+  // ★ 非静默模式才显示 loading，避免侧边栏内容高度突变导致页面抖动
+  if (!silent) {
+    conversationLoading.value = true
+  }
+
   try {
     const response = await conversationApi.list({
       appId: currentAppId.value,
@@ -1244,28 +1267,36 @@ async function loadConversations(preferredId?: string, selectFirst = false) {
     })
 
     const list = pickList(response)
-    conversations.value = list
+    const parsed = list
       .map((item, index) => parseConversation(item, index))
       .filter((item): item is ConversationItem => Boolean(item))
 
-    if (conversations.value.length === 0) {
+    // ★ 静默模式：直接替换数据，不经过清空状态，Vue diff 会平滑更新 DOM
+    conversations.value = parsed
+
+    if (parsed.length === 0) {
       chatStore.setCurrentConversationId(null)
       chatStore.setMessages([])
       return
     }
 
     // 只有明确传了 preferredId（例如刚刚发送完消息拿到新的会话 id）才选中
-    if (preferredId && conversations.value.some((item) => item.id === preferredId)) {
+    if (preferredId && parsed.some((item) => item.id === preferredId)) {
       chatStore.setCurrentConversationId(preferredId)
-      await loadMessages(preferredId)
+      // ★ 静默刷新列表时不重新加载消息，避免打断当前正在显示的流式输出
+      if (!silent) {
+        await loadMessages(preferredId)
+      }
       return
     }
 
     // 或者显式要求选中第一条
     if (selectFirst) {
-      const first = conversations.value[0].id
+      const first = parsed[0].id
       chatStore.setCurrentConversationId(first)
-      await loadMessages(first)
+      if (!silent) {
+        await loadMessages(first)
+      }
       return
     }
 
@@ -1273,7 +1304,7 @@ async function loadConversations(preferredId?: string, selectFirst = false) {
     // 如果之前已经选中了一条且仍然存在，则保留；否则置空
     if (
       currentConversationId.value &&
-      conversations.value.some((item) => item.id === currentConversationId.value)
+      parsed.some((item) => item.id === currentConversationId.value)
     ) {
       // 保留当前选中
       return
@@ -1284,7 +1315,9 @@ async function loadConversations(preferredId?: string, selectFirst = false) {
   } catch (error: unknown) {
     ElMessage.error(extractErrorMessage(error) || '对话列表加载失败')
   } finally {
-    conversationLoading.value = false
+    if (!silent) {
+      conversationLoading.value = false
+    }
   }
 }
 
@@ -1331,7 +1364,6 @@ async function handleDeleteConversation(conversationId: string) {
     await conversationApi.delete(conversationId, currentAppId.value)
 
     const previous = [...conversations.value]
-    const removedIndex = previous.findIndex((item) => item.id === conversationId)
     conversations.value = previous.filter((item) => item.id !== conversationId)
 
     if (currentConversationId.value === conversationId) {
@@ -1375,12 +1407,12 @@ async function handleFeedback(message: ChatMessage, rating: FeedbackRating) {
   try {
     feedbackByMessageId.value = { ...feedbackByMessageId.value, [backendMessageId]: rating }
     await chatApi.feedback(currentAppId.value, backendMessageId, rating)
-    ElMessage.success('Feedback saved')
+    ElMessage.success('收到啦！您的建议将帮助我们变得更好。')
   } catch (error: unknown) {
     const rollback = { ...feedbackByMessageId.value }
     if (rollback[backendMessageId] === rating) delete rollback[backendMessageId]
     feedbackByMessageId.value = rollback
-    ElMessage.error(extractErrorMessage(error) || 'Feedback failed')
+    ElMessage.error(extractErrorMessage(error) || '哎呀，这里好像有点小问题')
   }
 }
 
@@ -1617,8 +1649,8 @@ async function handleSend() {
 
     const latestConversationId = chatStore.getCurrentConversationId
     if (!previousConversationId && latestConversationId) {
-      // ★ 新会话发送成功后，刷新侧边栏列表（不切换）
-      await loadConversations(latestConversationId, false)
+      // ★ 核心修复：传 silent=true，静默刷新侧边栏列表，不触发 loading 状态，彻底消除抖动
+      await loadConversations(latestConversationId, false, true)
     }
   } catch (error: unknown) {
     if (!controller.signal.aborted) {
@@ -1744,6 +1776,8 @@ onBeforeUnmount(() => {
           </div>
 
           <el-scrollbar class="section-scroll">
+            <!-- ★ 修复：loading 状态只在非静默加载时才显示（初次加载、切换应用），
+                 发送消息后的后台刷新不会触发此分支，侧边栏内容不会闪烁消失 -->
             <div v-if="conversationLoading" class="tip-text">正在加载对话...</div>
             <template v-else>
               <div
@@ -2003,33 +2037,59 @@ onBeforeUnmount(() => {
                             class="assistant-action-row"
                           >
                             <div class="feedback-actions">
+                              <!-- Like 按钮 -->
                               <el-button
                                 text
                                 size="small"
-                                class="feedback-btn"
+                                class="feedback-btn like"
                                 :class="{ active: getFeedbackValue(message) === 'like' }"
                                 @click="handleFeedback(message, 'like')"
                               >
-                                Like
+                                <el-icon :size="16">
+                                  <!-- 这里是大拇指向上 SVG -->
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                  >
+                                    <path
+                                      d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"
+                                    />
+                                  </svg>
+                                </el-icon>
+                                <span class="btn-text">赞</span>
                               </el-button>
+
+                              <!-- Dislike 按钮 -->
                               <el-button
                                 text
                                 size="small"
-                                class="feedback-btn"
+                                class="feedback-btn dislike"
                                 :class="{ active: getFeedbackValue(message) === 'dislike' }"
                                 @click="handleFeedback(message, 'dislike')"
                               >
-                                Dislike
-                              </el-button>
-                              <el-button
-                                text
-                                size="small"
-                                :loading="isSuggestedLoading(message)"
-                                @click="loadSuggestedQuestions(message)"
-                              >
-                                Suggestions
+                                <el-icon :size="16">
+                                  <!-- 这里是大拇指向下 SVG -->
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                  >
+                                    <path
+                                      d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"
+                                    />
+                                  </svg>
+                                </el-icon>
+                                <span class="btn-text">踩</span>
                               </el-button>
                             </div>
+
                             <div
                               v-if="getSuggestedQuestions(message).length > 0"
                               class="suggested-question-list"
@@ -2159,17 +2219,183 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+@keyframes onlinePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes welcomeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes logoFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes logoPulse {
+  0%,
+  100% {
+    opacity: 0.6;
+    transform: scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes cardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes thumbs-up-pop {
+  0% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.3) rotate(-10deg);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
 /* ═══════════════════════════════════════════════════
- * Page Shell
+ * Keyframes
  * ═══════════════════════════════════════════════════ */
+@keyframes orbit {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.92;
+    transform: scale(0.85);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 窄屏下隐藏副标题 */
+@media (width <= 720px) {
+  .back-button {
+    padding: 6px 14px 6px 10px;
+    gap: 8px;
+  }
+
+  .back-button-sub {
+    display: none;
+  }
+
+  .back-button-icon {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+/* 极窄屏下只保留图标 */
+@media (width <= 520px) {
+  .back-button-text {
+    display: none;
+  }
+
+  .back-button {
+    padding: 6px;
+  }
+}
+
+@media (width <= 720px) {
+  .prompt-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (width <= 960px) {
+  .input-hint-text {
+    display: none;
+  }
+
+  .input-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .input-actions-left {
+    justify-content: flex-start;
+  }
+
+  .input-actions-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .send-btn {
+    width: 100%;
+  }
+}
+
 .chat-page {
+  display: flex;
   width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #f1f5f9;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', sans-serif;
+  background: #f1f5f9;
+  flex-direction: column;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -2177,13 +2403,13 @@ onBeforeUnmount(() => {
  * ═══════════════════════════════════════════════════ */
 .chat-header {
   position: relative;
-  height: 56px;
   display: flex;
-  align-items: center;
+  height: 56px;
   padding: 0 20px;
-  background: #ffffff;
+  background: #fff;
   border-bottom: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 4%);
+  align-items: center;
   flex-shrink: 0;
 }
 
@@ -2191,15 +2417,15 @@ onBeforeUnmount(() => {
 .header-accent-line {
   position: absolute;
   top: 0;
-  left: 0;
   right: 0;
+  left: 0;
   height: 1px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(14, 165, 233, 0.3) 30%,
-    rgba(14, 165, 233, 0.5) 50%,
-    rgba(14, 165, 233, 0.3) 70%,
+    rgb(14 165 233 / 30%) 30%,
+    rgb(14 165 233 / 50%) 50%,
+    rgb(14 165 233 / 30%) 70%,
     transparent 100%
   );
 }
@@ -2210,61 +2436,61 @@ onBeforeUnmount(() => {
 .back-button {
   position: relative;
   display: inline-flex;
-  align-items: center;
-  gap: 10px;
   padding: 6px 16px 6px 12px;
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.08) 0%, rgba(56, 189, 248, 0.04) 100%);
-  border: 1px solid rgba(14, 165, 233, 0.25);
-  border-radius: 999px;
-  cursor: pointer;
+  overflow: hidden;
   font-family: inherit;
+  cursor: pointer;
+  background: linear-gradient(135deg, rgb(14 165 233 / 8%) 0%, rgb(56 189 248 / 4%) 100%);
+  border: 1px solid rgb(14 165 233 / 25%);
+  border-radius: 999px;
   outline: none;
   transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  align-items: center;
+  gap: 10px;
 }
 
 /* 左侧青色指示条 */
 .back-button::before {
-  content: '';
   position: absolute;
-  left: 0;
   top: 20%;
   bottom: 20%;
+  left: 0;
   width: 2px;
   background: #0ea5e9;
   border-radius: 0 2px 2px 0;
-  box-shadow: 0 0 6px rgba(14, 165, 233, 0.6);
+  content: '';
+  box-shadow: 0 0 6px rgb(14 165 233 / 60%);
   transition: all 0.22s ease;
 }
 
 /* 内部流光条（hover 时出现） */
 .back-button::after {
-  content: '';
   position: absolute;
   top: 0;
   left: -100%;
   width: 60%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.15), transparent);
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(56 189 248 / 15%), transparent);
+  content: '';
   transform: skewX(-20deg);
   transition: left 0.6s ease;
-  pointer-events: none;
 }
 
 .back-button:hover {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.14) 0%, rgba(56, 189, 248, 0.08) 100%);
-  border-color: rgba(14, 165, 233, 0.5);
-  box-shadow:
-    0 4px 14px rgba(14, 165, 233, 0.18),
-    0 0 0 3px rgba(14, 165, 233, 0.08);
+  background: linear-gradient(135deg, rgb(14 165 233 / 14%) 0%, rgb(56 189 248 / 8%) 100%);
+  border-color: rgb(14 165 233 / 50%);
   transform: translateX(-2px);
+  box-shadow:
+    0 4px 14px rgb(14 165 233 / 18%),
+    0 0 0 3px rgb(14 165 233 / 8%);
 }
 
 .back-button:hover::before {
   top: 10%;
   bottom: 10%;
   background: #38bdf8;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
+  box-shadow: 0 0 10px rgb(56 189 248 / 80%);
 }
 
 .back-button:hover::after {
@@ -2277,23 +2503,23 @@ onBeforeUnmount(() => {
 
 .back-button:focus-visible {
   box-shadow:
-    0 0 0 3px rgba(14, 165, 233, 0.25),
-    0 4px 14px rgba(14, 165, 233, 0.2);
+    0 0 0 3px rgb(14 165 233 / 25%),
+    0 4px 14px rgb(14 165 233 / 20%);
 }
 
 /* 箭头图标 */
 .back-button-icon {
+  display: inline-flex;
   width: 26px;
   height: 26px;
+  color: #0ea5e9;
+  background: #fff;
+  border: 1px solid rgb(14 165 233 / 30%);
   border-radius: 50%;
-  background: #ffffff;
-  border: 1px solid rgba(14, 165, 233, 0.3);
-  display: inline-flex;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   align-items: center;
   justify-content: center;
-  color: #0ea5e9;
   flex-shrink: 0;
-  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .back-button-icon svg {
@@ -2303,10 +2529,10 @@ onBeforeUnmount(() => {
 }
 
 .back-button:hover .back-button-icon {
+  color: #fff;
   background: linear-gradient(135deg, #0ea5e9, #38bdf8);
   border-color: transparent;
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.4);
+  box-shadow: 0 2px 8px rgb(14 165 233 / 40%);
 }
 
 .back-button:hover .back-button-icon svg {
@@ -2325,41 +2551,16 @@ onBeforeUnmount(() => {
 .back-button-label {
   font-size: 13px;
   font-weight: 600;
-  color: #0369a1;
   letter-spacing: 0.01em;
+  color: #0369a1;
 }
 
 .back-button-sub {
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 9px;
-  color: #0ea5e9;
   letter-spacing: 0.1em;
+  color: #0ea5e9;
   opacity: 0.7;
-}
-
-/* 窄屏下隐藏副标题 */
-@media (max-width: 720px) {
-  .back-button {
-    padding: 6px 14px 6px 10px;
-    gap: 8px;
-  }
-  .back-button-sub {
-    display: none;
-  }
-  .back-button-icon {
-    width: 22px;
-    height: 22px;
-  }
-}
-
-/* 极窄屏下只保留图标 */
-@media (max-width: 520px) {
-  .back-button-text {
-    display: none;
-  }
-  .back-button {
-    padding: 6px;
-  }
 }
 
 .header-center {
@@ -2370,14 +2571,14 @@ onBeforeUnmount(() => {
 }
 
 .header-icon {
-  filter: drop-shadow(0 0 6px rgba(14, 165, 233, 0.4));
+  filter: drop-shadow(0 0 6px rgb(14 165 233 / 40%));
 }
 
 .header-title-text {
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
   letter-spacing: 0.02em;
+  color: #0f172a;
 }
 
 .header-right {
@@ -2389,60 +2590,50 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 5px 12px;
-  background: rgba(14, 165, 233, 0.06);
-  border: 1px solid rgba(14, 165, 233, 0.15);
+  background: rgb(14 165 233 / 6%);
+  border: 1px solid rgb(14 165 233 / 15%);
   border-radius: 999px;
 }
 
 .user-online-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   background: #10b981;
-  box-shadow: 0 0 5px rgba(16, 185, 129, 0.6);
+  border-radius: 50%;
+  box-shadow: 0 0 5px rgb(16 185 129 / 60%);
   animation: onlinePulse 2.5s ease-in-out infinite;
-}
-
-@keyframes onlinePulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
 }
 
 .user-display-name {
   font-size: 12px;
-  color: #0369a1;
   font-weight: 500;
+  color: #0369a1;
 }
 
 /* ═══════════════════════════════════════════════════
  * Body
  * ═══════════════════════════════════════════════════ */
 .chat-body {
-  flex: 1;
-  min-height: 0;
   display: flex;
+  min-height: 0;
+  flex: 1;
 }
 
 /* ═══════════════════════════════════════════════════
  * Sidebar - 浅色但带品牌感
  * ═══════════════════════════════════════════════════ */
 .chat-sidebar {
-  width: 280px;
   display: flex;
-  flex-direction: column;
-  background: #ffffff;
+  width: 280px;
+  background: #fff;
   border-right: 1px solid #e2e8f0;
+  flex-direction: column;
   flex-shrink: 0;
 }
 
 .sidebar-section {
-  min-height: 0;
   display: flex;
+  min-height: 0;
   flex-direction: column;
 }
 
@@ -2456,28 +2647,28 @@ onBeforeUnmount(() => {
 }
 
 .section-header {
+  display: flex;
   height: 44px;
   padding: 0 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
+  align-items: center;
+  justify-content: space-between;
   flex-shrink: 0;
 }
 
 .section-title {
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.12em;
-  text-transform: uppercase;
   color: #64748b;
+  text-transform: uppercase;
 }
 
 .section-action {
-  color: #64748b !important;
   font-size: 12px;
+  color: #64748b !important;
 }
 
 .section-action :deep(.el-icon) {
@@ -2490,7 +2681,7 @@ onBeforeUnmount(() => {
 
 :deep(.section-action.is-text:not(.is-disabled):hover) {
   color: #0ea5e9 !important;
-  background: rgba(14, 165, 233, 0.08) !important;
+  background: rgb(14 165 233 / 8%) !important;
 }
 
 .section-scroll {
@@ -2502,14 +2693,14 @@ onBeforeUnmount(() => {
 /* ── App Item ── */
 .app-item {
   position: relative;
+  display: flex;
   padding: 10px 12px;
   margin-bottom: 3px;
-  border-radius: 8px;
-  border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.2s ease;
   background: transparent;
-  display: flex;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition: all 0.2s ease;
   align-items: center;
   gap: 10px;
 }
@@ -2517,8 +2708,8 @@ onBeforeUnmount(() => {
 .app-item-indicator {
   width: 3px;
   height: 26px;
-  border-radius: 2px;
   background: #cbd5e1;
+  border-radius: 2px;
   transition: all 0.2s ease;
   flex-shrink: 0;
 }
@@ -2532,13 +2723,13 @@ onBeforeUnmount(() => {
 }
 
 .app-item.active {
-  background: linear-gradient(90deg, rgba(14, 165, 233, 0.1), rgba(14, 165, 233, 0.02));
-  border-color: rgba(14, 165, 233, 0.25);
+  background: linear-gradient(90deg, rgb(14 165 233 / 10%), rgb(14 165 233 / 2%));
+  border-color: rgb(14 165 233 / 25%);
 }
 
 .app-item.active .app-item-indicator {
   background: #0ea5e9;
-  box-shadow: 0 0 6px rgba(14, 165, 233, 0.5);
+  box-shadow: 0 0 6px rgb(14 165 233 / 50%);
 }
 
 .app-item-body {
@@ -2549,31 +2740,31 @@ onBeforeUnmount(() => {
 /* ── Conversation Item ── */
 .conversation-item {
   position: relative;
-  padding: 10px 12px;
-  margin-bottom: 3px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background: transparent;
   display: flex;
+  padding: 10px 12px;
+  padding-right: 36px;
+  margin-bottom: 3px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  transition: all 0.2s ease;
   align-items: flex-start;
   gap: 10px;
-  padding-right: 36px;
 }
 
 .conv-icon {
+  display: flex;
   width: 28px;
   height: 28px;
-  border-radius: 7px;
+  color: #64748b;
   background: #f1f5f9;
   border: 1px solid #e2e8f0;
-  display: flex;
+  border-radius: 7px;
+  transition: all 0.2s ease;
   align-items: center;
   justify-content: center;
-  color: #64748b;
   flex-shrink: 0;
-  transition: all 0.2s ease;
 }
 
 .conv-icon svg {
@@ -2586,20 +2777,20 @@ onBeforeUnmount(() => {
 }
 
 .conversation-item:hover .conv-icon {
-  background: rgba(14, 165, 233, 0.08);
-  border-color: rgba(14, 165, 233, 0.2);
   color: #0ea5e9;
+  background: rgb(14 165 233 / 8%);
+  border-color: rgb(14 165 233 / 20%);
 }
 
 .conversation-item.active {
-  background: linear-gradient(90deg, rgba(14, 165, 233, 0.1), rgba(14, 165, 233, 0.02));
-  border-color: rgba(14, 165, 233, 0.25);
+  background: linear-gradient(90deg, rgb(14 165 233 / 10%), rgb(14 165 233 / 2%));
+  border-color: rgb(14 165 233 / 25%);
 }
 
 .conversation-item.active .conv-icon {
-  background: rgba(14, 165, 233, 0.12);
-  border-color: rgba(14, 165, 233, 0.3);
   color: #0ea5e9;
+  background: rgb(14 165 233 / 12%);
+  border-color: rgb(14 165 233 / 30%);
 }
 
 .conv-body {
@@ -2625,13 +2816,13 @@ onBeforeUnmount(() => {
 }
 
 .item-title {
+  overflow: hidden;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.3;
   color: #334155;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.3;
 }
 
 .app-item.active .item-title,
@@ -2641,9 +2832,9 @@ onBeforeUnmount(() => {
 
 .item-sub {
   margin-top: 3px;
+  overflow: hidden;
   font-size: 11px;
   color: #94a3b8;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2652,22 +2843,22 @@ onBeforeUnmount(() => {
  * Chat Main
  * ═══════════════════════════════════════════════════ */
 .chat-main {
-  flex: 1;
+  display: flex;
   min-width: 0;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
   background: #f8fafc;
+  flex: 1;
+  flex-direction: column;
 }
 
 .chat-main-header {
-  height: 46px;
   display: flex;
+  height: 46px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #ffffff;
   flex-shrink: 0;
 }
 
@@ -2681,17 +2872,17 @@ onBeforeUnmount(() => {
 .main-header-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   background: #0ea5e9;
-  box-shadow: 0 0 6px rgba(14, 165, 233, 0.5);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgb(14 165 233 / 50%);
   flex-shrink: 0;
 }
 
 .main-header-title {
+  overflow: hidden;
   font-size: 14px;
   font-weight: 600;
   color: #0f172a;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2702,13 +2893,13 @@ onBeforeUnmount(() => {
 }
 
 .status-badge {
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-  font-size: 10px;
-  color: #0ea5e9;
-  letter-spacing: 0.15em;
   padding: 3px 10px;
-  background: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: #0ea5e9;
+  background: rgb(14 165 233 / 8%);
+  border: 1px solid rgb(14 165 233 / 20%);
   border-radius: 4px;
 }
 
@@ -2717,36 +2908,35 @@ onBeforeUnmount(() => {
  * ═══════════════════════════════════════════════════ */
 .welcome-screen {
   position: relative;
-  min-height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 100%;
   padding: 40px 24px;
   overflow: hidden;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 超大浅色网格背景 */
 .welcome-bg-grid {
   position: absolute;
-  inset: 0;
-  background-image: linear-gradient(rgba(14, 165, 233, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(14, 165, 233, 0.05) 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
-  -webkit-mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
   pointer-events: none;
+  background-image: linear-gradient(rgb(14 165 233 / 5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(14 165 233 / 5%) 1px, transparent 1px);
+  background-size: 40px 40px;
+  inset: 0;
+  mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
 }
 
 .welcome-bg-glow {
   position: absolute;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(14, 165, 233, 0.1) 0%, transparent 70%);
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  filter: blur(40px);
+  width: 500px;
+  height: 500px;
   pointer-events: none;
+  background: radial-gradient(circle, rgb(14 165 233 / 10%) 0%, transparent 70%);
+  filter: blur(40px);
+  transform: translate(-50%, -50%);
 }
 
 .welcome-content {
@@ -2758,90 +2948,56 @@ onBeforeUnmount(() => {
   animation: welcomeFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes welcomeFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .welcome-logo {
   position: relative;
+  display: flex;
   width: 64px;
   height: 64px;
   margin: 0 auto 24px;
-  display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .welcome-logo svg {
-  width: 48px;
-  height: 48px;
-  filter: drop-shadow(0 0 12px rgba(14, 165, 233, 0.5));
   position: relative;
   z-index: 1;
+  width: 48px;
+  height: 48px;
+  filter: drop-shadow(0 0 12px rgb(14 165 233 / 50%));
   animation: logoFloat 4s ease-in-out infinite;
-}
-
-@keyframes logoFloat {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-4px);
-  }
 }
 
 .welcome-logo-pulse {
   position: absolute;
   width: 64px;
   height: 64px;
+  background: radial-gradient(circle, rgb(14 165 233 / 30%) 0%, transparent 70%);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(14, 165, 233, 0.3) 0%, transparent 70%);
   animation: logoPulse 3s ease-in-out infinite;
 }
 
-@keyframes logoPulse {
-  0%,
-  100% {
-    transform: scale(0.8);
-    opacity: 0.6;
-  }
-  50% {
-    transform: scale(1.2);
-    opacity: 1;
-  }
-}
-
 .welcome-title {
+  margin-bottom: 8px;
   font-size: 28px;
   font-weight: 700;
-  color: #0f172a;
   letter-spacing: -0.02em;
-  margin-bottom: 8px;
+  color: #0f172a;
 }
 
 .welcome-title-accent {
   background: linear-gradient(135deg, #0ea5e9 0%, #22d3ee 50%, #38bdf8 100%);
-  -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .welcome-subtitle {
-  font-size: 14px;
-  color: #64748b;
-  line-height: 1.6;
-  margin-bottom: 32px;
   max-width: 480px;
-  margin-left: auto;
   margin-right: auto;
+  margin-bottom: 32px;
+  margin-left: auto;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #64748b;
 }
 
 /* ── 提示词网格 ── */
@@ -2853,55 +3009,38 @@ onBeforeUnmount(() => {
   text-align: left;
 }
 
-@media (max-width: 720px) {
-  .prompt-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .prompt-card {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 12px;
   padding: 14px 16px;
-  background: #ffffff;
+  cursor: pointer;
+  background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.25s ease;
   opacity: 0;
   animation: cardFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes cardFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  transition: all 0.25s ease;
+  align-items: center;
+  gap: 12px;
 }
 
 .prompt-card::before {
-  content: '';
   position: absolute;
   top: 0;
-  left: 0;
   right: 0;
+  left: 0;
   height: 2px;
   background: linear-gradient(90deg, transparent, #0ea5e9, transparent);
+  border-radius: 12px 12px 0 0;
+  content: '';
   opacity: 0;
   transition: opacity 0.25s;
-  border-radius: 12px 12px 0 0;
 }
 
 .prompt-card:hover {
   border-color: #0ea5e9;
   transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(14, 165, 233, 0.12);
+  box-shadow: 0 8px 20px rgb(14 165 233 / 12%);
 }
 
 .prompt-card:hover::before {
@@ -2909,14 +3048,14 @@ onBeforeUnmount(() => {
 }
 
 .prompt-icon-wrap {
+  display: flex;
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  display: flex;
+  transition: all 0.25s ease;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: all 0.25s ease;
 }
 
 .prompt-icon-wrap svg {
@@ -2925,27 +3064,27 @@ onBeforeUnmount(() => {
 }
 
 .prompt-icon--spark {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(56, 189, 248, 0.05));
   color: #0ea5e9;
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: linear-gradient(135deg, rgb(14 165 233 / 10%), rgb(56 189 248 / 5%));
+  border: 1px solid rgb(14 165 233 / 20%);
 }
 
 .prompt-icon--code {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(103, 232, 249, 0.05));
   color: #0891b2;
-  border: 1px solid rgba(34, 211, 238, 0.2);
+  background: linear-gradient(135deg, rgb(34 211 238 / 10%), rgb(103 232 249 / 5%));
+  border: 1px solid rgb(34 211 238 / 20%);
 }
 
 .prompt-icon--doc {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(52, 211, 153, 0.05));
   color: #059669;
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: linear-gradient(135deg, rgb(16 185 129 / 10%), rgb(52 211 153 / 5%));
+  border: 1px solid rgb(16 185 129 / 20%);
 }
 
 .prompt-icon--idea {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(251, 191, 36, 0.05));
   color: #d97706;
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: linear-gradient(135deg, rgb(245 158 11 / 10%), rgb(251 191 36 / 5%));
+  border: 1px solid rgb(245 158 11 / 20%);
 }
 
 .prompt-card:hover .prompt-icon-wrap {
@@ -2958,17 +3097,17 @@ onBeforeUnmount(() => {
 }
 
 .prompt-title {
+  margin-bottom: 2px;
   font-size: 14px;
   font-weight: 600;
-  color: #0f172a;
-  margin-bottom: 2px;
   letter-spacing: -0.01em;
+  color: #0f172a;
 }
 
 .prompt-desc {
   font-size: 12px;
-  color: #64748b;
   line-height: 1.5;
+  color: #64748b;
 }
 
 .prompt-arrow {
@@ -2987,14 +3126,14 @@ onBeforeUnmount(() => {
 /* 底部说明 */
 .welcome-hint {
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
   padding: 8px 14px;
-  background: rgba(14, 165, 233, 0.04);
-  border: 1px solid rgba(14, 165, 233, 0.12);
-  border-radius: 999px;
   font-size: 12px;
   color: #64748b;
+  background: rgb(14 165 233 / 4%);
+  border: 1px solid rgb(14 165 233 / 12%);
+  border-radius: 999px;
+  align-items: center;
+  gap: 8px;
 }
 
 .welcome-hint svg {
@@ -3022,11 +3161,11 @@ onBeforeUnmount(() => {
 
 .message-list {
   display: flex;
+  max-width: 960px;
+  padding: 24px 24px 8px;
+  margin: 0 auto;
   flex-direction: column;
   gap: 20px;
-  padding: 24px 24px 8px;
-  max-width: 960px;
-  margin: 0 auto;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -3056,49 +3195,49 @@ onBeforeUnmount(() => {
 
 /* ── Avatars ── */
 .message-avatar {
+  display: flex;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  margin-top: 22px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  border-radius: 9px;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  margin-top: 22px;
 }
 
 .avatar-ai {
-  background: linear-gradient(135deg, #0c1628 0%, #0f172a 50%, #1e293b 100%);
   color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
+  background: linear-gradient(135deg, #0c1628 0%, #0f172a 50%, #1e293b 100%);
+  border: 1px solid rgb(56 189 248 / 30%);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 20%);
 }
 
 .avatar-ai svg {
   width: 18px;
   height: 18px;
-  filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.4));
+  filter: drop-shadow(0 0 4px rgb(56 189 248 / 40%));
 }
 
 .avatar-user {
+  color: #fff;
   background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.35);
+  box-shadow: 0 2px 8px rgb(14 165 233 / 35%);
 }
 
 /* ── Message Meta ── */
 .message-meta {
-  font-size: 11px;
-  color: #94a3b8;
   display: flex;
+  margin-bottom: 6px;
+  font-size: 11px;
+  line-height: 1;
+  color: #94a3b8;
+  white-space: nowrap;
   align-items: center;
   flex-wrap: nowrap;
-  white-space: nowrap;
-  line-height: 1;
   gap: 8px;
-  margin-bottom: 6px;
 }
 
 .message-meta-role,
@@ -3120,20 +3259,20 @@ onBeforeUnmount(() => {
 
 /* ── Message Bubble ── */
 .message-bubble {
-  line-height: 1.7;
-  font-size: 14px;
   padding: 14px 16px;
-  border-radius: 12px;
-  background: #ffffff;
+  font-size: 14px;
+  line-height: 1.7;
+  background: #fff;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
 }
 
 .role-user .message-bubble {
+  color: #fff;
   background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
   border-color: transparent;
-  color: #ffffff;
-  box-shadow: 0 2px 10px rgba(14, 165, 233, 0.3);
+  box-shadow: 0 2px 10px rgb(14 165 233 / 30%);
 }
 
 .plain-content {
@@ -3153,40 +3292,40 @@ onBeforeUnmount(() => {
 }
 
 .user-file-reference-chip {
+  display: inline-flex;
   max-width: 240px;
   min-height: 24px;
-  display: inline-flex;
+  padding: 2px 8px 2px 6px;
+  background: rgb(255 255 255 / 15%);
+  border: 1px solid rgb(255 255 255 / 30%);
+  border-radius: 999px;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px 2px 6px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.15);
 }
 
 .user-file-reference-chip::before {
-  content: '';
   width: 5px;
   height: 5px;
+  background: rgb(255 255 255 / 80%);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.8);
+  content: '';
   flex-shrink: 0;
 }
 
 .user-file-reference-name {
   max-width: 164px;
   overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(255 255 255 / 95%);
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.95);
-  font-weight: 600;
 }
 
 .user-file-reference-ext {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.75);
   font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: rgb(255 255 255 / 75%);
   white-space: nowrap;
 }
 
@@ -3195,22 +3334,22 @@ onBeforeUnmount(() => {
  * ═══════════════════════════════════════════════════ */
 .thought-panel {
   margin-bottom: 10px;
-  border-radius: 8px;
   background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  border: 1px solid rgb(14 165 233 / 20%);
+  border-radius: 8px;
 }
 
 .thought-summary {
-  list-style: none;
-  cursor: pointer;
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
   padding: 8px 12px;
-  color: #0284c7;
   font-size: 13px;
   font-weight: 500;
+  color: #0284c7;
+  list-style: none;
+  cursor: pointer;
   user-select: none;
+  align-items: center;
+  gap: 8px;
 }
 
 .thought-summary::-webkit-details-marker {
@@ -3218,27 +3357,27 @@ onBeforeUnmount(() => {
 }
 
 .thought-content {
-  margin: 0 12px 10px;
   padding: 10px 12px 10px 16px;
+  margin: 0 12px 10px;
+  font-size: 13px;
+  color: #475569;
+  word-break: break-all;
+  background: #fff;
   border-left: 3px solid #0ea5e9;
-  background: #ffffff;
   border-radius: 6px;
   animation: fadeIn 0.26s ease;
   overflow-wrap: anywhere;
-  word-break: break-all;
-  font-size: 13px;
-  color: #475569;
 }
 
 /* ── Thinking Icon - 青色系思考中动画 ── */
 .thinking-icon {
+  display: inline-flex;
   width: 18px;
   height: 18px;
-  display: inline-flex;
+  background: radial-gradient(circle at 30% 30%, #fff 0%, #f0f9ff 72%, #e0f2fe 100%);
+  border-radius: 50%;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #ffffff 0%, #f0f9ff 72%, #e0f2fe 100%);
 }
 
 .thinking-icon svg {
@@ -3280,8 +3419,8 @@ onBeforeUnmount(() => {
 }
 
 .star-core {
-  fill: #ffffff;
-  filter: drop-shadow(0 0 4px rgba(14, 165, 233, 0.6));
+  fill: #fff;
+  filter: drop-shadow(0 0 4px rgb(14 165 233 / 60%));
   animation: breathe 1.3s ease-in-out infinite;
   transform-origin: 24px 24px;
 }
@@ -3298,10 +3437,10 @@ onBeforeUnmount(() => {
  * Assistant content
  * ═══════════════════════════════════════════════════ */
 .assistant-content {
+  color: #1e293b;
+  word-break: break-word;
   white-space: normal;
   overflow-wrap: anywhere;
-  word-break: break-word;
-  color: #1e293b;
 }
 
 .assistant-content :deep(p) {
@@ -3314,15 +3453,15 @@ onBeforeUnmount(() => {
 
 .assistant-content :deep(pre) {
   margin: 10px 0;
-  border-radius: 8px;
   overflow: auto;
+  border-radius: 8px;
 }
 
 .assistant-content :deep(.hljs) {
-  background: #0f172a;
-  border-radius: 8px;
   padding: 14px 16px;
   color: #e2e8f0;
+  background: #0f172a;
+  border-radius: 8px;
 }
 
 .assistant-content :deep(code) {
@@ -3331,12 +3470,12 @@ onBeforeUnmount(() => {
 }
 
 .assistant-content :deep(:not(pre) > code) {
-  background: rgba(14, 165, 233, 0.08);
-  color: #0369a1;
   padding: 1px 6px;
-  border-radius: 4px;
   font-size: 13px;
-  border: 1px solid rgba(14, 165, 233, 0.15);
+  color: #0369a1;
+  background: rgb(14 165 233 / 8%);
+  border: 1px solid rgb(14 165 233 / 15%);
+  border-radius: 4px;
 }
 
 .assistant-content :deep(a) {
@@ -3359,52 +3498,99 @@ onBeforeUnmount(() => {
 }
 
 .assistant-content :deep(blockquote) {
-  margin: 8px 0;
   padding: 8px 14px;
-  border-left: 3px solid #0ea5e9;
-  background: rgba(14, 165, 233, 0.04);
-  border-radius: 0 6px 6px 0;
+  margin: 8px 0;
   color: #64748b;
+  background: rgb(14 165 233 / 4%);
+  border-left: 3px solid #0ea5e9;
+  border-radius: 0 6px 6px 0;
 }
 
 .assistant-action-row {
   margin-top: 10px;
 }
 
+/* --- 1. 点赞，点踩 --- */
+
+/* 容器布局 */
 .feedback-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
+  gap: 12px; /* 间距拉开一点更舒服 */
+  margin-top: 10px;
 }
 
-.feedback-btn.active {
-  color: #0ea5e9;
-  font-weight: 600;
+/* 按钮基础样式 */
+.feedback-btn {
+  display: flex;
+  padding: 6px 10px !important;
+  color: #64748b !important; /* 默认深灰色 */
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  align-items: center;
+}
+
+/* 按钮内文字样式 */
+.btn-text {
+  margin-left: 6px;
+  font-size: 13px;
+}
+
+/* 鼠标悬停时的微交互 */
+.feedback-btn:hover {
+  background-color: #f1f5f9 !important;
+  transform: translateY(-1px);
+}
+
+/* --- 激活态样式 --- */
+
+/* 点赞激活：使用经典的蓝绿色调 */
+.feedback-btn.like.active {
+  color: #10b981 !important; /* 翠绿色，比纯蓝更显积极 */
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+}
+
+/* 踩激活：使用温和的红色调 */
+.feedback-btn.dislike.active {
+  color: #f43f5e !important;
+  background-color: #fff1f2 !important;
+  border-color: #fecdd3 !important;
+}
+
+/* 点击时的波纹/缩小反馈 */
+.feedback-btn:active {
+  transform: scale(0.92);
+}
+
+/* 激活时图标的动画 */
+.feedback-btn.active .el-icon {
+  animation: thumbs-up-pop 0.3s ease;
 }
 
 .suggested-question-list {
-  margin-top: 8px;
   display: flex;
+  margin-top: 8px;
   flex-wrap: wrap;
   gap: 6px;
 }
 
 .suggested-question-chip {
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #334155;
-  border-radius: 999px;
   padding: 4px 10px;
   font-size: 12px;
+  color: #334155;
   cursor: pointer;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
   transition: all 0.2s;
 }
 
 .suggested-question-chip:hover {
-  border-color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.08);
   color: #0369a1;
+  background: rgb(14 165 233 / 8%);
+  border-color: #0ea5e9;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -3412,9 +3598,9 @@ onBeforeUnmount(() => {
  * ═══════════════════════════════════════════════════ */
 .input-panel {
   position: relative;
-  border-top: 1px solid #e2e8f0;
-  background: #ffffff;
   padding: 14px 24px 16px;
+  background: #fff;
+  border-top: 1px solid #e2e8f0;
   flex-shrink: 0;
 }
 
@@ -3424,24 +3610,24 @@ onBeforeUnmount(() => {
 
 .uploaded-file-list {
   display: flex;
+  max-width: 960px;
+  margin-right: auto;
+  margin-bottom: 10px;
+  margin-left: auto;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 10px;
-  max-width: 960px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 .file-chip {
+  display: inline-flex;
   height: 28px;
   max-width: 320px;
   padding: 0 4px 0 10px;
-  display: inline-flex;
+  background: rgb(14 165 233 / 6%);
+  border: 1px solid rgb(14 165 233 / 20%);
+  border-radius: 14px;
   align-items: center;
   gap: 6px;
-  border-radius: 14px;
-  background: rgba(14, 165, 233, 0.06);
-  border: 1px solid rgba(14, 165, 233, 0.2);
 }
 
 .file-chip-icon {
@@ -3452,17 +3638,17 @@ onBeforeUnmount(() => {
 }
 
 .file-chip-name {
-  font-size: 12px;
-  color: #0369a1;
   overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  color: #0369a1;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
 }
 
 .file-chip-remove {
-  margin-left: 4px;
   padding: 2px;
+  margin-left: 4px;
 }
 
 .input-wrapper {
@@ -3472,15 +3658,15 @@ onBeforeUnmount(() => {
 
 /* Input textarea */
 .input-panel :deep(.el-textarea__inner) {
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  font-size: 14px;
-  resize: none;
-  transition: all 0.2s;
   padding: 12px 14px;
+  font-size: 14px;
   color: #0f172a;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
   box-shadow: none;
+  transition: all 0.2s;
+  resize: none;
 }
 
 .input-panel :deep(.el-textarea__inner::placeholder) {
@@ -3488,25 +3674,25 @@ onBeforeUnmount(() => {
 }
 
 .input-panel :deep(.el-textarea__inner:hover) {
+  background: #fff;
   border-color: #cbd5e1;
-  background: #ffffff;
 }
 
 .input-panel :deep(.el-textarea__inner:focus) {
+  background: #fff;
   border-color: #0ea5e9;
-  background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12);
+  box-shadow: 0 0 0 3px rgb(14 165 233 / 12%);
 }
 
 .input-actions {
-  margin-top: 10px;
   display: flex;
+  max-width: 960px;
+  margin-top: 10px;
+  margin-right: auto;
+  margin-left: auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  max-width: 960px;
-  margin-left: auto;
-  margin-right: auto;
 }
 
 .input-actions-left {
@@ -3519,8 +3705,8 @@ onBeforeUnmount(() => {
 
 .input-actions-left :deep(.el-button) {
   margin-left: 0;
-  color: #64748b;
   font-size: 13px;
+  color: #64748b;
 }
 
 .input-actions-left :deep(.el-button + .el-button) {
@@ -3528,8 +3714,8 @@ onBeforeUnmount(() => {
 }
 
 .input-actions-left :deep(.el-button.is-text:not(.is-disabled):hover) {
-  background: rgba(14, 165, 233, 0.08);
   color: #0ea5e9;
+  background: rgb(14 165 233 / 8%);
 }
 
 .input-actions-right {
@@ -3539,30 +3725,10 @@ onBeforeUnmount(() => {
 }
 
 .input-hint-text {
+  font-family: 'SF Mono', Monaco, Menlo, monospace;
   font-size: 11px;
-  color: #cbd5e1;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
   letter-spacing: 0.02em;
-}
-
-@media (max-width: 960px) {
-  .input-hint-text {
-    display: none;
-  }
-  .input-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .input-actions-left {
-    justify-content: flex-start;
-  }
-  .input-actions-right {
-    width: 100%;
-    justify-content: flex-end;
-  }
-  .send-btn {
-    width: 100%;
-  }
+  color: #cbd5e1;
 }
 
 .input-actions :deep(.el-icon) {
@@ -3576,33 +3742,33 @@ onBeforeUnmount(() => {
 /* Send button - 对齐登录页主按钮 */
 .send-btn,
 .input-actions :deep(.el-button--primary) {
+  position: relative;
+  padding: 8px 24px !important;
+  overflow: hidden;
+  font-weight: 600 !important;
+  letter-spacing: 0.05em;
+  color: #f0f9ff !important;
   background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%) !important;
   background-size: 200% 200% !important;
   border: none !important;
   border-radius: 8px !important;
-  padding: 8px 24px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.05em;
-  color: #f0f9ff !important;
   box-shadow:
-    0 4px 12px rgba(14, 165, 233, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+    0 4px 12px rgb(14 165 233 / 30%),
+    inset 0 1px 0 rgb(255 255 255 / 20%) !important;
   transition: all 0.2s ease !important;
-  position: relative;
-  overflow: hidden;
 }
 
 .stop-btn {
-  border-radius: 8px !important;
   padding: 8px 18px !important;
   font-weight: 600 !important;
+  border-radius: 8px !important;
 }
 
 .input-actions :deep(.el-button--primary:hover:not(.is-disabled)) {
   transform: translateY(-1px);
   box-shadow:
-    0 6px 18px rgba(14, 165, 233, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+    0 6px 18px rgb(14 165 233 / 40%),
+    inset 0 1px 0 rgb(255 255 255 / 30%) !important;
 }
 
 .input-actions :deep(.el-button--primary.is-disabled) {
@@ -3615,43 +3781,12 @@ onBeforeUnmount(() => {
  * ═══════════════════════════════════════════════════ */
 .tip-text {
   padding: 24px 12px;
-  text-align: center;
   font-size: 12px;
   color: #94a3b8;
+  text-align: center;
 }
 
 /* ═══════════════════════════════════════════════════
- * Keyframes
+ * Page Shell
  * ═══════════════════════════════════════════════════ */
-@keyframes orbit {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes breathe {
-  0%,
-  100% {
-    transform: scale(0.85);
-    opacity: 0.92;
-  }
-  50% {
-    transform: scale(1.05);
-    opacity: 1;
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 </style>
