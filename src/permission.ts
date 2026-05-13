@@ -1,4 +1,4 @@
-﻿import type { Router } from 'vue-router'
+import type { Router } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { setStaticToken } from '@/api/frontend-api'
 import { usePermissionStoreWithOut } from '@/store/modules/permission'
@@ -46,7 +46,7 @@ export function setupAuthGuard(router: Router): void {
         routes.forEach((route) => {
           const routeName = typeof route.name === 'string' ? route.name : ''
           if (routeName && !router.hasRoute(routeName)) {
-            router.addRoute(route)
+            router.addRoute(route as Parameters<typeof router.addRoute>[0])
             permissionStore.addDynamicRouteName(routeName)
           }
         })

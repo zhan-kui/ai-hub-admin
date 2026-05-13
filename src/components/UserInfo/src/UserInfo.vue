@@ -24,7 +24,7 @@ const prefixCls = getPrefixCls('user-info')
 const { t } = useI18n()
 
 const loginOut = () => {
-  userStore.logoutConfirm()
+  userStore.logout()
 }
 
 const dialogVisible = ref<boolean>(false)

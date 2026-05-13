@@ -6,7 +6,13 @@ import cssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker'
 import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker'
 import tsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker'
 
-self.MonacoEnvironment = {
+const monacoGlobal = self as typeof globalThis & {
+  MonacoEnvironment?: {
+    getWorker: (_: string, label: string) => Worker
+  }
+}
+
+monacoGlobal.MonacoEnvironment = {
   getWorker(_, label) {
     if (label === 'json') {
       return new jsonWorker()
@@ -26,12 +32,12 @@ self.MonacoEnvironment = {
 
 export function useMonacoEditor(language: string = 'javascript') {
   // 编辑器示例
-  let monacoEditor: monaco.editor.IStandaloneCodeEditor | null = null
+  let monacoEditor: any = null
   // 目标元素
   const monacoEditorRef = ref<HTMLElement>()
 
   // 创建实例
-  function createEditor(editorOption: monaco.editor.IStandaloneEditorConstructionOptions = {}) {
+  function createEditor(editorOption: Record<string, any> = {}) {
     if (!monacoEditorRef.value) return
     monacoEditor = monaco.editor.create(monacoEditorRef.value, {
       // 初始模型
@@ -83,12 +89,12 @@ export function useMonacoEditor(language: string = 'javascript') {
   }
 
   // 配置更新
-  function updateOptions(opt: monaco.editor.IStandaloneEditorConstructionOptions) {
+  function updateOptions(opt: Record<string, any>) {
     monacoEditor?.updateOptions(opt)
   }
 
   // 获取配置
-  function getOption(name: monaco.editor.EditorOption) {
+  function getOption(name: any) {
     return monacoEditor?.getOption(name)
   }
 

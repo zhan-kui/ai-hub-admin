@@ -6,7 +6,6 @@ import { Close, Delete, Microphone, Paperclip, Plus, Refresh } from '@element-pl
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
-import { CaretTop, CaretBottom } from '@element-plus/icons-vue'
 import {
   appApi,
   chatApi,
@@ -648,11 +647,6 @@ function getFeedbackValue(message: ChatMessage): FeedbackRating | undefined {
 function getSuggestedQuestions(message: ChatMessage): string[] {
   if (!message.backendMessageId) return []
   return suggestedByMessageId.value[message.backendMessageId] || []
-}
-
-function isSuggestedLoading(message: ChatMessage): boolean {
-  if (!message.backendMessageId) return false
-  return Boolean(suggestedLoadingByMessageId.value[message.backendMessageId])
 }
 
 function collectStringList(value: unknown): string[] {

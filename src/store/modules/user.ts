@@ -1,4 +1,4 @@
-﻿import { defineStore } from 'pinia'
+import { defineStore } from 'pinia'
 import { store } from '../index'
 import { authApi, setStaticToken, userApi, type UserInfoVO } from '@/api/frontend-api'
 

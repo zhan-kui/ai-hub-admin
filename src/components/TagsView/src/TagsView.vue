@@ -27,7 +27,8 @@ const { closeAll, closeLeft, closeRight, closeOther, closeCurrent, refreshPage }
 
 const permissionStore = usePermissionStore()
 
-const routers = computed(() => permissionStore.getRouters)
+const routers = computed(() => permissionStore.getRoutes)
+const firstRoute = computed(() => permissionStore.getRoutes[0])
 
 const tagsViewStore = useTagsViewStore()
 
@@ -82,14 +83,16 @@ const toLastView = () => {
     push(latestView)
   } else {
     if (
-      unref(currentRoute).path === permissionStore.getAddRouters[0].path ||
-      unref(currentRoute).path === permissionStore.getAddRouters[0].redirect
+      unref(currentRoute).path === firstRoute.value?.path ||
+      unref(currentRoute).path === firstRoute.value?.redirect
     ) {
       addTags()
       return
     }
     // You can set another route
-    push(permissionStore.getAddRouters[0].path)
+    if (firstRoute.value?.path) {
+      push(firstRoute.value.path)
+    }
   }
 }
 

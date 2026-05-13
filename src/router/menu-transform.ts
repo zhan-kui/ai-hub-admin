@@ -1,4 +1,4 @@
-﻿import type { RouteRecordRaw } from 'vue-router'
+import type { RouteRecordRaw } from 'vue-router'
 import type { MenuVO } from '@/api/frontend-api'
 
 const modules = import.meta.glob([
@@ -81,7 +81,7 @@ function resolveView(
   return hasChildren ? ParentView : PlaceholderView
 }
 
-function convertMenuToRoute(menu: MenuVO, parentAbsPath = ''): RouteRecordRaw | null {
+function convertMenuToRoute(menu: MenuVO, parentAbsPath = ''): AppRouteRecordRaw | null {
   if (menu.menuType === 'BUTTON') {
     return null
   }
@@ -94,9 +94,9 @@ function convertMenuToRoute(menu: MenuVO, parentAbsPath = ''): RouteRecordRaw | 
 
   const children = (menu.children || [])
     .map((child) => convertMenuToRoute(child, absPath))
-    .filter((route): route is RouteRecordRaw => Boolean(route))
+    .filter((route): route is AppRouteRecordRaw => Boolean(route))
 
-  const route: RouteRecordRaw = {
+  const route: AppRouteRecordRaw = {
     path: routePath,
     name: `menu-${menu.id}`,
     component: resolveView(menu.component, children.length > 0),
@@ -121,8 +121,8 @@ function convertMenuToRoute(menu: MenuVO, parentAbsPath = ''): RouteRecordRaw | 
   return route
 }
 
-export function buildAsyncRoutes(menuTree: MenuVO[]): RouteRecordRaw[] {
+export function buildAsyncRoutes(menuTree: MenuVO[]): AppRouteRecordRaw[] {
   return menuTree
     .map((menu) => convertMenuToRoute(menu))
-    .filter((route): route is RouteRecordRaw => Boolean(route))
+    .filter((route): route is AppRouteRecordRaw => Boolean(route))
 }

@@ -32,7 +32,7 @@ export default defineComponent({
     const permissionStore = usePermissionStore()
 
     const menuRouters = computed(() => {
-      const routers = permissionStore.getRouters
+      const routers = permissionStore.getRoutes
       return filterBreadcrumb(routers)
     })
 

@@ -35,7 +35,7 @@ export default defineComponent({
 
     const permissionStore = usePermissionStore()
 
-    const routers = computed(() => permissionStore.getRouters)
+    const routers = computed(() => permissionStore.getRoutes)
 
     const tabRouters = computed(() => unref(routers).filter((v) => !v?.meta?.hidden))
 

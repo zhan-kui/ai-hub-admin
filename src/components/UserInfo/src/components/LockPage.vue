@@ -9,8 +9,9 @@ import { useI18n } from '@/hooks/web/useI18n'
 import { useNow } from '@/hooks/web/useNow'
 import { useDesign } from '@/hooks/web/useDesign'
 import { Icon } from '@/components/Icon'
-import { loginOutApi } from '@/api/login'
+import { usePermissionStore } from '@/store/modules/permission'
 import { useTagsViewStore } from '@/store/modules/tagsView'
+import { useUserStore } from '@/store/modules/user'
 
 const tagsViewStore = useTagsViewStore()
 
@@ -27,12 +28,14 @@ const { getPrefixCls } = useDesign()
 const prefixCls = getPrefixCls('lock-page')
 
 const lockStore = useLockStore()
+const permissionStore = usePermissionStore()
+const userStore = useUserStore()
 
 const { hour, month, minute, meridiem, year, day, week } = useNow(true)
 
 const { t } = useI18n()
 
-// 解锁
+// 瑙ｉ攣
 async function unLock() {
   if (!password.value) {
     return
@@ -47,16 +50,15 @@ async function unLock() {
   }
 }
 
-// 返回登录
+// 杩斿洖鐧诲綍
 async function goLogin() {
-  const res = await loginOutApi().catch(() => {})
-  if (res) {
-    clear()
-    tagsViewStore.delAllViews()
-    resetRouter() // 重置静态路由表
-    lockStore.resetLockInfo()
-    replace('/login')
-  }
+  await userStore.logout()
+  clear()
+  tagsViewStore.delAllViews()
+  permissionStore.resetRoutesState()
+  resetRouter()
+  lockStore.resetLockInfo()
+  replace('/login')
 }
 
 const passwordInputRef = ref<ComponentRef<typeof ElInput>>()
