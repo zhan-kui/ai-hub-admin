@@ -1,4 +1,9 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios'
+import type {
+  CreateFromTemplateRequest,
+  CreateFromTemplateResponse,
+  TemplateMeta
+} from '@/views/app/orchestrator/types'
 
 /**
  * 閸欘垶鈧俺绻冮崜宥囶伂閻滎垰顣ㄩ崣姗€鍣虹憰鍡欐磰
@@ -1224,6 +1229,32 @@ export const systemApi = {
   }
 }
 
+// === 流程编排相关 ===
+export type {
+  CreateFromTemplateRequest,
+  CreateFromTemplateResponse,
+  TemplateMeta
+} from '@/views/app/orchestrator/types'
+
+export const orchestrationApi = {
+  /** 拿可用模板列表 */
+  listTemplates(config?: AxiosRequestConfig) {
+    return unwrap<TemplateMeta[]>(apiClient.get('/dify/app/templates', config))
+  },
+
+  /** 拿单个模板详情(第一版可暂不调用,留接口位) */
+  getTemplate(code: string, config?: AxiosRequestConfig) {
+    return unwrap<TemplateMeta>(apiClient.get(`/dify/app/templates/${code}`, config))
+  },
+
+  /** 从模板创建应用 */
+  createFromTemplate(payload: CreateFromTemplateRequest, config?: AxiosRequestConfig) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.post('/dify/app/create-from-template', payload, config)
+    )
+  }
+}
+
 export const api = {
   auth: authApi,
   user: userApi,
@@ -1237,7 +1268,8 @@ export const api = {
   knowledge: knowledgeApi,
   file: fileApi,
   agent: agentApi,
-  system: systemApi
+  system: systemApi,
+  orchestration: orchestrationApi
 }
 
 export default api

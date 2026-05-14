@@ -1,10 +1,13 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { useRouter } from 'vue-router'
 import { ContentWrap } from '@/components/ContentWrap'
 import { appApi, type AppConfigVO, type CreateAppRequest } from '@/api/frontend-api'
 
 type AppRow = AppConfigVO & Record<string, any>
+
+const router = useRouter()
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -209,6 +212,10 @@ async function showParameters(row: AppRow) {
   }
 }
 
+function goToOrchestrator() {
+  router.push('/apps/orchestrator/create')
+}
+
 onMounted(() => {
   void loadApps()
 })
@@ -225,6 +232,7 @@ onMounted(() => {
       />
       <div class="toolbar-actions">
         <el-button @click="loadApps">刷新</el-button>
+        <el-button type="primary" plain @click="goToOrchestrator">从模板创建</el-button>
         <el-button type="primary" @click="openCreate">新建应用</el-button>
       </div>
     </div>
@@ -364,15 +372,15 @@ onMounted(() => {
 }
 
 .json-view {
+  min-height: 320px;
+  padding: 12px;
   margin: 0;
-  white-space: pre-wrap;
-  word-break: break-all;
   font-size: 12px;
   line-height: 1.6;
-  background: #0f172a;
   color: #dbeafe;
+  word-break: break-all;
+  white-space: pre-wrap;
+  background: #0f172a;
   border-radius: 8px;
-  padding: 12px;
-  min-height: 320px;
 }
 </style>

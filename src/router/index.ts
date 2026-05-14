@@ -1,4 +1,4 @@
-﻿import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
+import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import { usePermissionStoreWithOut } from '@/store/modules/permission'
 
 export const ROOT_LAYOUT_NAME = 'RootLayout'
@@ -28,6 +28,11 @@ const staticRoutes: RouteRecordRaw[] = [
     path: '/agent-chat',
     component: () => import('@/views/ai/agent/AgentChat.vue'),
     meta: { hidden: true, requiresAuth: true }
+  },
+  {
+    path: '/apps/orchestrator/create',
+    component: () => import('@/views/app/orchestrator/index.vue'),
+    meta: { hidden: true, requiresAuth: true, title: '从模板创建应用' }
   },
   {
     path: '/',
