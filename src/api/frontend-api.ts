@@ -4,6 +4,7 @@ import type {
   CreateFromTemplateResponse,
   TemplateMeta
 } from '@/views/app/orchestrator/types'
+import type { CanvasFlowPayload } from '@/views/app/orchestrator/canvas/types'
 
 /**
  * 閸欘垶鈧俺绻冮崜宥囶伂閻滎垰顣ㄩ崣姗€鍣虹憰鍡欐磰
@@ -1235,6 +1236,7 @@ export type {
   CreateFromTemplateResponse,
   TemplateMeta
 } from '@/views/app/orchestrator/types'
+export type { CanvasFlowPayload } from '@/views/app/orchestrator/canvas/types'
 
 export const orchestrationApi = {
   /** 拿可用模板列表 */
@@ -1251,6 +1253,13 @@ export const orchestrationApi = {
   createFromTemplate(payload: CreateFromTemplateRequest, config?: AxiosRequestConfig) {
     return unwrap<CreateFromTemplateResponse>(
       apiClient.post('/dify/app/create-from-template', payload, config)
+    )
+  },
+
+  /** 从自由画布创建应用 */
+  createFromCanvas(payload: CanvasFlowPayload, config?: AxiosRequestConfig) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.post('/dify/app/create-from-canvas', payload, config)
     )
   }
 }

@@ -212,8 +212,12 @@ async function showParameters(row: AppRow) {
   }
 }
 
-function goToOrchestrator() {
-  router.push('/apps/orchestrator/create')
+function goToTemplateCreate() {
+  router.push('/apps/orchestrator/create?mode=template')
+}
+
+function goToCanvasCreate() {
+  router.push('/apps/orchestrator/create?mode=blank')
 }
 
 onMounted(() => {
@@ -232,7 +236,8 @@ onMounted(() => {
       />
       <div class="toolbar-actions">
         <el-button @click="loadApps">刷新</el-button>
-        <el-button type="primary" plain @click="goToOrchestrator">从模板创建</el-button>
+        <el-button type="primary" plain @click="goToTemplateCreate">从模板创建</el-button>
+        <el-button type="primary" plain @click="goToCanvasCreate">从空白编排</el-button>
         <el-button type="primary" @click="openCreate">新建应用</el-button>
       </div>
     </div>
