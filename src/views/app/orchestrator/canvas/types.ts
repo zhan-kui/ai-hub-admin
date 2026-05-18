@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@vue-flow/core'
 
-export type CanvasNodeType = 'start' | 'llm' | 'if-else' | 'answer'
+export type CanvasNodeType = 'start' | 'llm' | 'if-else' | 'knowledge-retrieval' | 'answer'
 
 export interface CanvasAppMeta {
   name: string
@@ -53,13 +53,31 @@ export interface IfCase {
 export interface IfElseNodeData extends BaseNodeData {
   nodeType: 'if-else'
   cases: IfCase[]
+  elseEnabled: boolean
+  elseLabel?: string
+}
+
+export interface KnowledgeRetrievalNodeData extends BaseNodeData {
+  nodeType: 'knowledge-retrieval'
+  datasetIds: string[]
+  retrievalMode: 'multiple'
+  topK: number
+  rerankingEnable: boolean
+  rerankingMode: 'reranking_model'
 }
 
 export interface AnswerNodeData extends BaseNodeData {
   nodeType: 'answer'
+  answerMode: 'auto' | 'static'
+  answerText?: string
 }
 
-export type CanvasNodeData = StartNodeData | LlmNodeData | IfElseNodeData | AnswerNodeData
+export type CanvasNodeData =
+  | StartNodeData
+  | LlmNodeData
+  | IfElseNodeData
+  | KnowledgeRetrievalNodeData
+  | AnswerNodeData
 
 export type CanvasGraphNode = Node<CanvasNodeData> & { selected?: boolean }
 

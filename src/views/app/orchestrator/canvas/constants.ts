@@ -12,6 +12,7 @@ export const NODE_DIMENSIONS = {
   start: { width: 242, height: 72 },
   llm: { width: 242, height: 87 },
   'if-else': { width: 242, height: 171 },
+  'knowledge-retrieval': { width: 242, height: 89 },
   answer: { width: 242, height: 102 }
 } as const
 

@@ -1,5 +1,12 @@
 import { computed, type Ref } from 'vue'
-import type { CanvasAppMeta, CanvasGraphEdge, CanvasGraphNode, IfElseNodeData } from './types'
+import type {
+  AnswerNodeData,
+  CanvasAppMeta,
+  CanvasGraphEdge,
+  CanvasGraphNode,
+  IfElseNodeData,
+  KnowledgeRetrievalNodeData
+} from './types'
 import { MAX_IF_CASES, MAX_NODES } from './constants'
 import { needCaseValue } from './utils'
 
@@ -118,8 +125,13 @@ function validateFlow(
       if (outgoers.length > 1) errors.push('start 节点最多 1 条出线')
       for (const edge of outgoers) {
         const targetType = nodeMap.get(edge.target)?.data?.nodeType
-        if (targetType !== 'llm' && targetType !== 'if-else') {
-          errors.push('start 节点只能连接 llm 或 if-else')
+        if (
+          targetType !== 'llm' &&
+          targetType !== 'if-else' &&
+          targetType !== 'knowledge-retrieval' &&
+          targetType !== 'answer'
+        ) {
+          errors.push('start 节点出线目标不合法')
         }
       }
       continue
@@ -140,7 +152,12 @@ function validateFlow(
       if (outgoers.length > 1) errors.push(`LLM 节点「${nodeData.title}」最多 1 条出线`)
       for (const edge of outgoers) {
         const targetType = nodeMap.get(edge.target)?.data?.nodeType
-        if (targetType !== 'llm' && targetType !== 'if-else' && targetType !== 'answer') {
+        if (
+          targetType !== 'llm' &&
+          targetType !== 'if-else' &&
+          targetType !== 'knowledge-retrieval' &&
+          targetType !== 'answer'
+        ) {
           errors.push(`LLM 节点「${nodeData.title}」的出线目标不合法`)
         }
       }
@@ -183,20 +200,35 @@ function validateFlow(
       }
 
       const caseOutCount: Record<string, number> = {}
+      let elseOutCount = 0
+      const elseEnabled = ifData.elseEnabled !== false
       for (const edge of outgoers) {
         if (!edge.sourceHandle) {
           errors.push(`if 节点「${ifData.title}」出线必须带 sourceCaseId`)
           continue
         }
 
-        if (!caseIdSet.has(edge.sourceHandle)) {
-          errors.push(`if 节点「${ifData.title}」出线 sourceCaseId 无效`)
+        const targetType = nodeMap.get(edge.target)?.data?.nodeType
+        if (
+          targetType !== 'llm' &&
+          targetType !== 'knowledge-retrieval' &&
+          targetType !== 'answer'
+        ) {
+          errors.push(`if 节点「${ifData.title}」出线目标不合法`)
+        }
+
+        if (edge.sourceHandle === 'false') {
+          if (!elseEnabled) {
+            errors.push(`if 节点「${ifData.title}」未启用 else 分支，不应存在 false 出线`)
+            continue
+          }
+          elseOutCount += 1
           continue
         }
 
-        const targetType = nodeMap.get(edge.target)?.data?.nodeType
-        if (targetType === 'answer') {
-          errors.push(`if 节点「${ifData.title}」不能直接连接 answer`)
+        if (!caseIdSet.has(edge.sourceHandle)) {
+          errors.push(`if 节点「${ifData.title}」出线 sourceCaseId 无效`)
+          continue
         }
 
         caseOutCount[edge.sourceHandle] = (caseOutCount[edge.sourceHandle] || 0) + 1
@@ -208,10 +240,46 @@ function validateFlow(
         if (outCount > 1)
           errors.push(`if 节点「${ifData.title}」分支「${item.label}」最多 1 条出线`)
       }
+
+      if (elseEnabled && elseOutCount < 1) {
+        errors.push(`if 节点「${ifData.title}」缺少 else(false) 分支出线`)
+      }
+      if (elseOutCount > 1) {
+        errors.push(`if 节点「${ifData.title}」else(false) 分支最多 1 条出线`)
+      }
+      continue
+    }
+
+    if (nodeData.nodeType === 'knowledge-retrieval') {
+      const knowledgeData = nodeData as KnowledgeRetrievalNodeData
+      if (!knowledgeData.datasetIds?.length) {
+        errors.push(`知识检索节点「${knowledgeData.title}」必须配置 datasetIds`)
+      }
+      if (incomers.length !== 1) {
+        errors.push(`知识检索节点「${knowledgeData.title}」必须有且只有 1 条入线`)
+      }
+      if (outgoers.length !== 1) {
+        errors.push(`知识检索节点「${knowledgeData.title}」必须有且只有 1 条出线`)
+      }
+
+      if (incomers.length === 1) {
+        const sourceType = nodeMap.get(incomers[0].source)?.data?.nodeType
+        if (sourceType !== 'start' && sourceType !== 'llm' && sourceType !== 'if-else') {
+          errors.push(`知识检索节点「${knowledgeData.title}」上游类型不合法`)
+        }
+      }
+
+      for (const edge of outgoers) {
+        const targetType = nodeMap.get(edge.target)?.data?.nodeType
+        if (targetType !== 'llm') {
+          errors.push(`知识检索节点「${knowledgeData.title}」下游必须是 LLM`)
+        }
+      }
       continue
     }
 
     if (nodeData.nodeType === 'answer') {
+      const answerData = nodeData as AnswerNodeData
       if (outgoers.length > 0) errors.push(`answer 节点「${nodeData.title}」不能有出线`)
       if (incomers.length !== 1)
         errors.push(`answer 节点「${nodeData.title}」必须有且只有 1 条入线`)
@@ -220,8 +288,20 @@ function validateFlow(
         const sourceType = firstIncomer
           ? nodeMap.get(firstIncomer.source)?.data?.nodeType
           : undefined
-        if (sourceType !== 'start' && sourceType !== 'llm') {
-          errors.push(`answer 节点「${nodeData.title}」上游只能是 start 或 llm`)
+        const answerMode = answerData.answerMode || 'auto'
+        if (sourceType === 'knowledge-retrieval') {
+          errors.push(`answer 节点「${nodeData.title}」上游不能是 knowledge-retrieval`)
+        }
+        if (sourceType !== 'start' && sourceType !== 'llm' && sourceType !== 'if-else') {
+          errors.push(`answer 节点「${nodeData.title}」上游只能是 start、llm 或 if-else`)
+        }
+        if (sourceType === 'if-else') {
+          if (answerMode !== 'static') {
+            errors.push(`answer 节点「${nodeData.title}」连接 if-else 时必须使用 static 模式`)
+          }
+          if (!answerData.answerText?.trim()) {
+            errors.push(`answer 节点「${nodeData.title}」连接 if-else 时必须填写静态回复内容`)
+          }
         }
       }
     }

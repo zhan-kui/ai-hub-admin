@@ -17,6 +17,7 @@ import Toolbar from './components/Toolbar.vue'
 import LlmInspector from './components/inspectors/LlmInspector.vue'
 import IfElseInspector from './components/inspectors/IfElseInspector.vue'
 import AnswerInspector from './components/inspectors/AnswerInspector.vue'
+import KnowledgeInspector from './components/inspectors/KnowledgeInspector.vue'
 import { DEFAULT_ICON, DEFAULT_ICON_BG, MAX_NODES } from './constants'
 import { buildCanvasFlowPayload } from './payload-builder'
 import { useCanvasState } from './useCanvasState'
@@ -27,6 +28,7 @@ import type {
   CanvasAppMeta,
   CanvasNodeType,
   IfElseNodeData,
+  KnowledgeRetrievalNodeData,
   LlmNodeData
 } from './types'
 import { genEdgeId, isDuplicateEdge } from './utils'
@@ -60,10 +62,21 @@ const editingIfData = computed<IfElseNodeData | null>(() => {
     return editingNode.value.data as IfElseNodeData
   return null
 })
+const editingKnowledgeData = computed<KnowledgeRetrievalNodeData | null>(() => {
+  if (editingNode.value?.data?.nodeType === 'knowledge-retrieval')
+    return editingNode.value.data as KnowledgeRetrievalNodeData
+  return null
+})
 const editingAnswerData = computed<AnswerNodeData | null>(() => {
   if (editingNode.value?.data?.nodeType === 'answer')
     return editingNode.value.data as AnswerNodeData
   return null
+})
+const isEditingAnswerConnectedFromIfElse = computed(() => {
+  if (!editingAnswerData.value || !editingNode.value) return false
+  const incomer = edges.value.find((edge) => edge.target === editingNode.value?.id)
+  if (!incomer) return false
+  return getNodeById(incomer.source)?.data?.nodeType === 'if-else'
 })
 const selectedCount = computed(
   () =>
@@ -133,23 +146,48 @@ function canConnect(connection: Connection): boolean {
 
   if (sourceType === 'start') {
     if (sourceOutgoers.length >= 1) return false
-    if (targetType !== 'llm' && targetType !== 'if-else') return false
+    if (
+      targetType !== 'llm' &&
+      targetType !== 'if-else' &&
+      targetType !== 'knowledge-retrieval' &&
+      targetType !== 'answer'
+    ) {
+      return false
+    }
   }
 
   if (sourceType === 'llm') {
     if (sourceOutgoers.length >= 1) return false
-    if (targetType !== 'llm' && targetType !== 'if-else' && targetType !== 'answer') return false
+    if (
+      targetType !== 'llm' &&
+      targetType !== 'if-else' &&
+      targetType !== 'knowledge-retrieval' &&
+      targetType !== 'answer'
+    ) {
+      return false
+    }
   }
 
   if (sourceType === 'if-else') {
-    if (targetType === 'answer') return false
-
     const caseId = connection.sourceHandle
     const ifData = sourceNode.data as IfElseNodeData
-    if (!caseId || !ifData.cases.some((item) => item.id === caseId)) return false
+    const caseIdSet = new Set(ifData.cases.map((item) => item.id))
+    const elseEnabled = ifData.elseEnabled !== false
+    const isElseHandle = caseId === 'false'
+    const isCaseHandle = !!caseId && caseIdSet.has(caseId)
+    if (!caseId || (!isCaseHandle && !(elseEnabled && isElseHandle))) return false
 
     const caseOutCount = sourceOutgoers.filter((edge) => edge.sourceHandle === caseId).length
     if (caseOutCount >= 1) return false
+
+    if (targetType !== 'llm' && targetType !== 'knowledge-retrieval' && targetType !== 'answer') {
+      return false
+    }
+  }
+
+  if (sourceType === 'knowledge-retrieval') {
+    if (sourceOutgoers.length >= 1) return false
+    if (targetType !== 'llm') return false
   }
 
   if (sourceType !== 'if-else' && connection.sourceHandle && connection.sourceHandle !== 'source') {
@@ -163,9 +201,14 @@ function canConnect(connection: Connection): boolean {
     if (sourceType !== 'start' && sourceType !== 'llm') return false
   }
 
+  if (targetType === 'knowledge-retrieval') {
+    if (targetIncomers.length >= 1) return false
+    if (sourceType !== 'start' && sourceType !== 'llm' && sourceType !== 'if-else') return false
+  }
+
   if (targetType === 'answer') {
     if (targetIncomers.length >= 1) return false
-    if (sourceType !== 'start' && sourceType !== 'llm') return false
+    if (sourceType !== 'start' && sourceType !== 'llm' && sourceType !== 'if-else') return false
   }
 
   if (hasCycleWithConnection(sourceId, targetId)) return false
@@ -251,11 +294,31 @@ function handleConnect(connection: Connection) {
   } else {
     edges.value.push(newEdge)
   }
+
+  if (sourceNode.data?.nodeType === 'if-else' && targetNode.data?.nodeType === 'answer') {
+    const nextData = {
+      ...(targetNode.data as AnswerNodeData),
+      answerMode: 'static' as const,
+      answerText: (targetNode.data as AnswerNodeData).answerText || ''
+    }
+    updateNodeData(targetNode.id, nextData)
+  }
+}
+
+function isAnswerConnectedFromIfElse(nodeId: string): boolean {
+  const incomer = edges.value.find((edge) => edge.target === nodeId)
+  if (!incomer) return false
+  return getNodeById(incomer.source)?.data?.nodeType === 'if-else'
 }
 
 function handleNodeClick(nodeId: string) {
   const node = getNodeById(nodeId)
   if (!node || !node.data || node.data.nodeType === 'start') return
+
+  if (node.data.nodeType === 'answer' && isAnswerConnectedFromIfElse(nodeId)) {
+    const nextData = { ...(node.data as AnswerNodeData), answerMode: 'static' as const }
+    updateNodeData(nodeId, nextData)
+  }
 
   editingNodeId.value = nodeId
   inspectorVisible.value = true
@@ -266,20 +329,28 @@ function handlePaneClick() {
   inspectorVisible.value = false
 }
 
-function applyEditedNodeData(nextData: LlmNodeData | IfElseNodeData | AnswerNodeData) {
+function applyEditedNodeData(
+  nextData: LlmNodeData | IfElseNodeData | KnowledgeRetrievalNodeData | AnswerNodeData
+) {
   if (!editingNode.value) return
+
+  if (nextData.nodeType === 'answer' && isAnswerConnectedFromIfElse(editingNode.value.id)) {
+    nextData.answerMode = 'static'
+  }
 
   updateNodeData(editingNode.value.id, nextData)
 
   if (nextData.nodeType === 'if-else') {
     const caseIdSet = new Set(nextData.cases.map((item) => item.id))
+    const elseEnabled = nextData.elseEnabled !== false
 
     // 找到需要保留的线
     const edgesToKeep = edges.value.filter(
       (edge) =>
         edge.source !== editingNode.value?.id ||
         !edge.sourceHandle ||
-        caseIdSet.has(edge.sourceHandle)
+        caseIdSet.has(edge.sourceHandle) ||
+        (elseEnabled && edge.sourceHandle === 'false')
     )
 
     // 清空原数组并塞入新数据，保持 edges 数组代理绝对不变！
@@ -499,9 +570,15 @@ onMounted(async () => {
         :node-data="editingIfData"
         @save="applyEditedNodeData"
       />
+      <KnowledgeInspector
+        v-else-if="editingKnowledgeData"
+        :node-data="editingKnowledgeData"
+        @save="applyEditedNodeData"
+      />
       <AnswerInspector
         v-else-if="editingAnswerData"
         :node-data="editingAnswerData"
+        :force-static="isEditingAnswerConnectedFromIfElse"
         @save="applyEditedNodeData"
       />
     </el-drawer>

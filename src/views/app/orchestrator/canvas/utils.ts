@@ -64,7 +64,26 @@ export function createNode(
       data: {
         nodeType: 'if-else',
         title: '条件分支',
-        cases: [createDefaultCase()]
+        cases: [createDefaultCase()],
+        elseEnabled: true,
+        elseLabel: '否则'
+      }
+    }
+  }
+
+  if (nodeType === 'knowledge-retrieval') {
+    return {
+      id,
+      type: 'knowledge-retrieval',
+      position,
+      data: {
+        nodeType: 'knowledge-retrieval',
+        title: '知识检索',
+        datasetIds: [],
+        retrievalMode: 'multiple',
+        topK: 4,
+        rerankingEnable: false,
+        rerankingMode: 'reranking_model'
       }
     }
   }
@@ -75,7 +94,9 @@ export function createNode(
     position,
     data: {
       nodeType: 'answer',
-      title: '直接回复'
+      title: '直接回复',
+      answerMode: 'auto',
+      answerText: ''
     }
   }
 }

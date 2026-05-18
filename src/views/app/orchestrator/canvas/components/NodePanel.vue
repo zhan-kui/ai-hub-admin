@@ -38,6 +38,18 @@ function handleClickAdd(nodeType: Exclude<CanvasNodeType, 'start'>) {
       <el-button size="small" @click="handleClickAdd('if-else')">添加</el-button>
     </div>
 
+    <div
+      class="node-item"
+      draggable="true"
+      @dragstart="handleDragStart($event, 'knowledge-retrieval')"
+    >
+      <div class="node-meta">
+        <div class="node-name">知识检索节点</div>
+        <div class="node-desc">从知识库检索相关内容</div>
+      </div>
+      <el-button size="small" @click="handleClickAdd('knowledge-retrieval')">添加</el-button>
+    </div>
+
     <div class="node-item" draggable="true" @dragstart="handleDragStart($event, 'answer')">
       <div class="node-meta">
         <div class="node-name">answer 节点</div>

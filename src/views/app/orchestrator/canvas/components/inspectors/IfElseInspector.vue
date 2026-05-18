@@ -21,6 +21,8 @@ watch(
   () => props.nodeData,
   (value) => {
     Object.assign(formData, cloneData(value))
+    if (typeof formData.elseEnabled !== 'boolean') formData.elseEnabled = true
+    if (!formData.elseLabel) formData.elseLabel = '否则'
   },
   { deep: true, immediate: true }
 )
@@ -114,6 +116,16 @@ function cloneData<T>(value: T): T {
         </el-col>
       </el-row>
     </div>
+
+    <el-divider />
+
+    <el-form-item label="启用 else 分支">
+      <el-switch v-model="formData.elseEnabled" />
+    </el-form-item>
+
+    <el-form-item v-if="formData.elseEnabled" label="else 分支名称">
+      <el-input v-model="formData.elseLabel" maxlength="30" placeholder="否则" />
+    </el-form-item>
   </el-form>
 
   <div class="footer">

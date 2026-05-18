@@ -20,9 +20,21 @@ const props = defineProps<NodeProps<IfElseNodeData>>()
           <span class="case-label">{{ item.label || `分支 ${index + 1}` }}</span>
           <span class="case-condition">{{ item.operator }} {{ item.value }}</span>
         </div>
-        <!--直接把 :style 删掉即可，删掉错误的绝对计算高度，依靠父级的 relative 自动居中对齐当前行。不然那个连线跑到if节点下面去了 -->
         <Handle
           :id="item.id"
+          type="source"
+          :position="Position.Right"
+          class="big-handle case-handle"
+        />
+      </div>
+
+      <div v-if="props.data.elseEnabled" class="case-row else-row">
+        <div class="case-text">
+          <span class="case-label">{{ props.data.elseLabel || '否则' }}</span>
+          <span class="case-condition">以上条件都不满足</span>
+        </div>
+        <Handle
+          id="false"
           type="source"
           :position="Position.Right"
           class="big-handle case-handle"

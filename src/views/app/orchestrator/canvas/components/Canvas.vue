@@ -22,6 +22,7 @@ import '@vue-flow/minimap/dist/style.css'
 import StartNode from './nodes/StartNode.vue'
 import LlmNode from './nodes/LlmNode.vue'
 import IfElseNode from './nodes/IfElseNode.vue'
+import KnowledgeNode from './nodes/KnowledgeNode.vue'
 import AnswerNode from './nodes/AnswerNode.vue'
 import type { CanvasGraphEdge, CanvasGraphNode, CanvasNodeType } from '../types'
 
@@ -59,6 +60,7 @@ const nodeTypes = {
   start: StartNode,
   llm: LlmNode,
   'if-else': IfElseNode,
+  'knowledge-retrieval': KnowledgeNode,
   answer: AnswerNode
 }
 
@@ -139,6 +141,9 @@ function handleEdgeClick(event: EdgeMouseEvent | any, maybeEdge?: Edge) {
       </template>
       <template #node-if-else="nodeProps">
         <IfElseNode v-bind="nodeProps" />
+      </template>
+      <template #node-knowledge-retrieval="nodeProps">
+        <KnowledgeNode v-bind="nodeProps" />
       </template>
       <template #node-answer="nodeProps">
         <AnswerNode v-bind="nodeProps" />
