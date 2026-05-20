@@ -13,6 +13,7 @@ import { needCaseValue } from './utils'
 interface ValidationResult {
   valid: boolean
   errors: string[]
+  warnings: string[]
 }
 
 function findPathCycle(nodes: CanvasGraphNode[], edges: CanvasGraphEdge[]): boolean {
@@ -49,6 +50,7 @@ function validateFlow(
   edges: CanvasGraphEdge[]
 ): ValidationResult {
   const errors: string[] = []
+  const warnings: string[] = []
   const nodeMap = new Map<string, CanvasGraphNode>()
 
   if (!appMeta.name?.trim()) {
@@ -150,6 +152,21 @@ function validateFlow(
       if (incomers.length < 1) errors.push(`LLM 节点「${nodeData.title}」必须有入线`)
       if (incomers.length > 1) errors.push(`LLM 节点「${nodeData.title}」最多 1 条入线`)
       if (outgoers.length > 1) errors.push(`LLM 节点「${nodeData.title}」最多 1 条出线`)
+
+      if (incomers.length === 1) {
+        const upstreamType = nodeMap.get(incomers[0].source)?.data?.nodeType
+        if (upstreamType === 'knowledge-retrieval') {
+          const systemPrompt = nodeData.systemPrompt || ''
+          const userPromptTemplate = nodeData.userPromptTemplate || ''
+          const combinedPrompt = `${systemPrompt}\n${userPromptTemplate}`
+          if (!combinedPrompt.includes('{{#context#}}')) {
+            warnings.push(
+              `LLM 节点「${nodeData.title}」上游接了知识库，但提示词中未引用 {{#context#}}，模型将无法看到检索结果`
+            )
+          }
+        }
+      }
+
       for (const edge of outgoers) {
         const targetType = nodeMap.get(edge.target)?.data?.nodeType
         if (
@@ -335,7 +352,8 @@ function validateFlow(
 
   return {
     valid: errors.length === 0,
-    errors
+    errors,
+    warnings
   }
 }
 
@@ -346,10 +364,12 @@ export function useValidation(
 ) {
   const validation = computed(() => validateFlow(appMeta.value, nodes.value, edges.value))
   const errors = computed(() => validation.value.errors)
+  const warnings = computed(() => validation.value.warnings)
   const isValid = computed(() => validation.value.valid)
 
   return {
     errors,
+    warnings,
     isValid,
     validateNow: () => validateFlow(appMeta.value, nodes.value, edges.value)
   }

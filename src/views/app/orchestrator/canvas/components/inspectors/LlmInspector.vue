@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { MODEL_OPTIONS } from '../../constants'
-import type { LlmNodeData } from '../../types'
+import type { CanvasGraphEdge, CanvasGraphNode, LlmNodeData } from '../../types'
+import VariablePicker from '../../variables/VariablePicker.vue'
+import { useVariableSources } from '../../variables/useVariableSources'
 
 interface Props {
+  nodeId: string
   nodeData: LlmNodeData
+  nodes: CanvasGraphNode[]
+  edges: CanvasGraphEdge[]
 }
 
 const props = defineProps<Props>()
@@ -14,6 +19,10 @@ const emit = defineEmits<{
 }>()
 
 const formData = reactive<LlmNodeData>(cloneData(props.nodeData))
+const currentNodeId = computed(() => props.nodeId)
+const graphNodes = computed(() => props.nodes)
+const graphEdges = computed(() => props.edges)
+const variableSources = useVariableSources(currentNodeId, graphNodes, graphEdges)
 
 watch(
   () => props.nodeData,
@@ -46,22 +55,26 @@ function cloneData<T>(value: T): T {
     </el-form-item>
 
     <el-form-item label="系统提示词" required>
-      <el-input
-        v-model="formData.systemPrompt"
-        type="textarea"
+      <VariablePicker
+        :model-value="formData.systemPrompt"
+        :sources="variableSources"
         :rows="6"
-        maxlength="4000"
-        show-word-limit
+        :maxlength="4000"
+        :show-word-limit="true"
+        placeholder="输入 / 可插入变量，例如：根据知识库回答问题，知识库内容：/"
+        @update:model-value="(value) => (formData.systemPrompt = value)"
       />
+      <div class="form-tip">提示：输入 <code>/</code> 可插入变量（知识库、用户输入等）</div>
     </el-form-item>
 
     <el-form-item label="用户提示词模板">
-      <el-input
-        v-model="formData.userPromptTemplate"
-        type="textarea"
+      <VariablePicker
+        :model-value="formData.userPromptTemplate || ''"
+        :sources="variableSources"
         :rows="3"
-        maxlength="2000"
+        :maxlength="2000"
         placeholder="{{#sys.query#}}"
+        @update:model-value="(value) => (formData.userPromptTemplate = value)"
       />
     </el-form-item>
 
@@ -128,6 +141,13 @@ function cloneData<T>(value: T): T {
 </template>
 
 <style scoped lang="less">
+.form-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-text-color-secondary);
+}
+
 .footer {
   display: flex;
   margin-top: 8px;

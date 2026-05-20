@@ -15,8 +15,8 @@ export interface ModelOption {
 
 export const MODEL_OPTIONS: ModelOption[] = [
   {
-    label: 'Qwen 3.5 35B-A3B',
-    value: 'qwen3.5-35b-a3b',
+    label: 'Qwen3.5-35B-A3B',
+    value: 'Qwen3.5-35B-A3B',
     provider: 'langgenius/openai_api_compatible/openai_api_compatible'
   },
   // TODO: 以下两个是占位,请按你 Dify 平台实际挂的模型校对 provider 字符串后再启用

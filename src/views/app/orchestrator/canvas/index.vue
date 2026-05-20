@@ -45,7 +45,7 @@ const appMeta = ref<CanvasAppMeta>({
 
 const { nodes, edges, viewport, addNode, updateNodeData, setGraph, setViewport, resetGraph } =
   useCanvasState()
-const { errors, validateNow } = useValidation(appMeta, nodes, edges)
+const { errors, warnings, validateNow } = useValidation(appMeta, nodes, edges)
 const { loadDraft, saveDraft, clearDraft, createDebouncedSaver } = useDraftStorage()
 
 const submitting = ref(false)
@@ -441,6 +441,19 @@ async function handleCreate() {
     return
   }
 
+  if (result.warnings.length) {
+    const warningMessage = `检测到以下问题：\n- ${result.warnings.join('\n- ')}\n\n是否仍要继续提交？`
+    try {
+      await ElMessageBox.confirm(warningMessage, '流程警告', {
+        type: 'warning',
+        confirmButtonText: '继续提交',
+        cancelButtonText: '取消'
+      })
+    } catch {
+      return
+    }
+  }
+
   const payload = buildCanvasFlowPayload({
     appMeta: {
       name: appMeta.value.name.trim(),
@@ -555,6 +568,19 @@ onMounted(async () => {
             <li v-for="(item, idx) in errors" :key="`${idx}-${item}`">{{ item }}</li>
           </ul>
         </el-alert>
+
+        <el-alert
+          v-if="warnings.length"
+          title="流程警告"
+          type="info"
+          :closable="false"
+          show-icon
+          class="error-panel"
+        >
+          <ul class="error-list">
+            <li v-for="(item, idx) in warnings" :key="`${idx}-${item}`">{{ item }}</li>
+          </ul>
+        </el-alert>
       </div>
     </div>
 
@@ -564,7 +590,14 @@ onMounted(async () => {
       :title="`节点配置 - ${editingNode.data?.title || ''}`"
       size="560px"
     >
-      <LlmInspector v-if="editingLlmData" :node-data="editingLlmData" @save="applyEditedNodeData" />
+      <LlmInspector
+        v-if="editingLlmData"
+        :node-id="editingNodeId"
+        :node-data="editingLlmData"
+        :nodes="nodes"
+        :edges="edges"
+        @save="applyEditedNodeData"
+      />
       <IfElseInspector
         v-else-if="editingIfData"
         :node-data="editingIfData"
