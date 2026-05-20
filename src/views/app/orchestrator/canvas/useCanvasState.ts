@@ -66,6 +66,8 @@ export function useCanvasState() {
 function decorateNode(node: CanvasGraphNode): CanvasGraphNode {
   const nodeType = node.data?.nodeType
   if (nodeType === 'start') {
+    const startData = node.data as { variables?: unknown[] }
+    if (!Array.isArray(startData.variables)) startData.variables = []
     return {
       ...node,
       type: 'start',

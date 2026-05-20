@@ -92,6 +92,17 @@ function validateFlow(
   }
 
   const startNodes = nodes.filter((node) => node.data?.nodeType === 'start')
+  const startVarMap = new Map<string, Set<string>>()
+  for (const startNode of startNodes) {
+    const list = (startNode.data as { variables?: Array<{ variable?: string }> } | undefined)
+      ?.variables
+    const keys = new Set<string>()
+    for (const item of list || []) {
+      if (item.variable) keys.add(item.variable)
+    }
+    startVarMap.set(startNode.id, keys)
+  }
+
   if (startNodes.length !== 1) {
     errors.push('必须有且只有 1 个 start 节点')
   }
@@ -123,6 +134,30 @@ function validateFlow(
     }
 
     if (nodeData.nodeType === 'start') {
+      const startData = nodeData as { variables?: Array<{ variable?: string; label?: string }> }
+      const variableList = startData.variables || []
+      const variableSet = new Set<string>()
+      for (const item of variableList) {
+        const key = (item.variable || '').trim()
+        if (!key) {
+          errors.push('start 节点存在空的变量 Key')
+          continue
+        }
+        if (!/^[a-zA-Z_][a-zA-Z0-9_]{0,29}$/.test(key)) {
+          errors.push(`start 节点变量 Key「${key}」格式不合法`)
+        }
+        if (key === 'query' || key === 'files') {
+          errors.push(`start 节点变量 Key「${key}」与系统变量冲突`)
+        }
+        if (variableSet.has(key)) {
+          errors.push(`start 节点变量 Key「${key}」重复`)
+        }
+        variableSet.add(key)
+        if (!item.label?.trim()) {
+          errors.push(`start 节点变量「${key}」显示名不能为空`)
+        }
+      }
+
       if (incomers.length > 0) errors.push('start 节点不能有入线')
       if (outgoers.length > 1) errors.push('start 节点最多 1 条出线')
       for (const edge of outgoers) {
@@ -195,13 +230,14 @@ function validateFlow(
         }
       }
 
-      if (!ifData.cases?.length) errors.push(`if 节点「${ifData.title}」至少需要 1 个分支`)
-      if (ifData.cases.length > MAX_IF_CASES) {
+      const cases = ifData.cases || []
+      if (!cases.length) errors.push(`if 节点「${ifData.title}」至少需要 1 个分支`)
+      if (cases.length > MAX_IF_CASES) {
         errors.push(`if 节点「${ifData.title}」分支数量不能超过 ${MAX_IF_CASES}`)
       }
 
       const caseIdSet = new Set<string>()
-      for (const item of ifData.cases) {
+      for (const item of cases) {
         if (caseIdSet.has(item.id)) {
           errors.push(`if 节点「${ifData.title}」分支 ID 重复`)
         }
@@ -211,8 +247,39 @@ function validateFlow(
           errors.push(`if 节点「${ifData.title}」存在空的分支名称`)
         }
 
-        if (needCaseValue(item.operator) && !item.value?.trim()) {
-          errors.push(`if 节点「${ifData.title}」分支「${item.label || item.id}」未填写判断值`)
+        const conditions = item.conditions || []
+        if (!conditions.length) {
+          errors.push(`if 节点「${ifData.title}」分支「${item.label || item.id}」缺少条件`)
+          continue
+        }
+
+        for (const condition of conditions) {
+          if (needCaseValue(condition.operator) && !condition.value?.trim()) {
+            errors.push(`if 节点「${ifData.title}」分支「${item.label || item.id}」未填写判断值`)
+          }
+
+          if (
+            !condition.variableSelector ||
+            !Array.isArray(condition.variableSelector) ||
+            condition.variableSelector.length !== 2
+          ) {
+            warnings.push(
+              `if 节点「${ifData.title}」分支「${item.label || item.id}」条件缺少变量，已按 sys.query 处理`
+            )
+            continue
+          }
+
+          const [nodeId, variableKey] = condition.variableSelector as [string, string]
+          if (nodeId === 'sys' && (variableKey === 'query' || variableKey === 'files')) {
+            continue
+          }
+
+          const vars = startVarMap.get(nodeId)
+          if (!vars || !vars.has(variableKey)) {
+            warnings.push(
+              `if 节点「${ifData.title}」分支「${item.label || item.id}」引用变量已失效，建议重新选择`
+            )
+          }
         }
       }
 
@@ -251,7 +318,7 @@ function validateFlow(
         caseOutCount[edge.sourceHandle] = (caseOutCount[edge.sourceHandle] || 0) + 1
       }
 
-      for (const item of ifData.cases) {
+      for (const item of cases) {
         const outCount = caseOutCount[item.id] || 0
         if (outCount < 1) errors.push(`if 节点「${ifData.title}」分支「${item.label}」缺少出线`)
         if (outCount > 1)

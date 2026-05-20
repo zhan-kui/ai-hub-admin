@@ -22,7 +22,10 @@ const formData = reactive<LlmNodeData>(cloneData(props.nodeData))
 const currentNodeId = computed(() => props.nodeId)
 const graphNodes = computed(() => props.nodes)
 const graphEdges = computed(() => props.edges)
-const variableSources = useVariableSources(currentNodeId, graphNodes, graphEdges)
+const systemScene = computed(() => 'system' as const)
+const userScene = computed(() => 'user' as const)
+const systemSources = useVariableSources(systemScene, currentNodeId, graphNodes, graphEdges)
+const userSources = useVariableSources(userScene, currentNodeId, graphNodes, graphEdges)
 
 watch(
   () => props.nodeData,
@@ -57,25 +60,31 @@ function cloneData<T>(value: T): T {
     <el-form-item label="系统提示词" required>
       <VariablePicker
         :model-value="formData.systemPrompt"
-        :sources="variableSources"
+        :sources="systemSources"
         :rows="6"
         :maxlength="4000"
         :show-word-limit="true"
-        placeholder="输入 / 可插入变量，例如：根据知识库回答问题，知识库内容：/"
+        placeholder="输入 / 可插入变量，例如：根据用户输入回答问题"
+        aria-label="系统提示词"
         @update:model-value="(value) => (formData.systemPrompt = value)"
       />
-      <div class="form-tip">提示：输入 <code>/</code> 可插入变量（知识库、用户输入等）</div>
+      <div class="form-tip">提示：输入 <code>/</code> 可插入变量。系统提示词不支持文件变量。</div>
     </el-form-item>
 
     <el-form-item label="用户提示词模板">
       <VariablePicker
         :model-value="formData.userPromptTemplate || ''"
-        :sources="variableSources"
+        :sources="userSources"
         :rows="3"
         :maxlength="2000"
-        placeholder="{{#sys.query#}}"
+        placeholder="例如：/用户输入"
+        aria-label="用户提示词"
         @update:model-value="(value) => (formData.userPromptTemplate = value)"
       />
+      <div class="form-tip">
+        说明：Dify 的 user prompt 仅支持 <code>sys.query</code> 和 <code>sys.files</code>
+        引用，自定义文本与其他变量在此处不会生效。
+      </div>
     </el-form-item>
 
     <el-row :gutter="12">
@@ -92,7 +101,7 @@ function cloneData<T>(value: T): T {
         </el-form-item>
       </el-col>
       <el-col :span="10">
-        <el-form-item label="Temperature">
+        <el-form-item label="温度">
           <el-input-number
             v-model="formData.model.temperature"
             :min="0"
@@ -123,12 +132,12 @@ function cloneData<T>(value: T): T {
 
     <el-row :gutter="12">
       <el-col :span="12">
-        <el-form-item label="启用记忆">
+        <el-form-item label="记忆窗口配置">
           <el-switch v-model="formData.memory.enabled" />
         </el-form-item>
       </el-col>
       <el-col :span="12">
-        <el-form-item label="记忆窗口">
+        <el-form-item label="记忆窗口数量">
           <el-input-number v-model="formData.memory.windowSize" :min="1" :max="50" class="w-full" />
         </el-form-item>
       </el-col>

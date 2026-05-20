@@ -14,6 +14,7 @@ import AppMetaBar from './components/AppMetaBar.vue'
 import Canvas from './components/Canvas.vue'
 import NodePanel from './components/NodePanel.vue'
 import Toolbar from './components/Toolbar.vue'
+import StartInspector from './components/inspectors/StartInspector.vue'
 import LlmInspector from './components/inspectors/LlmInspector.vue'
 import IfElseInspector from './components/inspectors/IfElseInspector.vue'
 import AnswerInspector from './components/inspectors/AnswerInspector.vue'
@@ -29,7 +30,8 @@ import type {
   CanvasNodeType,
   IfElseNodeData,
   KnowledgeRetrievalNodeData,
-  LlmNodeData
+  LlmNodeData,
+  StartNodeData
 } from './types'
 import { genEdgeId, isDuplicateEdge } from './utils'
 
@@ -53,6 +55,10 @@ const inspectorVisible = ref(false)
 const editingNodeId = ref('')
 
 const editingNode = computed(() => nodes.value.find((node) => node.id === editingNodeId.value))
+const editingStartData = computed<StartNodeData | null>(() => {
+  if (editingNode.value?.data?.nodeType === 'start') return editingNode.value.data as StartNodeData
+  return null
+})
 const editingLlmData = computed<LlmNodeData | null>(() => {
   if (editingNode.value?.data?.nodeType === 'llm') return editingNode.value.data as LlmNodeData
   return null
@@ -313,7 +319,7 @@ function isAnswerConnectedFromIfElse(nodeId: string): boolean {
 
 function handleNodeClick(nodeId: string) {
   const node = getNodeById(nodeId)
-  if (!node || !node.data || node.data.nodeType === 'start') return
+  if (!node || !node.data) return
 
   if (node.data.nodeType === 'answer' && isAnswerConnectedFromIfElse(nodeId)) {
     const nextData = { ...(node.data as AnswerNodeData), answerMode: 'static' as const }
@@ -330,7 +336,12 @@ function handlePaneClick() {
 }
 
 function applyEditedNodeData(
-  nextData: LlmNodeData | IfElseNodeData | KnowledgeRetrievalNodeData | AnswerNodeData
+  nextData:
+    | StartNodeData
+    | LlmNodeData
+    | IfElseNodeData
+    | KnowledgeRetrievalNodeData
+    | AnswerNodeData
 ) {
   if (!editingNode.value) return
 
@@ -590,8 +601,13 @@ onMounted(async () => {
       :title="`节点配置 - ${editingNode.data?.title || ''}`"
       size="560px"
     >
+      <StartInspector
+        v-if="editingStartData"
+        :node-data="editingStartData"
+        @save="applyEditedNodeData"
+      />
       <LlmInspector
-        v-if="editingLlmData"
+        v-else-if="editingLlmData"
         :node-id="editingNodeId"
         :node-data="editingLlmData"
         :nodes="nodes"
@@ -600,7 +616,10 @@ onMounted(async () => {
       />
       <IfElseInspector
         v-else-if="editingIfData"
+        :node-id="editingNodeId"
         :node-data="editingIfData"
+        :nodes="nodes"
+        :edges="edges"
         @save="applyEditedNodeData"
       />
       <KnowledgeInspector

@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { IF_OPERATORS, MAX_IF_CASES } from '../../constants'
-import type { IfElseNodeData } from '../../types'
+import type { CanvasGraphEdge, CanvasGraphNode, IfCondition, IfElseNodeData } from '../../types'
 import { genCaseId, needCaseValue } from '../../utils'
+import { useVariableSources } from '../../variables/useVariableSources'
+import type { VariableSource } from '../../variables/types'
 
 interface Props {
+  nodeId: string
   nodeData: IfElseNodeData
+  nodes: CanvasGraphNode[]
+  edges: CanvasGraphEdge[]
 }
 
 const props = defineProps<Props>()
@@ -16,6 +21,11 @@ const emit = defineEmits<{
 }>()
 
 const formData = reactive<IfElseNodeData>(cloneData(props.nodeData))
+const scene = computed(() => 'if-value' as const)
+const currentNodeId = computed(() => props.nodeId)
+const graphNodes = computed(() => props.nodes)
+const graphEdges = computed(() => props.edges)
+const sources = useVariableSources(scene, currentNodeId, graphNodes, graphEdges)
 
 watch(
   () => props.nodeData,
@@ -23,9 +33,70 @@ watch(
     Object.assign(formData, cloneData(value))
     if (typeof formData.elseEnabled !== 'boolean') formData.elseEnabled = true
     if (!formData.elseLabel) formData.elseLabel = '否则'
+    normalizeCases(formData)
   },
   { deep: true, immediate: true }
 )
+
+const groupedSources = computed(() => {
+  const groups: Record<string, VariableSource[]> = {}
+  for (const item of sources.value) {
+    if (!groups[item.group]) groups[item.group] = []
+    groups[item.group].push(item)
+  }
+  return groups
+})
+
+const groupLabelMap: Record<string, string> = {
+  context: '上下文',
+  system: '系统变量',
+  start_var: '用户输入变量',
+  node_output: '节点输出'
+}
+
+function selectorKey(selector: [string, string]) {
+  return `${selector[0]}.${selector[1]}`
+}
+
+function keyToSelector(key: string): [string, string] {
+  if (key === 'sys.query') return ['sys', 'query']
+  if (key === 'sys.files') return ['sys', 'files']
+  const idx = key.lastIndexOf('.')
+  if (idx <= 0 || idx >= key.length - 1) return ['sys', 'query']
+  return [key.slice(0, idx), key.slice(idx + 1)]
+}
+
+function createDefaultCondition(): IfCondition {
+  return {
+    id: genCaseId(),
+    variableSelector: ['sys', 'query'],
+    operator: 'contains',
+    value: ''
+  }
+}
+
+function normalizeCases(target: IfElseNodeData) {
+  for (const item of target.cases) {
+    if (!Array.isArray(item.conditions) || item.conditions.length === 0) {
+      const legacy = item as unknown as { operator?: IfCondition['operator']; value?: string }
+      item.conditions = [
+        {
+          id: genCaseId(),
+          variableSelector: ['sys', 'query'],
+          operator: legacy.operator || 'contains',
+          value: legacy.value || ''
+        }
+      ]
+    }
+    item.logicalOperator = 'and'
+    for (const condition of item.conditions) {
+      if (!condition.id) condition.id = genCaseId()
+      if (!Array.isArray(condition.variableSelector) || condition.variableSelector.length !== 2) {
+        condition.variableSelector = ['sys', 'query']
+      }
+    }
+  }
+}
 
 function addCase() {
   if (formData.cases.length >= MAX_IF_CASES) {
@@ -35,8 +106,8 @@ function addCase() {
   formData.cases.push({
     id: genCaseId(),
     label: `分支 ${formData.cases.length + 1}`,
-    operator: 'contains',
-    value: ''
+    conditions: [createDefaultCondition()],
+    logicalOperator: 'and'
   })
 }
 
@@ -44,7 +115,25 @@ function removeCase(index: number) {
   formData.cases.splice(index, 1)
 }
 
+function updateConditionVar(caseIndex: number, condIndex: number, key: string) {
+  formData.cases[caseIndex].conditions[condIndex].variableSelector = keyToSelector(key)
+}
+
+function updateConditionOperator(
+  caseIndex: number,
+  condIndex: number,
+  operator: IfCondition['operator']
+) {
+  const condition = formData.cases[caseIndex].conditions[condIndex]
+  condition.operator = operator
+  if (!needCaseValue(operator)) {
+    condition.value = ''
+  }
+}
+
 function handleSave() {
+  normalizeCases(formData)
+
   if (!formData.cases.length) {
     ElMessage.warning('至少保留 1 个分支')
     return
@@ -62,9 +151,11 @@ function handleSave() {
     }
     caseIdSet.add(item.id)
 
-    if (needCaseValue(item.operator) && !item.value?.trim()) {
-      ElMessage.warning(`分支「${item.label}」未填写判断值`)
-      return
+    for (const condition of item.conditions) {
+      if (needCaseValue(condition.operator) && !condition.value?.trim()) {
+        ElMessage.warning(`分支「${item.label}」未填写判断值`)
+        return
+      }
     }
   }
 
@@ -88,33 +179,54 @@ function cloneData<T>(value: T): T {
     </div>
 
     <div v-for="(item, index) in formData.cases" :key="item.id" class="case-item">
-      <el-row :gutter="8">
-        <el-col :span="7">
-          <el-input v-model="item.label" placeholder="分支名称" maxlength="30" />
-        </el-col>
-        <el-col :span="7">
-          <el-select v-model="item.operator">
+      <div class="case-title">
+        <el-input v-model="item.label" placeholder="分支名称" maxlength="30" />
+        <el-button text type="danger" @click="removeCase(index)">删除</el-button>
+      </div>
+
+      <div v-for="(condition, condIdx) in item.conditions" :key="condition.id" class="cond-row">
+        <el-select
+          class="cond-var"
+          :model-value="selectorKey(condition.variableSelector)"
+          placeholder="选择变量"
+          @update:model-value="(value) => updateConditionVar(index, condIdx, value)"
+        >
+          <el-option-group
+            v-for="(options, group) in groupedSources"
+            :key="group"
+            :label="groupLabelMap[group] || group"
+          >
             <el-option
-              v-for="op in IF_OPERATORS"
-              :key="op.value"
-              :label="op.label"
-              :value="op.value"
+              v-for="option in options"
+              :key="option.key"
+              :label="option.label"
+              :value="option.key"
             />
-          </el-select>
-        </el-col>
-        <el-col :span="8">
-          <el-input
-            v-if="needCaseValue(item.operator)"
-            v-model="item.value"
-            placeholder="判断值"
-            maxlength="100"
+          </el-option-group>
+        </el-select>
+
+        <el-select
+          class="cond-op"
+          :model-value="condition.operator"
+          @update:model-value="(value) => updateConditionOperator(index, condIdx, value)"
+        >
+          <el-option
+            v-for="op in IF_OPERATORS"
+            :key="op.value"
+            :label="op.label"
+            :value="op.value"
           />
-          <span v-else class="empty-value">无需填写判断值</span>
-        </el-col>
-        <el-col :span="2">
-          <el-button text type="danger" @click="removeCase(index)">删</el-button>
-        </el-col>
-      </el-row>
+        </el-select>
+
+        <el-input
+          v-if="needCaseValue(condition.operator)"
+          v-model="condition.value"
+          class="cond-value"
+          placeholder="判断值"
+          maxlength="100"
+        />
+        <span v-else class="empty-value">无需填写判断值</span>
+      </div>
     </div>
 
     <el-divider />
@@ -151,7 +263,33 @@ function cloneData<T>(value: T): T {
   border-radius: 8px;
 }
 
+.case-title {
+  display: flex;
+  margin-bottom: 8px;
+  gap: 8px;
+  align-items: center;
+}
+
+.cond-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cond-var {
+  width: 38%;
+}
+
+.cond-op {
+  width: 24%;
+}
+
+.cond-value {
+  width: 38%;
+}
+
 .empty-value {
+  width: 38%;
   font-size: 12px;
   line-height: 32px;
   color: var(--el-text-color-secondary);

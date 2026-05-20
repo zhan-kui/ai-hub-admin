@@ -14,8 +14,21 @@ export interface BaseNodeData {
   title: string
 }
 
+export interface StartVariable {
+  id: string
+  variable: string
+  label: string
+  type: 'paragraph'
+  required: boolean
+  default?: string
+  hint?: string
+  placeholder?: string
+  maxLength?: number
+}
+
 export interface StartNodeData extends BaseNodeData {
   nodeType: 'start'
+  variables: StartVariable[]
 }
 
 export interface LlmNodeData extends BaseNodeData {
@@ -35,9 +48,9 @@ export interface LlmNodeData extends BaseNodeData {
   }
 }
 
-export interface IfCase {
+export interface IfCondition {
   id: string
-  label: string
+  variableSelector: [string, string]
   operator:
     | 'contains'
     | 'not contains'
@@ -48,6 +61,13 @@ export interface IfCase {
     | 'start with'
     | 'end with'
   value?: string
+}
+
+export interface IfCase {
+  id: string
+  label: string
+  conditions: IfCondition[]
+  logicalOperator: 'and'
 }
 
 export interface IfElseNodeData extends BaseNodeData {

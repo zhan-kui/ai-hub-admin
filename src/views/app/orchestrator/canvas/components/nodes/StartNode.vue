@@ -11,7 +11,12 @@ const props = defineProps<NodeProps<StartNodeData>>()
       <span class="node-badge">START</span>
       <span class="node-title">{{ props.data.title || '用户输入' }}</span>
     </div>
-    <div class="node-body">用户输入</div>
+    <div class="node-body">
+      <div class="node-line">用户输入</div>
+      <div class="node-line muted"
+        >系统变量 + 自定义 {{ props.data.variables?.length || 0 }} 个</div
+      >
+    </div>
     <Handle id="source" type="source" :position="Position.Right" class="big-handle handle-source" />
   </div>
 </template>
@@ -62,7 +67,16 @@ const props = defineProps<NodeProps<StartNodeData>>()
 }
 
 .node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node-line {
   font-size: 12px;
+}
+
+.node-line.muted {
   color: var(--el-text-color-secondary);
 }
 

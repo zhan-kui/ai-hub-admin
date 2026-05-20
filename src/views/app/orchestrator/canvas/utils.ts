@@ -1,4 +1,4 @@
-import type { CanvasGraphEdge, CanvasGraphNode, CanvasNodeType, IfCase } from './types'
+import type { CanvasGraphEdge, CanvasGraphNode, CanvasNodeType, IfCase, IfCondition } from './types'
 import { DEFAULT_MODEL } from './constants'
 
 export function genNodeId(type: string): string {
@@ -16,7 +16,7 @@ export function genCaseId(): string {
   return `case_${Date.now()}_${rand}`
 }
 
-export function needCaseValue(operator: IfCase['operator']): boolean {
+export function needCaseValue(operator: IfCondition['operator']): boolean {
   return operator !== 'empty' && operator !== 'not empty'
 }
 
@@ -24,8 +24,15 @@ export function createDefaultCase(): IfCase {
   return {
     id: genCaseId(),
     label: '分支 1',
-    operator: 'contains',
-    value: ''
+    conditions: [
+      {
+        id: genCaseId(),
+        variableSelector: ['sys', 'query'],
+        operator: 'contains',
+        value: ''
+      }
+    ],
+    logicalOperator: 'and'
   }
 }
 
@@ -108,7 +115,8 @@ export function createStartNode(): CanvasGraphNode {
     position: { x: 80, y: 240 },
     data: {
       nodeType: 'start',
-      title: '用户输入'
+      title: '用户输入',
+      variables: []
     }
   }
 }

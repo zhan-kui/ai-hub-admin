@@ -18,7 +18,10 @@ const props = defineProps<NodeProps<IfElseNodeData>>()
       <div v-for="(item, index) in props.data.cases" :key="item.id" class="case-row">
         <div class="case-text">
           <span class="case-label">{{ item.label || `分支 ${index + 1}` }}</span>
-          <span class="case-condition">{{ item.operator }} {{ item.value }}</span>
+          <span class="case-condition">
+            {{ item.conditions?.[0]?.operator || 'contains' }}
+            {{ item.conditions?.[0]?.value || '' }}
+          </span>
         </div>
         <Handle
           :id="item.id"

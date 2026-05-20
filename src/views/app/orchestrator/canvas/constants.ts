@@ -1,4 +1,4 @@
-import type { IfCase, LlmNodeData } from './types'
+import type { IfCondition, LlmNodeData } from './types'
 
 export const MAX_NODES = 20
 export const MAX_IF_CASES = 5
@@ -6,7 +6,7 @@ export const MAX_IF_CASES = 5
 export const DEFAULT_ICON = '🤖'
 export const DEFAULT_ICON_BG = '#FFEAD5'
 
-export const DRAFT_KEY = 'aihub:orchestrator:canvas-draft:v2'
+export const DRAFT_KEY = 'aihub:orchestrator:canvas-draft:v3'
 
 export const NODE_DIMENSIONS = {
   start: { width: 242, height: 72 },
@@ -18,7 +18,7 @@ export const NODE_DIMENSIONS = {
 
 export const DEFAULT_MODEL: Required<LlmNodeData['model']> = {
   provider: 'langgenius/openai_api_compatible/openai_api_compatible',
-  name: 'qwen3.5-35b-a3b',
+  name: 'Qwen3.5-35B-A3B',
   temperature: 0.7,
   enableThinking: false,
   reasoningEffort: 'medium'
@@ -41,7 +41,7 @@ export interface ModelOption {
 export const MODEL_OPTIONS: ModelOption[] = [
   {
     label: 'Qwen 3.5 35B-A3B',
-    value: 'qwen3.5-35b-a3b',
+    value: 'Qwen3.5-35B-A3B',
     provider: 'langgenius/openai_api_compatible/openai_api_compatible'
   },
   {
@@ -56,7 +56,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   }
 ]
 
-export const IF_OPERATORS: Array<{ label: string; value: IfCase['operator'] }> = [
+export const IF_OPERATORS: Array<{ label: string; value: IfCondition['operator'] }> = [
   { label: '包含', value: 'contains' },
   { label: '不包含', value: 'not contains' },
   { label: '等于', value: 'is' },

@@ -4,8 +4,11 @@ import type {
   CanvasFlowNode,
   CanvasFlowPayload,
   CanvasNodeData,
+  IfCondition,
+  IfElseNodeData,
   CanvasViewport
 } from './types'
+import { genCaseId } from './utils'
 
 export interface BuildPayloadOptions {
   appMeta: CanvasFlowPayload['appMeta']
@@ -26,7 +29,7 @@ export function buildCanvasFlowPayload(options: BuildPayloadOptions): CanvasFlow
 }
 
 function toFlowNode(node: Node): CanvasFlowNode {
-  const data = node.data as CanvasNodeData
+  const data = normalizeNodeData(cloneData(node.data as CanvasNodeData))
   return {
     id: node.id,
     type: data.nodeType,
@@ -35,7 +38,7 @@ function toFlowNode(node: Node): CanvasFlowNode {
       x: node.position.x,
       y: node.position.y
     },
-    data: cloneData(data)
+    data
   }
 }
 
@@ -53,4 +56,34 @@ function toFlowEdge(edge: Edge, nodes: Node[]): CanvasFlowEdge {
 
 function cloneData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
+}
+
+function normalizeNodeData(data: CanvasNodeData): CanvasNodeData {
+  if (data.nodeType === 'if-else') {
+    const ifData = data as IfElseNodeData
+    for (const item of ifData.cases || []) {
+      if (!Array.isArray(item.conditions) || item.conditions.length === 0) {
+        const legacy = item as unknown as { operator?: IfCondition['operator']; value?: string }
+        item.conditions = [
+          {
+            id: genCaseId(),
+            variableSelector: ['sys', 'query'],
+            operator: legacy.operator || 'contains',
+            value: legacy.value || ''
+          }
+        ]
+      }
+      item.logicalOperator = 'and'
+      for (const condition of item.conditions) {
+        if (
+          !condition.variableSelector ||
+          !Array.isArray(condition.variableSelector) ||
+          condition.variableSelector.length !== 2
+        ) {
+          condition.variableSelector = ['sys', 'query']
+        }
+      }
+    }
+  }
+  return data
 }

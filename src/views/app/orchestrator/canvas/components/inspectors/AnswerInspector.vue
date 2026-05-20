@@ -72,7 +72,7 @@ function cloneData<T>(value: T): T {
     />
     <el-alert
       v-else
-      title="Answer 节点内容会根据回复模式生成。auto 模式由后端根据入线自动引用。"
+      title="Answer 节点内容会根据回复模式生成。auto 模式由后端根据入线自动引用，引用格式为 {{#<llm_id>.text#}}。"
       type="info"
       :closable="false"
       show-icon
