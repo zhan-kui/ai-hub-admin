@@ -9,6 +9,7 @@ import type {
 } from './types'
 import { MAX_IF_CASES, MAX_NODES } from './constants'
 import { needCaseValue } from './utils'
+import { inferVarType } from './variables/inferVarType'
 
 interface ValidationResult {
   valid: boolean
@@ -134,7 +135,14 @@ function validateFlow(
     }
 
     if (nodeData.nodeType === 'start') {
-      const startData = nodeData as { variables?: Array<{ variable?: string; label?: string }> }
+      const startData = nodeData as {
+        variables?: Array<{
+          variable?: string
+          label?: string
+          type?: string
+          default?: string | number
+        }>
+      }
       const variableList = startData.variables || []
       const variableSet = new Set<string>()
       for (const item of variableList) {
@@ -155,6 +163,18 @@ function validateFlow(
         variableSet.add(key)
         if (!item.label?.trim()) {
           errors.push(`start 节点变量「${key}」显示名不能为空`)
+        }
+
+        const varType = item.type === 'number' ? 'number' : 'paragraph'
+        if (varType === 'number') {
+          const defaultValue = item.default
+          if (defaultValue !== '' && defaultValue !== undefined && defaultValue !== null) {
+            const numeric =
+              typeof defaultValue === 'number' ? defaultValue : Number(String(defaultValue).trim())
+            if (!Number.isFinite(numeric)) {
+              errors.push(`start 节点变量「${key}」的默认值不是合法数字`)
+            }
+          }
         }
       }
 
@@ -237,7 +257,7 @@ function validateFlow(
       }
 
       const caseIdSet = new Set<string>()
-      for (const item of cases) {
+      for (const [caseIndex, item] of cases.entries()) {
         if (caseIdSet.has(item.id)) {
           errors.push(`if 节点「${ifData.title}」分支 ID 重复`)
         }
@@ -249,8 +269,19 @@ function validateFlow(
 
         const conditions = item.conditions || []
         if (!conditions.length) {
-          errors.push(`if 节点「${ifData.title}」分支「${item.label || item.id}」缺少条件`)
+          errors.push(`if 节点「${ifData.title}」分支 ${caseIndex + 1} 至少需要 1 个条件`)
           continue
+        }
+
+        const logicalOperator = (item as unknown as { logicalOperator?: unknown }).logicalOperator
+        if (
+          logicalOperator !== undefined &&
+          logicalOperator !== 'and' &&
+          logicalOperator !== 'or'
+        ) {
+          errors.push(
+            `if 节点「${ifData.title}」分支「${item.label || item.id}」逻辑连接符无效，仅支持 and/or`
+          )
         }
 
         for (const condition of conditions) {
@@ -279,6 +310,17 @@ function validateFlow(
             warnings.push(
               `if 节点「${ifData.title}」分支「${item.label || item.id}」引用变量已失效，建议重新选择`
             )
+            continue
+          }
+
+          const varType = inferVarType(condition.variableSelector, nodes)
+          if (varType === 'number' && needCaseValue(condition.operator)) {
+            const rawValue = (condition.value || '').trim()
+            if (!/^-?\d+(\.\d+)?$/.test(rawValue)) {
+              errors.push(
+                `if 节点「${ifData.title}」分支「${item.label || item.id}」的数字条件值不合法`
+              )
+            }
           }
         }
       }

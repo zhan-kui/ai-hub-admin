@@ -18,9 +18,9 @@ export interface StartVariable {
   id: string
   variable: string
   label: string
-  type: 'paragraph'
+  type: 'paragraph' | 'number'
   required: boolean
-  default?: string
+  default?: string | number
   hint?: string
   placeholder?: string
   maxLength?: number
@@ -56,6 +56,12 @@ export interface IfCondition {
     | 'not contains'
     | 'is'
     | 'is not'
+    | '='
+    | '≠'
+    | '>'
+    | '<'
+    | '≥'
+    | '≤'
     | 'empty'
     | 'not empty'
     | 'start with'

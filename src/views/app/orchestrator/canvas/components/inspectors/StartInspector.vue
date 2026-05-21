@@ -67,7 +67,7 @@ function openAdd() {
 
 function openEdit(index: number) {
   editingIndex.value = index
-  Object.assign(form, cloneData(variables.value[index]))
+  Object.assign(form, emptyForm(), cloneData(variables.value[index]))
   dialogVisible.value = true
 }
 
@@ -100,13 +100,18 @@ function saveVariable() {
     return
   }
 
+  const normalizedType: StartVariable['type'] = form.type === 'number' ? 'number' : 'paragraph'
   const item: StartVariable = {
     ...cloneData(form),
     id: form.id || genVarId(),
     variable: key,
     label: form.label.trim(),
-    type: 'paragraph',
-    maxLength: form.maxLength || 200000
+    type: normalizedType,
+    default:
+      normalizedType === 'number'
+        ? normalizeNumberDefault(form.default)
+        : String(form.default ?? ''),
+    maxLength: normalizedType === 'number' ? 0 : form.maxLength || 200000
   }
 
   if (editingIndex.value >= 0) {
@@ -120,6 +125,37 @@ function saveVariable() {
 function handleSave() {
   emit('save', cloneData(formData))
 }
+
+function normalizeNumberDefault(value: StartVariable['default']): number | '' {
+  if (value === '' || value === undefined || value === null) return ''
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num : ''
+}
+
+function numberDefaultModelValue(): number | undefined {
+  const normalized = normalizeNumberDefault(form.default)
+  return normalized === '' ? undefined : normalized
+}
+
+function updateNumberDefault(value: number | null | undefined) {
+  form.default = value ?? ''
+}
+
+watch(
+  () => form.type,
+  (type) => {
+    if (type === 'number') {
+      form.default = normalizeNumberDefault(form.default)
+      form.maxLength = 0
+      return
+    }
+
+    form.default = String(form.default ?? '')
+    if (!form.maxLength || form.maxLength < 1) {
+      form.maxLength = 200000
+    }
+  }
+)
 </script>
 
 <template>
@@ -144,7 +180,7 @@ function handleSave() {
         <div v-for="(item, index) in variables" :key="item.id" class="custom-var-row">
           <code class="var-key">{{ item.variable }}</code>
           <span class="var-label">{{ item.label }}</span>
-          <span class="var-type">paragraph</span>
+          <span class="var-type">{{ item.type === 'number' ? 'number' : 'paragraph' }}</span>
           <el-tag v-if="item.required" type="warning" size="small">必填</el-tag>
           <div class="row-actions">
             <el-button text @click="openEdit(index)">编辑</el-button>
@@ -170,15 +206,24 @@ function handleSave() {
         <el-input v-model="form.label" placeholder="例如: 文件类型" />
       </el-form-item>
       <el-form-item label="类型">
-        <el-select v-model="form.type" disabled>
+        <el-select v-model="form.type">
           <el-option label="多行文本" value="paragraph" />
+          <el-option label="数字" value="number" />
         </el-select>
       </el-form-item>
       <el-form-item label="是否必填">
         <el-switch v-model="form.required" />
       </el-form-item>
-      <el-form-item label="默认值">
+      <el-form-item v-if="form.type === 'paragraph'" label="默认值">
         <el-input v-model="form.default" type="textarea" :rows="2" />
+      </el-form-item>
+      <el-form-item v-else label="默认值">
+        <el-input-number
+          :model-value="numberDefaultModelValue()"
+          class="w-full"
+          controls-position="right"
+          @update:model-value="updateNumberDefault"
+        />
       </el-form-item>
       <el-form-item label="提示文字">
         <el-input v-model="form.hint" />
@@ -186,7 +231,7 @@ function handleSave() {
       <el-form-item label="占位符">
         <el-input v-model="form.placeholder" />
       </el-form-item>
-      <el-form-item label="最大长度">
+      <el-form-item v-if="form.type === 'paragraph'" label="最大长度">
         <el-input-number v-model="form.maxLength" :min="1" :max="200000" class="w-full" />
       </el-form-item>
     </el-form>

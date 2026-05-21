@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { IF_OPERATORS, MAX_IF_CASES } from '../../constants'
+import { MAX_IF_CASES } from '../../constants'
 import type { CanvasGraphEdge, CanvasGraphNode, IfCondition, IfElseNodeData } from '../../types'
 import { genCaseId, needCaseValue } from '../../utils'
+import { inferVarType, NUMBER_OPERATORS, STRING_OPERATORS } from '../../variables/inferVarType'
 import { useVariableSources } from '../../variables/useVariableSources'
 import type { VariableSource } from '../../variables/types'
 
@@ -18,6 +19,7 @@ const props = defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'save', value: IfElseNodeData): void
+  (e: 'change', value: { cases: IfElseNodeData['cases'] }): void
 }>()
 
 const formData = reactive<IfElseNodeData>(cloneData(props.nodeData))
@@ -53,6 +55,8 @@ const groupLabelMap: Record<string, string> = {
   start_var: '用户输入变量',
   node_output: '节点输出'
 }
+type CaseLogicalOperator = 'and' | 'or'
+type IfVarType = 'string' | 'number'
 
 function selectorKey(selector: [string, string]) {
   return `${selector[0]}.${selector[1]}`
@@ -75,6 +79,55 @@ function createDefaultCondition(): IfCondition {
   }
 }
 
+function operatorOptionsByType(type: IfVarType) {
+  return type === 'number' ? NUMBER_OPERATORS : STRING_OPERATORS
+}
+
+function operatorOptionsFor(condition: IfCondition) {
+  return operatorOptionsByType(varTypeFor(condition))
+}
+
+function defaultOperatorByType(type: IfVarType): IfCondition['operator'] {
+  return type === 'number' ? '=' : 'contains'
+}
+
+function varTypeFor(condition: IfCondition): IfVarType {
+  return inferVarType(condition.variableSelector, graphNodes.value)
+}
+
+function normalizeConditionOperator(condition: IfCondition) {
+  const type = varTypeFor(condition)
+  const allowed = operatorOptionsByType(type).map((item) => item.value)
+  if (!allowed.includes(condition.operator)) {
+    condition.operator = defaultOperatorByType(type)
+  }
+  if (!needCaseValue(condition.operator)) {
+    condition.value = ''
+  }
+}
+
+function numberValueForCondition(value?: string) {
+  if (!value?.trim()) return undefined
+  const num = Number(value)
+  return Number.isFinite(num) ? num : undefined
+}
+
+function normalizeLogicalOperator(value: unknown): CaseLogicalOperator {
+  return value === 'or' ? 'or' : 'and'
+}
+
+function getCaseLogicalOperator(item: IfElseNodeData['cases'][number]): CaseLogicalOperator {
+  const logicalOperator = (item as unknown as { logicalOperator?: unknown }).logicalOperator
+  return normalizeLogicalOperator(logicalOperator)
+}
+
+function setCaseLogicalOperator(
+  item: IfElseNodeData['cases'][number],
+  operator: CaseLogicalOperator
+) {
+  ;(item as unknown as { logicalOperator: CaseLogicalOperator }).logicalOperator = operator
+}
+
 function normalizeCases(target: IfElseNodeData) {
   for (const item of target.cases) {
     if (!Array.isArray(item.conditions) || item.conditions.length === 0) {
@@ -88,14 +141,20 @@ function normalizeCases(target: IfElseNodeData) {
         }
       ]
     }
-    item.logicalOperator = 'and'
+    setCaseLogicalOperator(item, getCaseLogicalOperator(item))
     for (const condition of item.conditions) {
       if (!condition.id) condition.id = genCaseId()
       if (!Array.isArray(condition.variableSelector) || condition.variableSelector.length !== 2) {
         condition.variableSelector = ['sys', 'query']
       }
+      normalizeConditionOperator(condition)
     }
   }
+}
+
+function emitCasesChange() {
+  normalizeCases(formData)
+  emit('change', { cases: cloneData(formData.cases) })
 }
 
 function addCase() {
@@ -109,14 +168,31 @@ function addCase() {
     conditions: [createDefaultCondition()],
     logicalOperator: 'and'
   })
+  emitCasesChange()
 }
 
 function removeCase(index: number) {
   formData.cases.splice(index, 1)
+  emitCasesChange()
+}
+
+function addCondition(caseIndex: number) {
+  formData.cases[caseIndex].conditions.push(createDefaultCondition())
+  emitCasesChange()
+}
+
+function removeCondition(caseIndex: number, condIndex: number) {
+  const conditions = formData.cases[caseIndex].conditions
+  if (conditions.length <= 1) return
+  conditions.splice(condIndex, 1)
+  emitCasesChange()
 }
 
 function updateConditionVar(caseIndex: number, condIndex: number, key: string) {
-  formData.cases[caseIndex].conditions[condIndex].variableSelector = keyToSelector(key)
+  const condition = formData.cases[caseIndex].conditions[condIndex]
+  condition.variableSelector = keyToSelector(key)
+  normalizeConditionOperator(condition)
+  emitCasesChange()
 }
 
 function updateConditionOperator(
@@ -129,6 +205,29 @@ function updateConditionOperator(
   if (!needCaseValue(operator)) {
     condition.value = ''
   }
+  emitCasesChange()
+}
+
+function updateConditionValue(caseIndex: number, condIndex: number, value: string) {
+  formData.cases[caseIndex].conditions[condIndex].value = value
+  emitCasesChange()
+}
+
+function updateConditionNumberValue(
+  caseIndex: number,
+  condIndex: number,
+  value: number | null | undefined
+) {
+  updateConditionValue(
+    caseIndex,
+    condIndex,
+    value === null || value === undefined ? '' : String(value)
+  )
+}
+
+function updateCaseLogicalOperator(caseIndex: number, operator: unknown) {
+  setCaseLogicalOperator(formData.cases[caseIndex], normalizeLogicalOperator(operator))
+  emitCasesChange()
 }
 
 function handleSave() {
@@ -150,6 +249,12 @@ function handleSave() {
       return
     }
     caseIdSet.add(item.id)
+    setCaseLogicalOperator(item, getCaseLogicalOperator(item))
+
+    if (!item.conditions?.length) {
+      ElMessage.warning(`分支 ${item.label || item.id} 至少需要 1 个条件`)
+      return
+    }
 
     for (const condition of item.conditions) {
       if (needCaseValue(condition.operator) && !condition.value?.trim()) {
@@ -185,6 +290,23 @@ function cloneData<T>(value: T): T {
       </div>
 
       <div v-for="(condition, condIdx) in item.conditions" :key="condition.id" class="cond-row">
+        <div class="logic-cell">
+          <el-dropdown
+            v-if="condIdx > 0"
+            trigger="click"
+            @command="(value) => updateCaseLogicalOperator(index, value)"
+          >
+            <span class="logic-chip">{{ getCaseLogicalOperator(item).toUpperCase() }}</span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="and">AND</el-dropdown-item>
+                <el-dropdown-item command="or">OR</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <span v-else class="logic-placeholder"></span>
+        </div>
+
         <el-select
           class="cond-var"
           :model-value="selectorKey(condition.variableSelector)"
@@ -211,21 +333,42 @@ function cloneData<T>(value: T): T {
           @update:model-value="(value) => updateConditionOperator(index, condIdx, value)"
         >
           <el-option
-            v-for="op in IF_OPERATORS"
+            v-for="op in operatorOptionsFor(condition)"
             :key="op.value"
             :label="op.label"
             :value="op.value"
           />
         </el-select>
 
+        <el-input-number
+          v-if="varTypeFor(condition) === 'number' && needCaseValue(condition.operator)"
+          :model-value="numberValueForCondition(condition.value)"
+          class="cond-value"
+          controls-position="right"
+          @update:model-value="(value) => updateConditionNumberValue(index, condIdx, value)"
+        />
         <el-input
-          v-if="needCaseValue(condition.operator)"
-          v-model="condition.value"
+          v-else-if="needCaseValue(condition.operator)"
+          :model-value="condition.value"
           class="cond-value"
           placeholder="判断值"
           maxlength="100"
+          @update:model-value="(value) => updateConditionValue(index, condIdx, value)"
         />
         <span v-else class="empty-value">无需填写判断值</span>
+
+        <el-button
+          text
+          type="danger"
+          :disabled="item.conditions.length === 1"
+          @click="removeCondition(index, condIdx)"
+        >
+          删除
+        </el-button>
+      </div>
+
+      <div class="cond-actions">
+        <el-button text type="primary" @click="addCondition(index)">+ 添加条件</el-button>
       </div>
     </div>
 
@@ -276,23 +419,51 @@ function cloneData<T>(value: T): T {
   align-items: center;
 }
 
+.logic-cell {
+  width: 64px;
+  flex: 0 0 64px;
+}
+
+.logic-chip {
+  display: inline-flex;
+  width: 64px;
+  height: 28px;
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  user-select: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.logic-placeholder {
+  display: inline-block;
+  width: 64px;
+  height: 28px;
+}
+
 .cond-var {
-  width: 38%;
+  width: 34%;
 }
 
 .cond-op {
-  width: 24%;
+  width: 20%;
 }
 
 .cond-value {
-  width: 38%;
+  width: 30%;
 }
 
 .empty-value {
-  width: 38%;
+  width: 30%;
   font-size: 12px;
   line-height: 32px;
   color: var(--el-text-color-secondary);
+}
+
+.cond-actions {
+  margin-top: 8px;
 }
 
 .footer {
