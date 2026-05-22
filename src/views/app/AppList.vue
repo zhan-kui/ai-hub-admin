@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { ContentWrap } from '@/components/ContentWrap'
-import { appApi, type AppConfigVO, type CreateAppRequest } from '@/api/frontend-api'
+import { appApi, type AppConfigVO, type UpdateAppBasicRequest } from '@/api/frontend-api'
 
 type AppRow = AppConfigVO & Record<string, any>
 
@@ -17,33 +17,29 @@ const keyword = ref('')
 const appList = ref<AppRow[]>([])
 
 const dialogVisible = ref(false)
-const dialogMode = ref<'create' | 'edit'>('create')
 const formRef = ref<FormInstance>()
-const detailFieldMissing = ref(false)
-
-const formData = reactive<CreateAppRequest & { id?: number }>({
+const formData = reactive<UpdateAppBasicRequest & { id?: number }>({
   appName: '',
-  appCode: '',
-  appType: '',
-  difyApiKey: '',
-  difyAppId: '',
-  difyBaseUrl: '',
   description: '',
   icon: '',
   sort: 1,
+  enabled: true,
   id: undefined
 })
 
 const formRules: FormRules = {
-  appName: [{ required: true, message: '请输入应用名称', trigger: 'blur' }],
-  appCode: [{ required: true, message: '请输入应用编码', trigger: 'blur' }],
-  appType: [{ required: true, message: '请输入应用类型', trigger: 'blur' }],
-  difyApiKey: [{ required: true, message: '请输入 Dify API Key', trigger: 'blur' }]
+  appName: [{ required: true, message: '请输入应用名称', trigger: 'blur' }]
 }
 
 const parameterDrawerVisible = ref(false)
 const parameterTitle = ref('应用参数')
 const parameterText = ref('')
+
+const statusMap: Record<string, string> = {
+  SAVED: '已保存未发布',
+  PUBLISHED: '已发布',
+  PUBLISH_FAILED: '发布失败'
+}
 
 function pickArray(payload: any): any[] {
   if (Array.isArray(payload)) return payload
@@ -57,6 +53,31 @@ function pickArray(payload: any): any[] {
     }
   }
   return []
+}
+
+function resolveSourceType(row: AppRow): 'canvas' | 'template' | undefined {
+  if (row.sourceType === 'canvas' || row.sourceType === 'template') return row.sourceType
+  if (row.templateCode === '__canvas__') return 'canvas'
+  if (row.templateCode) return 'template'
+  return undefined
+}
+
+function getPublishStatusText(status?: string): string {
+  if (!status) return '-'
+  return statusMap[status] || status
+}
+
+function getPublishStatusTagType(status?: string): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'PUBLISHED') return 'success'
+  if (status === 'SAVED') return 'warning'
+  if (status === 'PUBLISH_FAILED') return 'danger'
+  return 'info'
+}
+
+function normalizeEnabled(value: unknown): boolean {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value === 1
+  return Boolean(value)
 }
 
 async function loadApps() {
@@ -83,98 +104,52 @@ const filteredApps = computed(() => {
 function resetForm() {
   formData.id = undefined
   formData.appName = ''
-  formData.appCode = ''
-  formData.appType = ''
-  formData.difyApiKey = ''
-  formData.difyAppId = ''
-  formData.difyBaseUrl = ''
   formData.description = ''
   formData.icon = ''
   formData.sort = 1
-  detailFieldMissing.value = false
+  formData.enabled = true
 }
 
-function openCreate() {
-  dialogMode.value = 'create'
-  dialogVisible.value = true
-  resetForm()
-}
-
-async function openEdit(row: AppRow) {
-  dialogMode.value = 'edit'
+async function openBasicEdit(row: AppRow) {
   dialogVisible.value = true
   resetForm()
   formData.id = Number(row.id)
+  formData.appName = row.appName || ''
+  formData.description = row.description || ''
+  formData.icon = row.icon || ''
+  formData.sort = Number(row.sort || 1)
+  formData.enabled = normalizeEnabled(row.enabled)
 
   try {
     const detail = (await appApi.detail(Number(row.id))) as Record<string, any>
-    const missingRequiredDetailField =
-      !('difyApiKey' in detail) || !('difyAppId' in detail) || !('difyBaseUrl' in detail)
-    detailFieldMissing.value = missingRequiredDetailField
-
     formData.appName = detail.appName || row.appName || ''
-    formData.appCode = detail.appCode || row.appCode || ''
-    formData.appType = detail.appType || row.appType || ''
-    formData.difyApiKey = detail.difyApiKey || ''
-    formData.difyAppId = detail.difyAppId || ''
-    formData.difyBaseUrl = detail.difyBaseUrl || ''
     formData.description = detail.description || row.description || ''
     formData.icon = detail.icon || row.icon || ''
     formData.sort = Number(detail.sort || row.sort || 1)
-
-    if (missingRequiredDetailField) {
-      ElMessage.error(
-        '应用详情接口未返回 difyApiKey / difyAppId / difyBaseUrl，已禁止编辑保存，避免误覆盖。请先补齐后端返回字段。'
-      )
-    }
+    formData.enabled = normalizeEnabled(detail.enabled ?? row.enabled)
   } catch (error: any) {
-    formData.appName = row.appName || ''
-    formData.appCode = row.appCode || ''
-    formData.appType = row.appType || ''
-    formData.difyApiKey = ''
-    formData.difyAppId = ''
-    formData.difyBaseUrl = ''
-    formData.description = row.description || ''
-    formData.icon = row.icon || ''
-    formData.sort = Number(row.sort || 1)
-    ElMessage.warning(error?.message || '详情接口调用失败，请确认字段后再保存')
+    ElMessage.warning(error?.message || '详情接口调用失败，已使用列表数据回填')
   }
 }
 
-function toPayload(): CreateAppRequest {
+function toBasicPayload(): UpdateAppBasicRequest {
   return {
     appName: formData.appName.trim(),
-    appCode: formData.appCode.trim(),
-    appType: formData.appType.trim(),
-    difyApiKey: formData.difyApiKey.trim(),
-    difyAppId: formData.difyAppId?.trim() || undefined,
-    difyBaseUrl: formData.difyBaseUrl?.trim() || undefined,
     description: formData.description?.trim() || undefined,
     icon: formData.icon?.trim() || undefined,
-    sort: formData.sort
+    sort: Number(formData.sort || 1),
+    enabled: normalizeEnabled(formData.enabled)
   }
 }
 
-async function submitForm() {
-  if (dialogMode.value === 'edit' && detailFieldMissing.value) {
-    ElMessage.error(
-      '当前后端详情接口字段不完整，已阻止保存。请后端补齐 difyApiKey / difyAppId / difyBaseUrl 后再编辑。'
-    )
-    return
-  }
-
+async function submitBasicEdit() {
   if (!formRef.value) return
   await formRef.value.validate()
 
   submitting.value = true
   try {
-    if (dialogMode.value === 'create') {
-      await appApi.create(toPayload())
-      ElMessage.success('应用创建成功')
-    } else {
-      await appApi.update(Number(formData.id), toPayload())
-      ElMessage.success('应用更新成功')
-    }
+    await appApi.updateBasic(Number(formData.id), toBasicPayload())
+    ElMessage.success('基本信息更新成功')
     dialogVisible.value = false
     await loadApps()
   } catch (error: any) {
@@ -182,6 +157,19 @@ async function submitForm() {
   } finally {
     submitting.value = false
   }
+}
+
+function handleEditFlow(row: AppRow) {
+  const sourceType = resolveSourceType(row)
+  if (sourceType === 'canvas') {
+    router.push(`/apps/orchestrator/create?mode=blank&edit=${row.id}`)
+    return
+  }
+  if (sourceType === 'template') {
+    router.push(`/apps/orchestrator/create?mode=template&edit=${row.id}`)
+    return
+  }
+  ElMessage.warning('该应用缺少编排来源，无法进入流程编辑')
 }
 
 async function removeApp(row: AppRow) {
@@ -238,7 +226,6 @@ onMounted(() => {
         <el-button @click="loadApps">刷新</el-button>
         <el-button type="primary" plain @click="goToTemplateCreate">从模板创建</el-button>
         <el-button type="primary" plain @click="goToCanvasCreate">从空白编排</el-button>
-        <el-button type="primary" @click="openCreate">新建应用</el-button>
       </div>
     </div>
 
@@ -249,16 +236,33 @@ onMounted(() => {
       <el-table-column prop="appType" label="应用类型" min-width="120" />
       <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
       <el-table-column prop="sort" label="排序" width="70" align="center" />
+      <el-table-column label="来源" min-width="96" align="center">
+        <template #default="{ row }">
+          <el-tag v-if="resolveSourceType(row)" type="info">{{ resolveSourceType(row) }}</el-tag>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="发布状态" min-width="138" align="center">
+        <template #default="{ row }">
+          <el-tag :type="getPublishStatusTagType(row.publishStatus)">
+            {{ getPublishStatusText(row.publishStatus) }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="version" label="版本" width="80" align="center" />
+      <el-table-column prop="lastEditedAt" label="最后编辑时间" min-width="170" />
+      <el-table-column prop="publishedAt" label="最后发布时间" min-width="170" />
       <el-table-column label="启用" width="90" align="center">
         <template #default="{ row }">
           <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '是' : '否' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="createdAt" label="创建时间" min-width="170" />
-      <el-table-column label="操作" width="280" fixed="right">
+      <el-table-column label="操作" width="360" fixed="right">
         <template #default="{ row }">
           <el-space>
-            <el-button type="primary" link @click="openEdit(row)">编辑</el-button>
+            <el-button type="primary" link @click="handleEditFlow(row)">编辑流程</el-button>
+            <el-button type="warning" link @click="openBasicEdit(row)">改基本信息</el-button>
             <el-button type="success" link @click="showParameters(row)">参数</el-button>
             <el-button type="danger" link @click="removeApp(row)">删除</el-button>
           </el-space>
@@ -267,60 +271,17 @@ onMounted(() => {
     </el-table>
   </ContentWrap>
 
-  <el-dialog
-    v-model="dialogVisible"
-    :title="dialogMode === 'create' ? '新建应用' : '编辑应用'"
-    width="720px"
-    destroy-on-close
-  >
-    <el-alert
-      v-if="dialogMode === 'edit' && detailFieldMissing"
-      title="当前应用详情接口字段不完整，已禁止保存，避免配置被覆盖。"
-      type="error"
-      :closable="false"
-      class="mb-16px"
-    />
-
-    <el-form ref="formRef" :model="formData" :rules="formRules" label-width="110px">
+  <el-dialog v-model="dialogVisible" title="改基本信息" width="640px" destroy-on-close>
+    <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
       <el-row :gutter="16">
-        <el-col :span="12">
+        <el-col :span="16">
           <el-form-item label="应用名称" prop="appName">
             <el-input v-model="formData.appName" />
           </el-form-item>
         </el-col>
-        <el-col :span="12">
-          <el-form-item label="应用编码" prop="appCode">
-            <el-input v-model="formData.appCode" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item label="应用类型" prop="appType">
-            <el-input v-model="formData.appType" placeholder="如 chatbot/workflow/agent" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
+        <el-col :span="8">
           <el-form-item label="排序">
             <el-input-number v-model="formData.sort" class="w-full" :min="1" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-form-item label="Dify API 密钥" prop="difyApiKey">
-        <el-input v-model="formData.difyApiKey" type="textarea" :rows="2" />
-      </el-form-item>
-
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item label="Dify 应用 ID">
-            <el-input v-model="formData.difyAppId" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="Dify 基础地址">
-            <el-input v-model="formData.difyBaseUrl" placeholder="例如 https://api.dify.ai/v1" />
           </el-form-item>
         </el-col>
       </el-row>
@@ -331,7 +292,11 @@ onMounted(() => {
             <el-input v-model="formData.icon" />
           </el-form-item>
         </el-col>
-        <el-col :span="12" />
+        <el-col :span="12">
+          <el-form-item label="启用">
+            <el-switch v-model="formData.enabled" />
+          </el-form-item>
+        </el-col>
       </el-row>
 
       <el-form-item label="描述">
@@ -341,14 +306,7 @@ onMounted(() => {
 
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button
-        type="primary"
-        :loading="submitting"
-        :disabled="dialogMode === 'edit' && detailFieldMissing"
-        @click="submitForm"
-      >
-        保存
-      </el-button>
+      <el-button type="primary" :loading="submitting" @click="submitBasicEdit"> 保存 </el-button>
     </template>
   </el-dialog>
 

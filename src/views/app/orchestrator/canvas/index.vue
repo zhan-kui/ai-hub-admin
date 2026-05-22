@@ -36,6 +36,9 @@ import type {
 import { genEdgeId, isDuplicateEdge } from './utils'
 
 const router = useRouter()
+const props = defineProps<{
+  editId?: number
+}>()
 const flowStore = ref<VueFlowStore>()
 
 const appMeta = ref<CanvasAppMeta>({
@@ -45,14 +48,40 @@ const appMeta = ref<CanvasAppMeta>({
   iconBackground: DEFAULT_ICON_BG
 })
 
-const { nodes, edges, viewport, addNode, updateNodeData, setGraph, setViewport, resetGraph } =
-  useCanvasState()
+const {
+  nodes,
+  edges,
+  viewport,
+  addNode,
+  updateNodeData,
+  setGraph,
+  setGraphFromFlow,
+  setViewport,
+  resetGraph
+} = useCanvasState()
 const { errors, warnings, validateNow } = useValidation(appMeta, nodes, edges)
-const { loadDraft, saveDraft, clearDraft, createDebouncedSaver } = useDraftStorage()
+const draftKey = computed(() =>
+  props.editId
+    ? `aihub:orchestrator:canvas-draft:v4:edit:${props.editId}`
+    : 'aihub:orchestrator:canvas-draft:v4:new'
+)
+const { loadDraft, saveDraft, clearDraft, createDebouncedSaver } = useDraftStorage(
+  () => draftKey.value
+)
 
-const submitting = ref(false)
+const isEditMode = computed(() => Number.isFinite(props.editId))
+const submittingAction = ref<'' | 'save' | 'publish'>('')
+const version = ref<number | undefined>(undefined)
 const inspectorVisible = ref(false)
 const editingNodeId = ref('')
+const pageTitle = computed(() =>
+  isEditMode.value ? `编辑应用：${appMeta.value.name || ''}` : '从空白编排创建应用'
+)
+const pageMessage = computed(() =>
+  isEditMode.value
+    ? '编辑已保存的画布流程，支持保存草稿与发布更新'
+    : '拖拽节点、连线配置后保存或发布到 Dify'
+)
 
 const editingNode = computed(() => nodes.value.find((node) => node.id === editingNodeId.value))
 const editingStartData = computed<StartNodeData | null>(() => {
@@ -445,7 +474,70 @@ function handleViewportChange(nextViewport: ViewportTransform) {
   })
 }
 
-async function handleCreate() {
+function buildSubmitPayload() {
+  return buildCanvasFlowPayload({
+    appMeta: {
+      name: appMeta.value.name.trim(),
+      description: appMeta.value.description?.trim() || '',
+      icon: appMeta.value.icon.trim(),
+      iconBackground: appMeta.value.iconBackground || DEFAULT_ICON_BG
+    },
+    nodes: nodes.value,
+    edges: edges.value,
+    viewport: viewport.value
+  })
+}
+
+function getRequestStatus(error: unknown): number | undefined {
+  return (error as any)?.response?.status
+}
+
+function getRequestMessage(error: unknown, fallback: string): string {
+  const responseMessage = (error as any)?.response?.data?.message
+  if (responseMessage) return String(responseMessage)
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
+function updateVersionFromResponse(response: any) {
+  const nextVersion = Number(response?.version)
+  if (Number.isFinite(nextVersion)) {
+    version.value = nextVersion
+  }
+}
+
+async function loadEditCanvas(editId: number) {
+  const response = (await orchestrationApi.getCanvasConfig(editId)) as any
+  const flow = response?.flow
+  if (!flow || !Array.isArray(flow.nodes) || !Array.isArray(flow.edges)) {
+    throw new Error('画布配置数据不完整')
+  }
+  appMeta.value = {
+    name: String(response?.appMeta?.name || ''),
+    description: String(response?.appMeta?.description || ''),
+    icon: String(response?.appMeta?.icon || DEFAULT_ICON),
+    iconBackground: String(response?.appMeta?.iconBackground || DEFAULT_ICON_BG)
+  }
+  setGraphFromFlow(flow)
+  pendingRestoreViewport = flow.viewport || { x: 0, y: 0, zoom: 1 }
+  version.value = Number.isFinite(Number(response?.version)) ? Number(response.version) : undefined
+}
+
+async function handleConflict(editId: number) {
+  try {
+    await ElMessageBox.confirm('应用已被他人修改，是否重新加载远端版本？', '版本冲突', {
+      type: 'warning',
+      confirmButtonText: '重新加载远端版本',
+      cancelButtonText: '保留当前草稿'
+    })
+    await loadEditCanvas(editId)
+    ElMessage.success('已加载远端最新版本')
+  } catch {
+    // 用户选择保留当前草稿，不做覆盖
+  }
+}
+
+async function submitCanvas(action: 'save' | 'publish') {
   const result = validateNow()
   if (!result.valid) {
     ElMessage.error(result.errors[0] || '流程校验未通过')
@@ -465,29 +557,49 @@ async function handleCreate() {
     }
   }
 
-  const payload = buildCanvasFlowPayload({
-    appMeta: {
-      name: appMeta.value.name.trim(),
-      description: appMeta.value.description?.trim() || '',
-      icon: appMeta.value.icon.trim(),
-      iconBackground: appMeta.value.iconBackground || DEFAULT_ICON_BG
-    },
-    nodes: nodes.value,
-    edges: edges.value,
-    viewport: viewport.value
-  })
+  const payload = buildSubmitPayload()
 
-  submitting.value = true
+  submittingAction.value = action
   try {
-    const response = await orchestrationApi.createFromCanvas(payload)
+    let response: any
+    if (isEditMode.value && props.editId) {
+      response =
+        action === 'save'
+          ? await orchestrationApi.saveCanvasConfig(props.editId, {
+              ...payload,
+              version: version.value
+            })
+          : await orchestrationApi.publishCanvasConfig(props.editId, {
+              ...payload,
+              version: version.value
+            })
+    } else {
+      response =
+        action === 'save'
+          ? await orchestrationApi.saveCanvas(payload)
+          : await orchestrationApi.publishCanvas(payload)
+    }
+    updateVersionFromResponse(response)
     clearDraft()
-    ElMessage.success(`应用「${response.appName}」创建成功`)
+    ElMessage.success(action === 'save' ? '保存成功' : '发布成功')
     router.push('/apps')
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : '创建失败'
+    const status = getRequestStatus(error)
+    if (status === 409 && props.editId) {
+      await handleConflict(props.editId)
+      return
+    }
+
+    const rawMessage = getRequestMessage(error, action === 'save' ? '保存失败' : '发布失败')
+    let message = rawMessage
+    if (status === 400 && /dify/i.test(rawMessage) && /(不存在|not found)/i.test(rawMessage)) {
+      message = '远端 Dify 应用已丢失，请联系管理员处理'
+    } else if (status === 500 && action === 'publish') {
+      message = '发布失败，旧版本仍可使用'
+    }
     ElMessage.error(message)
   } finally {
-    submitting.value = false
+    submittingAction.value = ''
   }
 }
 
@@ -510,6 +622,16 @@ watch(
 )
 
 onMounted(async () => {
+  if (isEditMode.value && props.editId) {
+    try {
+      await loadEditCanvas(props.editId)
+    } catch (error: unknown) {
+      ElMessage.error(getRequestMessage(error, '画布配置加载失败'))
+      router.push('/apps')
+      return
+    }
+  }
+
   const draft = loadDraft()
   if (!draft) return
 
@@ -535,7 +657,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ContentWrap title="从空白编排创建应用" message="拖拽节点、连线配置后创建 Dify 应用">
+  <ContentWrap :title="pageTitle" :message="pageMessage">
     <div class="layout">
       <div class="left-panel">
         <NodePanel @add="handleAddNode" />
@@ -545,14 +667,16 @@ onMounted(async () => {
         <AppMetaBar v-model="appMeta" />
 
         <Toolbar
-          :submitting="submitting"
+          :submitting-action="submittingAction"
           :selected-count="selectedCount"
           :error-count="errors.length"
+          :is-edit-mode="isEditMode"
           @fit="handleFitView"
           @delete-selected="handleDeleteSelected"
           @clear-draft="handleClearDraft"
           @cancel="handleCancel"
-          @create="handleCreate"
+          @save="submitCanvas('save')"
+          @publish="submitCanvas('publish')"
         />
 
         <Canvas

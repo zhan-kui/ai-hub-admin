@@ -2,7 +2,7 @@ import { DRAFT_KEY } from './constants'
 import type { CanvasDraft } from './types'
 import { genCaseId } from './utils'
 
-const LEGACY_KEYS = ['aihub:orchestrator:canvas-draft:v2']
+const LEGACY_NEW_KEYS = ['aihub:orchestrator:canvas-draft:v2', DRAFT_KEY]
 
 function migrateLegacyDraft(draft: any): CanvasDraft {
   for (const node of draft.nodes || []) {
@@ -41,20 +41,28 @@ function migrateLegacyDraft(draft: any): CanvasDraft {
   return draft as CanvasDraft
 }
 
-export function useDraftStorage() {
+export function useDraftStorage(getDraftKey: () => string) {
+  function resolveDraftKey() {
+    return getDraftKey()
+  }
+
   function loadDraft(): CanvasDraft | null {
     try {
-      const raw = localStorage.getItem(DRAFT_KEY)
+      const draftKey = resolveDraftKey()
+      const raw = localStorage.getItem(draftKey)
       if (raw) {
         return migrateLegacyDraft(JSON.parse(raw))
       }
 
-      for (const key of LEGACY_KEYS) {
+      const shouldMigrateLegacyNewDraft = draftKey.endsWith(':new')
+      if (!shouldMigrateLegacyNewDraft) return null
+
+      for (const key of LEGACY_NEW_KEYS) {
         const legacy = localStorage.getItem(key)
         if (!legacy) continue
 
         const migrated = migrateLegacyDraft(JSON.parse(legacy))
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(migrated))
+        localStorage.setItem(draftKey, JSON.stringify(migrated))
         localStorage.removeItem(key)
         return migrated
       }
@@ -66,11 +74,11 @@ export function useDraftStorage() {
   }
 
   function saveDraft(draft: CanvasDraft) {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+    localStorage.setItem(resolveDraftKey(), JSON.stringify(draft))
   }
 
   function clearDraft() {
-    localStorage.removeItem(DRAFT_KEY)
+    localStorage.removeItem(resolveDraftKey())
   }
 
   function createDebouncedSaver(fn: () => void, delay = 500) {

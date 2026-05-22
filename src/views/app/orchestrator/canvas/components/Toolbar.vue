@@ -1,8 +1,9 @@
 <script setup lang="ts">
 interface Props {
-  submitting: boolean
+  submittingAction: '' | 'save' | 'publish'
   selectedCount: number
   errorCount: number
+  isEditMode: boolean
 }
 
 defineProps<Props>()
@@ -12,7 +13,8 @@ const emit = defineEmits<{
   (e: 'deleteSelected'): void
   (e: 'clearDraft'): void
   (e: 'cancel'): void
-  (e: 'create'): void
+  (e: 'save'): void
+  (e: 'publish'): void
 }>()
 </script>
 
@@ -30,7 +32,10 @@ const emit = defineEmits<{
 
     <div class="toolbar-right">
       <el-button @click="emit('cancel')">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="emit('create')">创建应用</el-button>
+      <el-button :loading="submittingAction === 'save'" @click="emit('save')"> 保存 </el-button>
+      <el-button type="primary" :loading="submittingAction === 'publish'" @click="emit('publish')">
+        {{ isEditMode ? '发布更新' : '发布' }}
+      </el-button>
     </div>
   </div>
 </template>

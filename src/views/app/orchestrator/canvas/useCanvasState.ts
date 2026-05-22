@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import type {
+  CanvasFlowPayload,
   CanvasGraphEdge,
   CanvasGraphNode,
   CanvasNodeData,
@@ -45,6 +46,26 @@ export function useCanvasState() {
     viewport.value = nextViewport
   }
 
+  function setGraphFromFlow(flow: CanvasFlowPayload['flow']) {
+    const nextNodes: CanvasGraphNode[] = (flow.nodes || []).map((node) =>
+      decorateNode({
+        id: node.id,
+        type: node.type,
+        position: node.position,
+        data: node.data
+      } as CanvasGraphNode)
+    )
+    const nextEdges: CanvasGraphEdge[] = (flow.edges || []).map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: edge.sourceCaseId,
+      type: 'smoothstep',
+      animated: true
+    }))
+    setGraph(nextNodes, nextEdges, flow.viewport || { x: 0, y: 0, zoom: 1 })
+  }
+
   function resetGraph() {
     nodes.value = [decorateNode(createStartNode())]
     edges.value = []
@@ -59,6 +80,7 @@ export function useCanvasState() {
     updateNodeData,
     setViewport,
     setGraph,
+    setGraphFromFlow,
     resetGraph
   }
 }

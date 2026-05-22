@@ -142,6 +142,12 @@ export interface CanvasFlowPayload {
   }
 }
 
+export interface CanvasFlowPayloadWithVersion extends CanvasFlowPayload {
+  id?: number
+  version?: number
+  publishAction?: 'save' | 'publish'
+}
+
 export interface CanvasDraft {
   appMeta: CanvasAppMeta
   nodes: CanvasGraphNode[]

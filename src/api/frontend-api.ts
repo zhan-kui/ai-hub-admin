@@ -2,9 +2,13 @@ import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse 
 import type {
   CreateFromTemplateRequest,
   CreateFromTemplateResponse,
+  TemplatePayloadWithVersion,
   TemplateMeta
 } from '@/views/app/orchestrator/types'
-import type { CanvasFlowPayload } from '@/views/app/orchestrator/canvas/types'
+import type {
+  CanvasFlowPayload,
+  CanvasFlowPayloadWithVersion
+} from '@/views/app/orchestrator/canvas/types'
 
 /**
  * 閸欘垶鈧俺绻冮崜宥囶伂閻滎垰顣ㄩ崣姗€鍣虹憰鍡欐磰
@@ -192,16 +196,32 @@ export interface CreateAppRequest {
 export interface AppConfigVO {
   id: number
   appName: string
-  appCode: string
-  appType: string
+  appCode?: string
+  appType?: string
+  description?: string
+  icon?: string
+  sort?: number
+  enabled?: boolean
+
+  sourceType?: 'canvas' | 'template'
+  templateCode?: string
+  publishStatus?: 'SAVED' | 'PUBLISHED' | 'PUBLISH_FAILED'
+  version?: number
+  lastEditedAt?: string
+  publishedAt?: string
+
   difyApiKey?: string
   difyAppId?: string
   difyBaseUrl?: string
+  createdAt?: string
+}
+
+export interface UpdateAppBasicRequest {
+  appName: string
   description?: string
   icon?: string
-  sort: number
-  enabled: boolean
-  createdAt: string
+  sort?: number
+  enabled?: boolean
 }
 
 export type KnowledgeId = string | number
@@ -723,11 +743,7 @@ export const appApi = {
     return unwrap<AppConfigVO>(apiClient.get(`/apps/${id}`, config))
   },
 
-  create(payload: CreateAppRequest, config?: AxiosRequestConfig) {
-    return unwrap<AppConfigVO>(apiClient.post('/apps/create', payload, config))
-  },
-
-  update(id: number, payload: CreateAppRequest, config?: AxiosRequestConfig) {
+  updateBasic(id: number, payload: UpdateAppBasicRequest, config?: AxiosRequestConfig) {
     return unwrap<AppConfigVO>(apiClient.put(`/apps/${id}`, payload, config))
   },
 
@@ -1249,18 +1265,88 @@ export const orchestrationApi = {
     return unwrap<TemplateMeta>(apiClient.get(`/dify/app/templates/${code}`, config))
   },
 
-  /** 从模板创建应用 */
-  createFromTemplate(payload: CreateFromTemplateRequest, config?: AxiosRequestConfig) {
+  /** 新建模板编排 - 保存 */
+  saveTemplate(payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
     return unwrap<CreateFromTemplateResponse>(
-      apiClient.post('/dify/app/create-from-template', payload, config)
+      apiClient.post('/dify/app/template/save', payload, config)
     )
   },
 
-  /** 从自由画布创建应用 */
-  createFromCanvas(payload: CanvasFlowPayload, config?: AxiosRequestConfig) {
+  /** 新建模板编排 - 发布 */
+  publishTemplate(payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
     return unwrap<CreateFromTemplateResponse>(
-      apiClient.post('/dify/app/create-from-canvas', payload, config)
+      apiClient.post('/dify/app/template/publish', payload, config)
     )
+  },
+
+  /** 编辑模板编排 - 查询 */
+  getTemplateConfig(id: number, config?: AxiosRequestConfig) {
+    return unwrap<any>(apiClient.get(`/dify/app/template-config/${id}`, config))
+  },
+
+  /** 编辑模板编排 - 保存 */
+  saveTemplateConfig(id: number, payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.put(`/dify/app/template/${id}/save`, payload, config)
+    )
+  },
+
+  /** 编辑模板编排 - 发布 */
+  publishTemplateConfig(
+    id: number,
+    payload: TemplatePayloadWithVersion,
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.put(`/dify/app/template/${id}/publish`, payload, config)
+    )
+  },
+
+  /** 新建空白编排 - 保存 */
+  saveCanvas(payload: CanvasFlowPayloadWithVersion, config?: AxiosRequestConfig) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.post('/dify/app/canvas/save', payload, config)
+    )
+  },
+
+  /** 新建空白编排 - 发布 */
+  publishCanvas(payload: CanvasFlowPayloadWithVersion, config?: AxiosRequestConfig) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.post('/dify/app/canvas/publish', payload, config)
+    )
+  },
+
+  /** 编辑空白编排 - 查询 */
+  getCanvasConfig(id: number, config?: AxiosRequestConfig) {
+    return unwrap<any>(apiClient.get(`/dify/app/canvas/${id}`, config))
+  },
+
+  /** 编辑空白编排 - 保存 */
+  saveCanvasConfig(id: number, payload: CanvasFlowPayloadWithVersion, config?: AxiosRequestConfig) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.put(`/dify/app/canvas/${id}/save`, payload, config)
+    )
+  },
+
+  /** 编辑空白编排 - 发布 */
+  publishCanvasConfig(
+    id: number,
+    payload: CanvasFlowPayloadWithVersion,
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<CreateFromTemplateResponse>(
+      apiClient.put(`/dify/app/canvas/${id}/publish`, payload, config)
+    )
+  },
+
+  /** 兼容旧调用: 从模板创建（等价发布） */
+  createFromTemplate(payload: CreateFromTemplateRequest, config?: AxiosRequestConfig) {
+    return orchestrationApi.publishTemplate(payload, config)
+  },
+
+  /** 兼容旧调用: 从空白画布创建（等价发布） */
+  createFromCanvas(payload: CanvasFlowPayload, config?: AxiosRequestConfig) {
+    return orchestrationApi.publishCanvas(payload, config)
   }
 }
 

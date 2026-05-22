@@ -85,6 +85,12 @@ export interface AppMeta {
   iconBackground: string
 }
 
+export interface TemplateNodeConfig {
+  id: string
+  type: string
+  config: Record<string, any>
+}
+
 /** 从模板创建应用请求体 */
 export interface CreateFromTemplateRequest {
   /** 用哪个模板,对应 TemplateMeta.code */
@@ -92,14 +98,12 @@ export interface CreateFromTemplateRequest {
   /** 应用元信息 */
   appMeta: AppMeta
   /** 节点配置数组 */
-  nodes: Array<{
-    /** 节点 id,跟 TemplateNode.id 对应 */
-    id: string
-    /** 节点类型,跟 TemplateNode.type 对应 */
-    type: string
-    /** 用户填写的扁平配置 */
-    config: Record<string, any>
-  }>
+  nodes: TemplateNodeConfig[]
+}
+
+export interface TemplatePayloadWithVersion extends CreateFromTemplateRequest {
+  id?: number
+  version?: number
 }
 
 /** 从模板创建应用成功响应 */
