@@ -6,8 +6,6 @@ export const MAX_IF_CASES = 5
 export const DEFAULT_ICON = '🤖'
 export const DEFAULT_ICON_BG = '#FFEAD5'
 
-export const DRAFT_KEY = 'aihub:orchestrator:canvas-draft:v3'
-
 export const NODE_DIMENSIONS = {
   start: { width: 242, height: 72 },
   llm: { width: 242, height: 87 },

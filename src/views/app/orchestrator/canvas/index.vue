@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import type {
@@ -20,9 +20,8 @@ import IfElseInspector from './components/inspectors/IfElseInspector.vue'
 import AnswerInspector from './components/inspectors/AnswerInspector.vue'
 import KnowledgeInspector from './components/inspectors/KnowledgeInspector.vue'
 import { DEFAULT_ICON, DEFAULT_ICON_BG, MAX_NODES } from './constants'
-import { buildCanvasFlowPayload } from './payload-builder'
+import { buildCanvasSnapshot, restoreCanvasSnapshot } from './snapshot-builder'
 import { useCanvasState } from './useCanvasState'
-import { useDraftStorage } from './useDraftStorage'
 import { useValidation } from './useValidation'
 import type {
   AnswerNodeData,
@@ -48,29 +47,12 @@ const appMeta = ref<CanvasAppMeta>({
   iconBackground: DEFAULT_ICON_BG
 })
 
-const {
-  nodes,
-  edges,
-  viewport,
-  addNode,
-  updateNodeData,
-  setGraph,
-  setGraphFromFlow,
-  setViewport,
-  resetGraph
-} = useCanvasState()
+const { nodes, edges, viewport, addNode, updateNodeData, setGraphFromFlow, setViewport } =
+  useCanvasState()
 const { errors, warnings, validateNow } = useValidation(appMeta, nodes, edges)
-const draftKey = computed(() =>
-  props.editId
-    ? `aihub:orchestrator:canvas-draft:v4:edit:${props.editId}`
-    : 'aihub:orchestrator:canvas-draft:v4:new'
-)
-const { loadDraft, saveDraft, clearDraft, createDebouncedSaver } = useDraftStorage(
-  () => draftKey.value
-)
 
 const isEditMode = computed(() => Number.isFinite(props.editId))
-const submittingAction = ref<'' | 'save' | 'publish'>('')
+const saving = ref(false)
 const version = ref<number | undefined>(undefined)
 const inspectorVisible = ref(false)
 const editingNodeId = ref('')
@@ -79,8 +61,8 @@ const pageTitle = computed(() =>
 )
 const pageMessage = computed(() =>
   isEditMode.value
-    ? '编辑已保存的画布流程，支持保存草稿与发布更新'
-    : '拖拽节点、连线配置后保存或发布到 Dify'
+    ? '编辑已保存的画布流程，点击保存后仅更新前端快照'
+    : '拖拽节点、连线配置后保存前端快照'
 )
 
 const editingNode = computed(() => nodes.value.find((node) => node.id === editingNodeId.value))
@@ -426,30 +408,6 @@ function handleDeleteSelected() {
   )
 }
 
-async function handleClearDraft() {
-  try {
-    await ElMessageBox.confirm('确认清空画布和草稿吗？', '清空确认', { type: 'warning' })
-    clearDraft()
-    resetGraph()
-    appMeta.value = {
-      name: '',
-      description: '',
-      icon: DEFAULT_ICON,
-      iconBackground: DEFAULT_ICON_BG
-    }
-    ElMessage.success('草稿已清空')
-  } catch (error) {
-    // error 为 'cancel' 表示用户点击了取消
-    if (error === 'cancel') {
-      console.log('用户取消了清空操作')
-      return
-    }
-    // 其他情况说明代码可能出现了真正的错误
-    console.error('清空草稿失败:', error)
-    ElMessage.error('清空失败，请稍后重试')
-  }
-}
-
 function handleFitView() {
   void flowStore.value?.fitView()
 }
@@ -475,7 +433,7 @@ function handleViewportChange(nextViewport: ViewportTransform) {
 }
 
 function buildSubmitPayload() {
-  return buildCanvasFlowPayload({
+  return buildCanvasSnapshot({
     appMeta: {
       name: appMeta.value.name.trim(),
       description: appMeta.value.description?.trim() || '',
@@ -507,19 +465,28 @@ function updateVersionFromResponse(response: any) {
 }
 
 async function loadEditCanvas(editId: number) {
-  const response = (await orchestrationApi.getCanvasConfig(editId)) as any
-  const flow = response?.flow
-  if (!flow || !Array.isArray(flow.nodes) || !Array.isArray(flow.edges)) {
+  const response = (await orchestrationApi.getCanvasDraft(editId)) as any
+  const snapshot = (response?.snapshot || response) as any
+  if (
+    !snapshot?.flow ||
+    !Array.isArray(snapshot.flow.nodes) ||
+    !Array.isArray(snapshot.flow.edges)
+  ) {
     throw new Error('画布配置数据不完整')
   }
+  const restored = restoreCanvasSnapshot(snapshot)
   appMeta.value = {
-    name: String(response?.appMeta?.name || ''),
-    description: String(response?.appMeta?.description || ''),
-    icon: String(response?.appMeta?.icon || DEFAULT_ICON),
-    iconBackground: String(response?.appMeta?.iconBackground || DEFAULT_ICON_BG)
+    name: String(snapshot?.appMeta?.name || ''),
+    description: String(snapshot?.appMeta?.description || ''),
+    icon: String(snapshot?.appMeta?.icon || DEFAULT_ICON),
+    iconBackground: String(snapshot?.appMeta?.iconBackground || DEFAULT_ICON_BG)
   }
-  setGraphFromFlow(flow)
-  pendingRestoreViewport = flow.viewport || { x: 0, y: 0, zoom: 1 }
+  setGraphFromFlow({
+    nodes: restored.nodes as any[],
+    edges: restored.edges as any[],
+    viewport: restored.viewport
+  })
+  pendingRestoreViewport = restored.viewport || { x: 0, y: 0, zoom: 1 }
   version.value = Number.isFinite(Number(response?.version)) ? Number(response.version) : undefined
 }
 
@@ -537,7 +504,20 @@ async function handleConflict(editId: number) {
   }
 }
 
-async function submitCanvas(action: 'save' | 'publish') {
+function handleValidate() {
+  const result = validateNow()
+  if (!result.valid) {
+    ElMessage.error(result.errors[0] || '流程校验未通过')
+    return
+  }
+  if (result.warnings.length) {
+    ElMessage.warning(`存在 ${result.warnings.length} 条流程警告，请检查后保存`)
+    return
+  }
+  ElMessage.success('流程校验通过')
+}
+
+async function handleSave() {
   const result = validateNow()
   if (!result.valid) {
     ElMessage.error(result.errors[0] || '流程校验未通过')
@@ -559,67 +539,32 @@ async function submitCanvas(action: 'save' | 'publish') {
 
   const payload = buildSubmitPayload()
 
-  submittingAction.value = action
+  saving.value = true
   try {
-    let response: any
-    if (isEditMode.value && props.editId) {
-      response =
-        action === 'save'
-          ? await orchestrationApi.saveCanvasConfig(props.editId, {
-              ...payload,
-              version: version.value
-            })
-          : await orchestrationApi.publishCanvasConfig(props.editId, {
-              ...payload,
-              version: version.value
-            })
-    } else {
-      response =
-        action === 'save'
-          ? await orchestrationApi.saveCanvas(payload)
-          : await orchestrationApi.publishCanvas(payload)
-    }
+    const response =
+      isEditMode.value && props.editId
+        ? await orchestrationApi.updateCanvasDraft(props.editId, {
+            ...payload,
+            version: version.value
+          })
+        : await orchestrationApi.saveCanvasDraft(payload)
     updateVersionFromResponse(response)
-    clearDraft()
-    ElMessage.success(action === 'save' ? '保存成功' : '发布成功')
-    router.push('/apps')
+    const savedId = Number(response?.id)
+    if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
+      await router.replace(`/apps/orchestrator/create?mode=blank&edit=${savedId}`)
+    }
+    ElMessage.success('保存成功')
   } catch (error: unknown) {
     const status = getRequestStatus(error)
     if (status === 409 && props.editId) {
       await handleConflict(props.editId)
       return
     }
-
-    const rawMessage = getRequestMessage(error, action === 'save' ? '保存失败' : '发布失败')
-    let message = rawMessage
-    if (status === 400 && /dify/i.test(rawMessage) && /(不存在|not found)/i.test(rawMessage)) {
-      message = '远端 Dify 应用已丢失，请联系管理员处理'
-    } else if (status === 500 && action === 'publish') {
-      message = '发布失败，旧版本仍可使用'
-    }
-    ElMessage.error(message)
+    ElMessage.error(getRequestMessage(error, '保存失败'))
   } finally {
-    submittingAction.value = ''
+    saving.value = false
   }
 }
-
-const debouncedSaveDraft = createDebouncedSaver(() => {
-  saveDraft({
-    appMeta: appMeta.value,
-    nodes: nodes.value,
-    edges: edges.value,
-    viewport: viewport.value,
-    savedAt: Date.now()
-  })
-}, 500)
-
-watch(
-  [appMeta, nodes, edges, viewport],
-  () => {
-    debouncedSaveDraft()
-  },
-  { deep: true }
-)
 
 onMounted(async () => {
   if (isEditMode.value && props.editId) {
@@ -630,28 +575,6 @@ onMounted(async () => {
       router.push('/apps')
       return
     }
-  }
-
-  const draft = loadDraft()
-  if (!draft) return
-
-  try {
-    await ElMessageBox.confirm('检测到未完成的编排草稿，是否恢复？', '恢复草稿', {
-      confirmButtonText: '恢复',
-      cancelButtonText: '丢弃',
-      type: 'info'
-    })
-
-    appMeta.value = {
-      name: draft.appMeta.name || '',
-      description: draft.appMeta.description || '',
-      icon: draft.appMeta.icon || DEFAULT_ICON,
-      iconBackground: draft.appMeta.iconBackground || DEFAULT_ICON_BG
-    }
-    setGraph(draft.nodes || [], draft.edges || [], draft.viewport || { x: 0, y: 0, zoom: 1 })
-    pendingRestoreViewport = draft.viewport || { x: 0, y: 0, zoom: 1 }
-  } catch {
-    clearDraft()
   }
 })
 </script>
@@ -667,16 +590,14 @@ onMounted(async () => {
         <AppMetaBar v-model="appMeta" />
 
         <Toolbar
-          :submitting-action="submittingAction"
+          :saving="saving"
           :selected-count="selectedCount"
           :error-count="errors.length"
-          :is-edit-mode="isEditMode"
           @fit="handleFitView"
+          @validate="handleValidate"
           @delete-selected="handleDeleteSelected"
-          @clear-draft="handleClearDraft"
           @cancel="handleCancel"
-          @save="submitCanvas('save')"
-          @publish="submitCanvas('publish')"
+          @save="handleSave"
         />
 
         <Canvas

@@ -5,6 +5,7 @@ import type {
   CanvasGraphNode,
   CanvasNodeData,
   CanvasNodeType,
+  CanvasSnapshotPayload,
   CanvasViewport
 } from './types'
 import { createNode, createStartNode } from './utils'
@@ -46,7 +47,7 @@ export function useCanvasState() {
     viewport.value = nextViewport
   }
 
-  function setGraphFromFlow(flow: CanvasFlowPayload['flow']) {
+  function setGraphFromFlow(flow: CanvasFlowPayload['flow'] | CanvasSnapshotPayload['flow']) {
     const nextNodes: CanvasGraphNode[] = (flow.nodes || []).map((node) =>
       decorateNode({
         id: node.id,
@@ -59,9 +60,14 @@ export function useCanvasState() {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      sourceHandle: edge.sourceCaseId,
-      type: 'smoothstep',
-      animated: true
+      sourceHandle: (edge as any).sourceHandle ?? (edge as any).sourceCaseId,
+      targetHandle: (edge as any).targetHandle,
+      label: (edge as any).label,
+      data: (edge as any).data,
+      markerEnd: (edge as any).markerEnd,
+      style: (edge as any).style,
+      type: (edge as any).type || 'smoothstep',
+      animated: (edge as any).animated ?? true
     }))
     setGraph(nextNodes, nextEdges, flow.viewport || { x: 0, y: 0, zoom: 1 })
   }

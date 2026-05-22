@@ -3,7 +3,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { ContentWrap } from '@/components/ContentWrap'
-import { appApi, type AppConfigVO, type UpdateAppBasicRequest } from '@/api/frontend-api'
+import {
+  appApi,
+  orchestrationApi,
+  type AppConfigVO,
+  type UpdateAppBasicRequest
+} from '@/api/frontend-api'
 
 type AppRow = AppConfigVO & Record<string, any>
 
@@ -11,6 +16,7 @@ const router = useRouter()
 
 const loading = ref(false)
 const submitting = ref(false)
+const publishingId = ref<number | null>(null)
 const parameterLoading = ref(false)
 
 const keyword = ref('')
@@ -36,6 +42,7 @@ const parameterTitle = ref('应用参数')
 const parameterText = ref('')
 
 const statusMap: Record<string, string> = {
+  DRAFT: '草稿',
   SAVED: '已保存未发布',
   PUBLISHED: '已发布',
   PUBLISH_FAILED: '发布失败'
@@ -69,7 +76,7 @@ function getPublishStatusText(status?: string): string {
 
 function getPublishStatusTagType(status?: string): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'PUBLISHED') return 'success'
-  if (status === 'SAVED') return 'warning'
+  if (status === 'SAVED' || status === 'DRAFT') return 'warning'
   if (status === 'PUBLISH_FAILED') return 'danger'
   return 'info'
 }
@@ -200,6 +207,41 @@ async function showParameters(row: AppRow) {
   }
 }
 
+async function publishApp(row: AppRow) {
+  try {
+    await ElMessageBox.confirm(
+      `确认发布应用【${row.appName}】吗？\n发布后将把当前保存的流程编排转换为 Dify 应用并生效。\n如果该应用已发布过，将原地更新 Dify 工作流，difyAppId 和 API Key 不变。`,
+      '发布确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认发布',
+        cancelButtonText: '取消'
+      }
+    )
+    publishingId.value = Number(row.id)
+    await orchestrationApi.publishApp(Number(row.id), {
+      version: Number(row.version || 0) || undefined
+    })
+    ElMessage.success('发布成功')
+    await loadApps()
+  } catch (error: any) {
+    if (error === 'cancel' || error === 'close') return
+    const status = error?.response?.status
+    const backendMessage = error?.response?.data?.message || error?.message || '发布失败'
+    if (status === 409) {
+      ElMessage.error('应用已被别人修改，请刷新后重试')
+    } else if (status === 400) {
+      ElMessage.error(String(backendMessage))
+    } else if (status === 500) {
+      ElMessage.error('发布失败')
+    } else {
+      ElMessage.error(String(backendMessage))
+    }
+  } finally {
+    publishingId.value = null
+  }
+}
+
 function goToTemplateCreate() {
   router.push('/apps/orchestrator/create?mode=template')
 }
@@ -249,21 +291,35 @@ onMounted(() => {
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="version" label="版本" width="80" align="center" />
+      <el-table-column prop="version" label="当前版本" width="90" align="center" />
+      <el-table-column prop="currentDraftVersion" label="草稿版本" width="90" align="center" />
+      <el-table-column prop="currentPublishedVersion" label="发布版本" width="90" align="center" />
       <el-table-column prop="lastEditedAt" label="最后编辑时间" min-width="170" />
-      <el-table-column prop="publishedAt" label="最后发布时间" min-width="170" />
+      <el-table-column label="最后发布时间" min-width="170">
+        <template #default="{ row }">
+          {{ row.lastPublishedAt || row.publishedAt || '-' }}
+        </template>
+      </el-table-column>
       <el-table-column label="启用" width="90" align="center">
         <template #default="{ row }">
           <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '是' : '否' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="createdAt" label="创建时间" min-width="170" />
-      <el-table-column label="操作" width="360" fixed="right">
+      <el-table-column label="操作" width="420" fixed="right">
         <template #default="{ row }">
           <el-space>
             <el-button type="primary" link @click="handleEditFlow(row)">编辑流程</el-button>
+            <el-button
+              type="success"
+              link
+              :loading="publishingId === Number(row.id)"
+              @click="publishApp(row)"
+            >
+              发布
+            </el-button>
             <el-button type="warning" link @click="openBasicEdit(row)">改基本信息</el-button>
-            <el-button type="success" link @click="showParameters(row)">参数</el-button>
+            <el-button type="info" link @click="showParameters(row)">参数</el-button>
             <el-button type="danger" link @click="removeApp(row)">删除</el-button>
           </el-space>
         </template>

@@ -148,6 +148,45 @@ export interface CanvasFlowPayloadWithVersion extends CanvasFlowPayload {
   publishAction?: 'save' | 'publish'
 }
 
+export interface CanvasSnapshotNode {
+  id: string
+  type?: string
+  position: {
+    x: number
+    y: number
+  }
+  data?: Record<string, any>
+  width?: any
+  height?: any
+  selected?: boolean
+  dragging?: boolean
+  sourcePosition?: Node['sourcePosition']
+  targetPosition?: Node['targetPosition']
+}
+
+export interface CanvasSnapshotEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
+  type?: string
+  animated?: boolean
+  label?: Edge['label']
+  data?: Record<string, any>
+  markerEnd?: Edge['markerEnd']
+  style?: Edge['style']
+}
+
+export interface CanvasSnapshotPayload {
+  appMeta: CanvasAppMeta
+  flow: {
+    nodes: CanvasSnapshotNode[]
+    edges: CanvasSnapshotEdge[]
+    viewport: CanvasViewport
+  }
+}
+
 export interface CanvasDraft {
   appMeta: CanvasAppMeta
   nodes: CanvasGraphNode[]

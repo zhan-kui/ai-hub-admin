@@ -6,8 +6,8 @@ import type {
   TemplateMeta
 } from '@/views/app/orchestrator/types'
 import type {
-  CanvasFlowPayload,
-  CanvasFlowPayloadWithVersion
+  CanvasFlowPayloadWithVersion,
+  CanvasSnapshotPayload
 } from '@/views/app/orchestrator/canvas/types'
 
 /**
@@ -205,10 +205,13 @@ export interface AppConfigVO {
 
   sourceType?: 'canvas' | 'template'
   templateCode?: string
-  publishStatus?: 'SAVED' | 'PUBLISHED' | 'PUBLISH_FAILED'
+  publishStatus?: 'DRAFT' | 'SAVED' | 'PUBLISHED' | 'PUBLISH_FAILED'
   version?: number
+  currentDraftVersion?: number
+  currentPublishedVersion?: number
   lastEditedAt?: string
   publishedAt?: string
+  lastPublishedAt?: string
 
   difyApiKey?: string
   difyAppId?: string
@@ -1252,7 +1255,10 @@ export type {
   CreateFromTemplateResponse,
   TemplateMeta
 } from '@/views/app/orchestrator/types'
-export type { CanvasFlowPayload } from '@/views/app/orchestrator/canvas/types'
+export type {
+  CanvasFlowPayload,
+  CanvasSnapshotPayload
+} from '@/views/app/orchestrator/canvas/types'
 
 export const orchestrationApi = {
   /** 拿可用模板列表 */
@@ -1266,87 +1272,103 @@ export const orchestrationApi = {
   },
 
   /** 新建模板编排 - 保存 */
-  saveTemplate(payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
+  saveTemplateDraft(payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
     return unwrap<CreateFromTemplateResponse>(
       apiClient.post('/dify/app/template/save', payload, config)
     )
   },
 
-  /** 新建模板编排 - 发布 */
-  publishTemplate(payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
-    return unwrap<CreateFromTemplateResponse>(
-      apiClient.post('/dify/app/template/publish', payload, config)
-    )
-  },
-
   /** 编辑模板编排 - 查询 */
-  getTemplateConfig(id: number, config?: AxiosRequestConfig) {
-    return unwrap<any>(apiClient.get(`/dify/app/template-config/${id}`, config))
+  getTemplateDraft(id: number, config?: AxiosRequestConfig) {
+    return unwrap<any>(apiClient.get(`/dify/app/template/${id}`, config))
   },
 
   /** 编辑模板编排 - 保存 */
-  saveTemplateConfig(id: number, payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
-    return unwrap<CreateFromTemplateResponse>(
-      apiClient.put(`/dify/app/template/${id}/save`, payload, config)
-    )
-  },
-
-  /** 编辑模板编排 - 发布 */
-  publishTemplateConfig(
+  updateTemplateDraft(
     id: number,
     payload: TemplatePayloadWithVersion,
     config?: AxiosRequestConfig
   ) {
     return unwrap<CreateFromTemplateResponse>(
-      apiClient.put(`/dify/app/template/${id}/publish`, payload, config)
+      apiClient.put(`/dify/app/template/${id}/save`, payload, config)
     )
   },
 
   /** 新建空白编排 - 保存 */
-  saveCanvas(payload: CanvasFlowPayloadWithVersion, config?: AxiosRequestConfig) {
+  saveCanvasDraft(
+    payload: CanvasSnapshotPayload & { version?: number },
+    config?: AxiosRequestConfig
+  ) {
     return unwrap<CreateFromTemplateResponse>(
       apiClient.post('/dify/app/canvas/save', payload, config)
     )
   },
 
-  /** 新建空白编排 - 发布 */
-  publishCanvas(payload: CanvasFlowPayloadWithVersion, config?: AxiosRequestConfig) {
-    return unwrap<CreateFromTemplateResponse>(
-      apiClient.post('/dify/app/canvas/publish', payload, config)
-    )
-  },
-
   /** 编辑空白编排 - 查询 */
-  getCanvasConfig(id: number, config?: AxiosRequestConfig) {
+  getCanvasDraft(id: number, config?: AxiosRequestConfig) {
     return unwrap<any>(apiClient.get(`/dify/app/canvas/${id}`, config))
   },
 
   /** 编辑空白编排 - 保存 */
-  saveCanvasConfig(id: number, payload: CanvasFlowPayloadWithVersion, config?: AxiosRequestConfig) {
+  updateCanvasDraft(
+    id: number,
+    payload: CanvasSnapshotPayload & { version?: number },
+    config?: AxiosRequestConfig
+  ) {
     return unwrap<CreateFromTemplateResponse>(
       apiClient.put(`/dify/app/canvas/${id}/save`, payload, config)
     )
   },
 
-  /** 编辑空白编排 - 发布 */
-  publishCanvasConfig(
-    id: number,
-    payload: CanvasFlowPayloadWithVersion,
-    config?: AxiosRequestConfig
-  ) {
+  /** 列表页发布 */
+  publishApp(id: number, payload?: { version?: number }, config?: AxiosRequestConfig) {
     return unwrap<CreateFromTemplateResponse>(
-      apiClient.put(`/dify/app/canvas/${id}/publish`, payload, config)
+      apiClient.post(`/dify/app/${id}/publish`, payload, config)
     )
   },
 
-  /** 兼容旧调用: 从模板创建（等价发布） */
-  createFromTemplate(payload: CreateFromTemplateRequest, config?: AxiosRequestConfig) {
-    return orchestrationApi.publishTemplate(payload, config)
+  /** 兼容旧调用 */
+  saveTemplate(payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
+    return orchestrationApi.saveTemplateDraft(payload, config)
   },
 
-  /** 兼容旧调用: 从空白画布创建（等价发布） */
-  createFromCanvas(payload: CanvasFlowPayload, config?: AxiosRequestConfig) {
-    return orchestrationApi.publishCanvas(payload, config)
+  /** 兼容旧调用 */
+  getTemplateConfig(id: number, config?: AxiosRequestConfig) {
+    return orchestrationApi.getTemplateDraft(id, config)
+  },
+
+  /** 兼容旧调用 */
+  saveTemplateConfig(id: number, payload: TemplatePayloadWithVersion, config?: AxiosRequestConfig) {
+    return orchestrationApi.updateTemplateDraft(id, payload, config)
+  },
+
+  /** 兼容旧调用 */
+  saveCanvas(payload: CanvasSnapshotPayload & { version?: number }, config?: AxiosRequestConfig) {
+    return orchestrationApi.saveCanvasDraft(payload, config)
+  },
+
+  /** 兼容旧调用 */
+  getCanvasConfig(id: number, config?: AxiosRequestConfig) {
+    return orchestrationApi.getCanvasDraft(id, config)
+  },
+
+  /** 兼容旧调用 */
+  saveCanvasConfig(
+    id: number,
+    payload: CanvasSnapshotPayload & { version?: number },
+    config?: AxiosRequestConfig
+  ) {
+    return orchestrationApi.updateCanvasDraft(id, payload, config)
+  },
+
+  /** 兼容旧调用: 从模板创建（映射为保存） */
+  createFromTemplate(payload: CreateFromTemplateRequest, config?: AxiosRequestConfig) {
+    return orchestrationApi.saveTemplateDraft(payload, config)
+  },
+
+  /** 兼容旧调用: 从空白画布创建（映射为保存） */
+  createFromCanvas(payload: CanvasFlowPayloadWithVersion, config?: AxiosRequestConfig) {
+    return orchestrationApi.saveCanvasDraft(payload as unknown as CanvasSnapshotPayload, config)
   }
 }
 

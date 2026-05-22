@@ -23,7 +23,7 @@ const nodeConfigs = ref<Record<string, Record<string, any>>>({})
 const drawerVisible = ref(false)
 const drawerNodeId = ref('')
 
-const submittingAction = ref<'' | 'save' | 'publish'>('')
+const saving = ref(false)
 const version = ref<number | undefined>(undefined)
 const readonlyTemplateText = ref('')
 const syncingTemplateConfig = ref(false)
@@ -35,8 +35,8 @@ const isEditMode = computed(() => Number.isFinite(props.editId))
 const pageTitle = computed(() => (isEditMode.value ? '编辑模板编排' : '从模板创建应用'))
 const pageMessage = computed(() =>
   isEditMode.value
-    ? '编辑已保存的模板流程，支持保存草稿与发布更新'
-    : '选择模板 → 填写参数 → 保存或发布到 Dify'
+    ? '编辑已保存的模板流程，点击保存后仅更新前端快照'
+    : '选择模板 → 填写参数 → 保存前端快照'
 )
 
 const drawerNode = computed(() =>
@@ -200,31 +200,26 @@ function updateVersionFromResponse(response: any) {
   }
 }
 
-async function handleSubmit(action: 'save' | 'publish') {
+async function handleSave() {
   const payload = buildPayload()
   if (!payload) return
 
-  submittingAction.value = action
+  saving.value = true
   try {
-    let result: any
-    if (isEditMode.value && props.editId) {
-      result =
-        action === 'save'
-          ? await orchestrationApi.saveTemplateConfig(props.editId, payload)
-          : await orchestrationApi.publishTemplateConfig(props.editId, payload)
-    } else {
-      result =
-        action === 'save'
-          ? await orchestrationApi.saveTemplate(payload)
-          : await orchestrationApi.publishTemplate(payload)
-    }
+    const result =
+      isEditMode.value && props.editId
+        ? await orchestrationApi.updateTemplateDraft(props.editId, payload)
+        : await orchestrationApi.saveTemplateDraft(payload)
     updateVersionFromResponse(result)
-    ElMessage.success(action === 'save' ? '保存成功' : '发布成功')
-    router.push('/apps')
+    const savedId = Number(result?.id)
+    if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
+      await router.replace(`/apps/orchestrator/create?mode=template&edit=${savedId}`)
+    }
+    ElMessage.success('保存成功')
   } catch (error: unknown) {
-    ElMessage.error(getErrorMessage(error, action === 'save' ? '保存失败' : '发布失败'))
+    ElMessage.error(getErrorMessage(error, '保存失败'))
   } finally {
-    submittingAction.value = ''
+    saving.value = false
   }
 }
 
@@ -242,7 +237,7 @@ async function ensureTemplateExists(templateCode: string): Promise<TemplateMeta 
 
 async function loadEditConfig(id: number) {
   try {
-    const config = (await orchestrationApi.getTemplateConfig(id)) as any
+    const config = (await orchestrationApi.getTemplateDraft(id)) as any
     const templateCode = String(config?.templateCode || '')
     if (!templateCode) {
       ElMessage.error('模板配置缺少 templateCode，无法进入编辑')
@@ -320,20 +315,8 @@ onMounted(async () => {
 
     <div class="action-bar">
       <el-button @click="handleBack">取消</el-button>
-      <el-button
-        :loading="submittingAction === 'save'"
-        :disabled="!selectedTemplate"
-        @click="handleSubmit('save')"
-      >
+      <el-button type="primary" :loading="saving" :disabled="!selectedTemplate" @click="handleSave">
         保存
-      </el-button>
-      <el-button
-        type="primary"
-        :loading="submittingAction === 'publish'"
-        :disabled="!selectedTemplate"
-        @click="handleSubmit('publish')"
-      >
-        {{ isEditMode ? '发布更新' : '发布' }}
       </el-button>
     </div>
 
