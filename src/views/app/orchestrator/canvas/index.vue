@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import type {
   Connection,
+  Edge,
   ValidConnectionFunc,
   ViewportTransform,
   VueFlowStore
@@ -107,10 +108,14 @@ function getNodeById(nodeId: string) {
   return nodes.value.find((node) => node.id === nodeId)
 }
 
-function hasCycleWithConnection(source: string, target: string): boolean {
+function hasCycleWithConnection(
+  source: string,
+  target: string,
+  existingEdges: Array<{ source: string; target: string }>
+): boolean {
   const adjacency = new Map<string, string[]>()
   for (const node of nodes.value) adjacency.set(node.id, [])
-  for (const edge of edges.value) {
+  for (const edge of existingEdges) {
     adjacency.get(edge.source)?.push(edge.target)
   }
   adjacency.get(source)?.push(target)
@@ -149,14 +154,19 @@ function canConnect(connection: Connection): boolean {
   const targetNode = getNodeById(targetId)
   if (!sourceNode || !targetNode) return false
 
-  if (isDuplicateEdge(edges.value, sourceId, targetId, connection.sourceHandle)) return false
+  const currentEdgeId = String((connection as Partial<Edge>).id || '')
+  const comparableEdges = currentEdgeId
+    ? edges.value.filter((edge) => String(edge.id || '') !== currentEdgeId)
+    : edges.value
+
+  if (isDuplicateEdge(comparableEdges, sourceId, targetId, connection.sourceHandle)) return false
 
   const sourceType = sourceNode.data?.nodeType
   const targetType = targetNode.data?.nodeType
   if (!sourceType || !targetType) return false
 
-  const sourceOutgoers = edges.value.filter((edge) => edge.source === sourceId)
-  const targetIncomers = edges.value.filter((edge) => edge.target === targetId)
+  const sourceOutgoers = comparableEdges.filter((edge) => edge.source === sourceId)
+  const targetIncomers = comparableEdges.filter((edge) => edge.target === targetId)
 
   if (targetType === 'start') return false
   if (sourceType === 'answer') return false
@@ -228,7 +238,7 @@ function canConnect(connection: Connection): boolean {
     if (sourceType !== 'start' && sourceType !== 'llm' && sourceType !== 'if-else') return false
   }
 
-  if (hasCycleWithConnection(sourceId, targetId)) return false
+  if (hasCycleWithConnection(sourceId, targetId, comparableEdges)) return false
 
   return true
 }
