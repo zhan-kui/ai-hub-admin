@@ -83,6 +83,7 @@ export interface AppMeta {
   description: string
   icon: string
   iconBackground: string
+  iconImage: string
 }
 
 export interface TemplateNodeConfig {

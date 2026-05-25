@@ -7,6 +7,7 @@ export interface CanvasAppMeta {
   description?: string
   icon: string
   iconBackground?: string
+  iconImage: string
 }
 
 export interface BaseNodeData {

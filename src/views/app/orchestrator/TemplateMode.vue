@@ -47,7 +47,8 @@ const appMeta = ref<AppMeta>({
   name: '',
   description: '',
   icon: DEFAULT_ICON,
-  iconBackground: DEFAULT_ICON_BG
+  iconBackground: DEFAULT_ICON_BG,
+  iconImage: ''
 })
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -186,7 +187,8 @@ function buildPayload(): TemplatePayloadWithVersion | null {
       name: String(appMeta.value.name || '').trim(),
       description: String(appMeta.value.description || '').trim(),
       icon: String(appMeta.value.icon || '').trim(),
-      iconBackground: appMeta.value.iconBackground || DEFAULT_ICON_BG
+      iconBackground: appMeta.value.iconBackground || DEFAULT_ICON_BG,
+      iconImage: appMeta.value.iconImage || ''
     },
     nodes,
     version: version.value
@@ -261,7 +263,8 @@ async function loadEditConfig(id: number) {
       name: String(config?.appMeta?.name || ''),
       description: String(config?.appMeta?.description || ''),
       icon: String(config?.appMeta?.icon || DEFAULT_ICON),
-      iconBackground: String(config?.appMeta?.iconBackground || DEFAULT_ICON_BG)
+      iconBackground: String(config?.appMeta?.iconBackground || DEFAULT_ICON_BG),
+      iconImage: String(config?.appMeta?.iconImage || '')
     }
     version.value = Number.isFinite(Number(config?.version)) ? Number(config.version) : undefined
     readonlyTemplateText.value = `基于模板：${template.name || template.code}（编辑模式下不可更换模板）`

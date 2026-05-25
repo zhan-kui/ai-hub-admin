@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { CanvasAppMeta } from '../types'
+import IconUploader from '@/views/app/components/IconUploader.vue'
 
 const appMeta = defineModel<CanvasAppMeta>({ required: true })
 </script>
@@ -7,12 +8,17 @@ const appMeta = defineModel<CanvasAppMeta>({ required: true })
 <template>
   <el-form label-position="top" class="meta-bar">
     <el-row :gutter="12">
+      <el-col :span="4">
+        <el-form-item label="头像">
+          <IconUploader v-model="appMeta.iconImage" :size="64" />
+        </el-form-item>
+      </el-col>
       <el-col :span="8">
         <el-form-item label="应用名称" required>
           <el-input v-model="appMeta.name" maxlength="80" show-word-limit />
         </el-form-item>
       </el-col>
-      <el-col :span="10">
+      <el-col :span="8">
         <el-form-item label="描述">
           <el-input
             v-model="appMeta.description"
@@ -23,12 +29,12 @@ const appMeta = defineModel<CanvasAppMeta>({ required: true })
           />
         </el-form-item>
       </el-col>
-      <el-col :span="3">
+      <el-col :span="2">
         <el-form-item label="图标" required>
           <el-input v-model="appMeta.icon" maxlength="4" />
         </el-form-item>
       </el-col>
-      <el-col :span="3">
+      <el-col :span="2">
         <el-form-item label="背景色">
           <el-color-picker v-model="appMeta.iconBackground" />
         </el-form-item>

@@ -45,7 +45,8 @@ const appMeta = ref<CanvasAppMeta>({
   name: '',
   description: '',
   icon: DEFAULT_ICON,
-  iconBackground: DEFAULT_ICON_BG
+  iconBackground: DEFAULT_ICON_BG,
+  iconImage: ''
 })
 
 const { nodes, edges, viewport, addNode, updateNodeData, setGraphFromFlow, setViewport } =
@@ -448,7 +449,8 @@ function buildSubmitPayload() {
       name: appMeta.value.name.trim(),
       description: appMeta.value.description?.trim() || '',
       icon: appMeta.value.icon.trim(),
-      iconBackground: appMeta.value.iconBackground || DEFAULT_ICON_BG
+      iconBackground: appMeta.value.iconBackground || DEFAULT_ICON_BG,
+      iconImage: appMeta.value.iconImage || ''
     },
     nodes: nodes.value,
     edges: edges.value,
@@ -489,7 +491,8 @@ async function loadEditCanvas(editId: number) {
     name: String(snapshot?.appMeta?.name || ''),
     description: String(snapshot?.appMeta?.description || ''),
     icon: String(snapshot?.appMeta?.icon || DEFAULT_ICON),
-    iconBackground: String(snapshot?.appMeta?.iconBackground || DEFAULT_ICON_BG)
+    iconBackground: String(snapshot?.appMeta?.iconBackground || DEFAULT_ICON_BG),
+    iconImage: String(snapshot?.appMeta?.iconImage || '')
   }
   setGraphFromFlow({
     nodes: restored.nodes as any[],

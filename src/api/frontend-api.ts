@@ -200,6 +200,7 @@ export interface AppConfigVO {
   appType?: string
   description?: string
   icon?: string
+  iconImage?: string
   sort?: number
   enabled?: boolean
 
@@ -220,11 +221,32 @@ export interface AppConfigVO {
 }
 
 export interface UpdateAppBasicRequest {
-  appName: string
+  appName?: string
   description?: string
   icon?: string
+  iconImage?: string
   sort?: number
   enabled?: boolean
+}
+
+export interface AppListParams {
+  pageNum?: number
+  pageSize?: number
+  keyword?: string
+  publishStatus?: 'PUBLISHED' | 'UNPUBLISHED' | ''
+}
+
+export interface PageResult<T> {
+  records: T[]
+  total: number
+  pageNum: number
+  pageSize: number
+}
+
+function listApps(): Promise<AppConfigVO[]>
+function listApps(params: AppListParams): Promise<PageResult<AppConfigVO> | AppConfigVO[]>
+function listApps(params?: AppListParams): Promise<PageResult<AppConfigVO> | AppConfigVO[]> {
+  return unwrap<PageResult<AppConfigVO> | AppConfigVO[]>(apiClient.get('/apps/list', { params }))
 }
 
 export type KnowledgeId = string | number
@@ -738,9 +760,7 @@ export const menuApi = {
 }
 
 export const appApi = {
-  list(config?: AxiosRequestConfig) {
-    return unwrap<AppConfigVO[]>(apiClient.get('/apps/list', config))
-  },
+  list: listApps,
 
   detail(id: number, config?: AxiosRequestConfig) {
     return unwrap<AppConfigVO>(apiClient.get(`/apps/${id}`, config))

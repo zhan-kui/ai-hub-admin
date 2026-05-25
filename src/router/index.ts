@@ -25,6 +25,12 @@ const staticRoutes: RouteRecordRaw[] = [
     meta: { hidden: true, requiresAuth: true }
   },
   {
+    path: '/apps/:appId/chat',
+    name: 'AppChat',
+    component: () => import('@/views/app/AppChat.vue'),
+    meta: { hidden: true, requiresAuth: true }
+  },
+  {
     path: '/agent-chat',
     component: () => import('@/views/ai/agent/AgentChat.vue'),
     meta: { hidden: true, requiresAuth: true }
