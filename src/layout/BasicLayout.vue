@@ -169,30 +169,6 @@ async function handleLogout() {
 
     <!-- ── Main container ── -->
     <el-container>
-      <el-header class="layout-header" height="56px">
-        <div class="header-left">
-          <div class="header-breadcrumb">
-            <svg
-              class="breadcrumb-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-            <span class="header-title">AI Hub 管理后台</span>
-          </div>
-        </div>
-        <div class="header-right">
-          <div class="header-status">
-            <span class="status-dot"></span>
-            <span class="status-text">系统运行中</span>
-          </div>
-        </div>
-      </el-header>
-
       <el-main class="layout-main" :class="{ 'is-switching': pageSwitching }">
         <div class="route-loading-bar" :class="{ 'is-active': pageSwitching }"></div>
         <router-view v-slot="{ Component, route: currentRoute }">
@@ -219,17 +195,6 @@ async function handleLogout() {
 </template>
 
 <style scoped>
-@keyframes statusPulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.5;
-  }
-}
-
 @keyframes routeLoading {
   0% {
     transform: translateX(-120%);
@@ -540,94 +505,6 @@ async function handleLogout() {
 
 .user-profile:hover .user-chevron {
   color: #94a3b8;
-}
-
-/* ═══════════════════════════════════════════════════
- * Header - 极简浅色 + 青色点缀
- * ═══════════════════════════════════════════════════ */
-.layout-header {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  background: #fff;
-  border-bottom: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgb(15 23 42 / 4%);
-}
-
-/* Header 顶部装饰细线 - 与侧边栏顶线呼应 */
-.layout-header::before {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgb(14 165 233 / 30%) 30%,
-    rgb(14 165 233 / 50%) 50%,
-    rgb(14 165 233 / 30%) 70%,
-    transparent 100%
-  );
-  content: '';
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-}
-
-.header-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.breadcrumb-icon {
-  width: 16px;
-  height: 16px;
-  color: #0ea5e9;
-}
-
-.header-title {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: #0f172a;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.header-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: rgb(16 185 129 / 8%);
-  border: 1px solid rgb(16 185 129 / 20%);
-  border-radius: 999px;
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  background: #10b981;
-  border-radius: 50%;
-  box-shadow: 0 0 6px rgb(16 185 129 / 50%);
-  animation: statusPulse 2.5s ease-in-out infinite;
-}
-
-.status-text {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: #047857;
 }
 
 /* ═══════════════════════════════════════════════════
