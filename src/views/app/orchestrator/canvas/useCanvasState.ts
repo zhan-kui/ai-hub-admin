@@ -8,12 +8,13 @@ import type {
   CanvasSnapshotPayload,
   CanvasViewport
 } from './types'
+import { DEFAULT_VIEWPORT } from './constants'
 import { createNode, createStartNode } from './utils'
 
 export function useCanvasState() {
   const nodes = ref<CanvasGraphNode[]>([decorateNode(createStartNode())])
   const edges = ref<CanvasGraphEdge[]>([])
-  const viewport = ref<CanvasViewport>({ x: 0, y: 0, zoom: 1 })
+  const viewport = ref<CanvasViewport>({ ...DEFAULT_VIEWPORT })
 
   function addNode(nodeType: Exclude<CanvasNodeType, 'start'>, position: { x: number; y: number }) {
     const node = decorateNode(createNode(nodeType, position))
@@ -69,13 +70,13 @@ export function useCanvasState() {
       type: (edge as any).type || 'smoothstep',
       animated: (edge as any).animated ?? true
     }))
-    setGraph(nextNodes, nextEdges, flow.viewport || { x: 0, y: 0, zoom: 1 })
+    setGraph(nextNodes, nextEdges, flow.viewport || { ...DEFAULT_VIEWPORT })
   }
 
   function resetGraph() {
     nodes.value = [decorateNode(createStartNode())]
     edges.value = []
-    viewport.value = { x: 0, y: 0, zoom: 1 }
+    viewport.value = { ...DEFAULT_VIEWPORT }
   }
 
   return {

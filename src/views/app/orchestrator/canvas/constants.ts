@@ -5,6 +5,7 @@ export const MAX_IF_CASES = 5
 
 export const DEFAULT_ICON = '🤖'
 export const DEFAULT_ICON_BG = '#FFEAD5'
+export const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.85 }
 
 export const NODE_DIMENSIONS = {
   start: { width: 242, height: 72 },

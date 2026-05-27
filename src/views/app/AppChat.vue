@@ -38,6 +38,14 @@ interface PromptSuggestion {
 }
 
 type FeedbackRating = 'like' | 'dislike'
+interface ThoughtContentParts {
+  thought: string
+  content: string
+}
+interface ThinkStreamState {
+  inThink: boolean
+  carry: string
+}
 
 const md = new MarkdownIt({
   html: false,
@@ -84,6 +92,8 @@ const messageScrollbarRef = ref<any>(null)
 const messageListRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const shouldStickToBottom = ref(true)
+const thoughtSettlingByMessageId = ref<Record<string, boolean>>({})
+const thoughtSettlingTimers = new Map<string, number>()
 
 const currentConversationId = computed(() => chatStore.getCurrentConversationId)
 const messages = computed(() => chatStore.getMessages)
@@ -355,6 +365,112 @@ function extractThought(record: Record<string, unknown>): string {
   return extractThoughtFromAgentThoughts(record.agent_thoughts) || ''
 }
 
+function mergeThoughtText(...parts: Array<string | null | undefined>): string {
+  const list = parts.map((item) => String(item || '').trim()).filter((item) => item.length > 0)
+  return list.join('\n\n')
+}
+
+function splitThinkTaggedText(raw: string): ThoughtContentParts {
+  if (!raw) {
+    return { thought: '', content: '' }
+  }
+
+  const thoughtParts: string[] = []
+  const contentParts: string[] = []
+  const thinkRegex = /<think>([\s\S]*?)<\/think>/gi
+  let cursor = 0
+  let matched = false
+  let match: RegExpExecArray | null = null
+
+  while ((match = thinkRegex.exec(raw)) !== null) {
+    matched = true
+    contentParts.push(raw.slice(cursor, match.index))
+    thoughtParts.push(match[1] || '')
+    cursor = thinkRegex.lastIndex
+  }
+
+  if (!matched) {
+    return {
+      thought: '',
+      content: raw
+    }
+  }
+
+  contentParts.push(raw.slice(cursor))
+  return {
+    thought: thoughtParts.join('\n\n'),
+    content: contentParts.join('')
+  }
+}
+
+function trailingPartialTagLength(text: string, tag: string): number {
+  const max = Math.min(tag.length - 1, text.length)
+  for (let length = max; length > 0; length -= 1) {
+    if (tag.startsWith(text.slice(-length))) {
+      return length
+    }
+  }
+  return 0
+}
+
+function splitThinkTaggedDelta(delta: string, state: ThinkStreamState): ThoughtContentParts {
+  if (!delta) {
+    return { thought: '', content: '' }
+  }
+
+  const openTag = '<think>'
+  const closeTag = '</think>'
+  const source = `${state.carry}${delta}`
+  const lowerSource = source.toLowerCase()
+  let cursor = 0
+  let thought = ''
+  let content = ''
+  state.carry = ''
+
+  while (cursor < source.length) {
+    if (state.inThink) {
+      const closeIndex = lowerSource.indexOf(closeTag, cursor)
+      if (closeIndex < 0) {
+        const tailLength = trailingPartialTagLength(source.slice(cursor), closeTag)
+        const end = tailLength > 0 ? source.length - tailLength : source.length
+        thought += source.slice(cursor, end)
+        state.carry = source.slice(end)
+        break
+      }
+      thought += source.slice(cursor, closeIndex)
+      state.inThink = false
+      cursor = closeIndex + closeTag.length
+      continue
+    }
+
+    const openIndex = lowerSource.indexOf(openTag, cursor)
+    if (openIndex < 0) {
+      const tailLength = trailingPartialTagLength(source.slice(cursor), openTag)
+      const end = tailLength > 0 ? source.length - tailLength : source.length
+      content += source.slice(cursor, end)
+      state.carry = source.slice(end)
+      break
+    }
+
+    content += source.slice(cursor, openIndex)
+    state.inThink = true
+    cursor = openIndex + openTag.length
+  }
+
+  return { thought, content }
+}
+
+function flushThinkStreamCarry(state: ThinkStreamState): ThoughtContentParts {
+  if (!state.carry) {
+    return { thought: '', content: '' }
+  }
+  const part = state.inThink
+    ? { thought: state.carry, content: '' }
+    : { thought: '', content: state.carry }
+  state.carry = ''
+  return part
+}
+
 function getScrollWrapEl(): HTMLElement | null {
   return (messageScrollbarRef.value?.wrapRef as HTMLElement | undefined) || null
 }
@@ -436,8 +552,55 @@ function parseConversation(rawItem: unknown, index: number): ConversationItem | 
     return null
   }
 
+  const messageSummaryRecord =
+    toRecord(record.firstMessage) ||
+    toRecord(record.first_message) ||
+    toRecord(record.lastMessage) ||
+    toRecord(record.last_message)
+  const dataRecord = toRecord(record.data)
+
   const name =
-    extractStringByKeys(record, ['name', 'title', 'conversationName', 'conversation_name']) ||
+    extractStringByKeys(record, [
+      'name',
+      'title',
+      'conversationName',
+      'conversation_name',
+      'summary',
+      'subject',
+      'firstQuery',
+      'first_query',
+      'firstMessage',
+      'first_message',
+      'lastMessage',
+      'last_message',
+      'query',
+      'question'
+    ]) ||
+    extractStringByKeys(dataRecord || {}, [
+      'name',
+      'title',
+      'conversationName',
+      'conversation_name',
+      'summary',
+      'subject',
+      'firstQuery',
+      'first_query',
+      'firstMessage',
+      'first_message',
+      'lastMessage',
+      'last_message',
+      'query',
+      'question'
+    ]) ||
+    extractStringByKeys(messageSummaryRecord || {}, [
+      'name',
+      'title',
+      'query',
+      'question',
+      'content',
+      'answer'
+    ]) ||
+    extractStringByKeys(toRecord(record.inputs) || {}, ['name', 'title', 'query', 'question']) ||
     `会话 ${index + 1}`
 
   const updatedAt = normalizeTimeValue(
@@ -470,8 +633,11 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   }
 
   const query = toDisplayText(record.query)
-  const answer = toDisplayText(record.answer)
-  const thoughtText = extractThought(record)
+  const recordThought = extractThought(record)
+  const answerRaw = extractRawStringByKeys(record, ['answer']) || ''
+  const answerParts = splitThinkTaggedText(answerRaw)
+  const answer = toDisplayText(answerParts.content) || toDisplayText(record.answer)
+  const thoughtText = mergeThoughtText(recordThought, toDisplayText(answerParts.thought))
   const createdAt = normalizeTimeValue(
     record.createdAt ?? record.created_at ?? record.updatedAt ?? record.updated_at
   )
@@ -515,10 +681,13 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
     }
   }
 
-  const content =
-    extractDisplayStringByKeys(record, ['content', 'message', 'text', 'output']) ||
-    extractDisplayStringByKeys(record, ['answer']) ||
+  const rawContent =
+    extractRawStringByKeys(record, ['content', 'message', 'text', 'output']) ||
+    extractRawStringByKeys(record, ['answer']) ||
     ''
+  const contentParts = splitThinkTaggedText(rawContent)
+  const content = toDisplayText(contentParts.content) || ''
+  const mergedThought = mergeThoughtText(thoughtText, toDisplayText(contentParts.thought))
 
   if (!content) {
     return []
@@ -530,7 +699,7 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
     {
       id: extractStringByKeys(record, ['id', 'messageId']) || `message-${index}`,
       role,
-      thought: thoughtText,
+      thought: mergedThought,
       content,
       isThinking: false,
       createdAt,
@@ -567,6 +736,53 @@ function roleLabel(role: ChatMessage['role']): string {
     return '系统'
   }
   return 'AI'
+}
+
+function isFallbackConversationName(value?: string): boolean {
+  if (!value) return true
+  return /^会话\s*\d+$/i.test(value.trim())
+}
+
+function summarizeConversationNameFromMessages(list: ChatMessage[]): string | null {
+  const firstUserMessage = list.find((item) => item.role === 'user' && item.content.trim())
+  if (!firstUserMessage) return null
+  return firstUserMessage.content.replace(/\s+/g, ' ').trim().slice(0, 28)
+}
+
+function patchConversationNameIfNeeded(conversationId: string, fallbackSource: ChatMessage[]) {
+  if (!conversationId) return
+  const nextName = summarizeConversationNameFromMessages(fallbackSource)
+  if (!nextName) return
+
+  conversations.value = conversations.value.map((item) => {
+    if (item.id !== conversationId) return item
+    if (!isFallbackConversationName(item.name)) return item
+    return { ...item, name: nextName }
+  })
+}
+
+function markThoughtSettling(messageId: string, duration = 360) {
+  if (!messageId) return
+  thoughtSettlingByMessageId.value = { ...thoughtSettlingByMessageId.value, [messageId]: true }
+  const oldTimer = thoughtSettlingTimers.get(messageId)
+  if (oldTimer) {
+    window.clearTimeout(oldTimer)
+  }
+  const timer = window.setTimeout(() => {
+    const next = { ...thoughtSettlingByMessageId.value }
+    delete next[messageId]
+    thoughtSettlingByMessageId.value = next
+    thoughtSettlingTimers.delete(messageId)
+  }, duration)
+  thoughtSettlingTimers.set(messageId, timer)
+}
+
+function isThoughtSettling(messageId: string): boolean {
+  return thoughtSettlingByMessageId.value[messageId] === true
+}
+
+function isThoughtPanelOpen(message: ChatMessage): boolean {
+  return message.isThinking || isThoughtSettling(message.id)
 }
 
 function updateMessageById(messageId: string, updater: (message: ChatMessage) => ChatMessage) {
@@ -634,7 +850,7 @@ function extractContentText(payload: Record<string, unknown>): string {
 
 function extractBackendMessageId(payload: Record<string, unknown>): string | null {
   return (
-    extractStringByKeys(payload, ['messageId', 'message_id', 'id']) ||
+    extractStringByKeys(payload, ['messageId', 'message_id']) ||
     extractStringByKeys(toRecord(payload.metadata) || {}, ['messageId', 'message_id']) ||
     null
   )
@@ -648,21 +864,6 @@ function getFeedbackValue(message: ChatMessage): FeedbackRating | undefined {
 function getSuggestedQuestions(message: ChatMessage): string[] {
   if (!message.backendMessageId) return []
   return suggestedByMessageId.value[message.backendMessageId] || []
-}
-
-function collectStringList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => toText(item))
-      .filter((item): item is string => Boolean(item && item.trim()))
-  }
-  const record = toRecord(value)
-  if (!record) return []
-  for (const key of ['questions', 'suggestions', 'list', 'items', 'records', 'data']) {
-    const result = collectStringList(record[key])
-    if (result.length > 0) return result
-  }
-  return []
 }
 
 function extractErrorMessage(error: unknown): string {
@@ -1327,7 +1528,9 @@ async function loadMessages(conversationId: string) {
     })
 
     resetMessageActionsState()
-    chatStore.setMessages(normalizeMessages(response))
+    const nextMessages = normalizeMessages(response)
+    chatStore.setMessages(nextMessages)
+    patchConversationNameIfNeeded(conversationId, nextMessages)
     requestStickBottom('auto')
   } catch (error: unknown) {
     chatStore.setMessages([])
@@ -1396,37 +1599,6 @@ async function handleFeedback(message: ChatMessage, rating: FeedbackRating) {
     if (rollback[backendMessageId] === rating) delete rollback[backendMessageId]
     feedbackByMessageId.value = rollback
     ElMessage.error(extractErrorMessage(error) || '哎呀，这里好像有点小问题')
-  }
-}
-
-async function loadSuggestedQuestions(message: ChatMessage) {
-  if (!appId.value || !message.backendMessageId) return
-  const backendMessageId = message.backendMessageId
-  if (
-    suggestedLoadingByMessageId.value[backendMessageId] ||
-    suggestedByMessageId.value[backendMessageId]?.length
-  ) {
-    return
-  }
-  suggestedLoadingByMessageId.value = {
-    ...suggestedLoadingByMessageId.value,
-    [backendMessageId]: true
-  }
-  try {
-    const payload = await chatApi.suggested(appId.value, backendMessageId)
-    const questions = collectStringList(payload).slice(0, 6)
-    if (questions.length > 0) {
-      suggestedByMessageId.value = {
-        ...suggestedByMessageId.value,
-        [backendMessageId]: questions
-      }
-    }
-  } catch (error: unknown) {
-    ElMessage.warning(extractErrorMessage(error) || 'Failed to load suggestions')
-  } finally {
-    const next = { ...suggestedLoadingByMessageId.value }
-    delete next[backendMessageId]
-    suggestedLoadingByMessageId.value = next
   }
 }
 
@@ -1512,6 +1684,7 @@ async function handleSend() {
 
   inputValue.value = ''
   let sendSucceeded = false
+  const streamThinkState: ThinkStreamState = { inThink: false, carry: '' }
 
   try {
     await chatApi.streamChat(
@@ -1557,21 +1730,26 @@ async function handleSend() {
                   isThinking: false,
                   backendMessageId: backendMessageId || msg.backendMessageId
                 }))
+                markThoughtSettling(assistantMessageId)
               } else if (chunkType === 'text') {
                 const textDelta = extractContentText(payload)
+                const parts = splitThinkTaggedDelta(textDelta, streamThinkState)
                 updateMessageById(assistantMessageId, (msg) => ({
                   ...msg,
-                  content: `${msg.content}${textDelta}`,
-                  isThinking: false,
+                  thought: `${msg.thought}${parts.thought}`,
+                  content: `${msg.content}${parts.content}`,
+                  isThinking: streamThinkState.inThink,
                   backendMessageId: backendMessageId || msg.backendMessageId
                 }))
               } else {
                 const fallbackText = extractContentText(payload)
                 if (fallbackText) {
+                  const parts = splitThinkTaggedDelta(fallbackText, streamThinkState)
                   updateMessageById(assistantMessageId, (msg) => ({
                     ...msg,
-                    content: `${msg.content}${fallbackText}`,
-                    isThinking: false,
+                    thought: `${msg.thought}${parts.thought}`,
+                    content: `${msg.content}${parts.content}`,
+                    isThinking: streamThinkState.inThink,
                     backendMessageId: backendMessageId || msg.backendMessageId
                   }))
                 }
@@ -1581,10 +1759,16 @@ async function handleSend() {
               updateStreamMeta(payload)
               const backendMessageId = extractBackendMessageId(payload)
               const content = extractContentText(payload)
-              if (content) {
+              streamThinkState.inThink = false
+              streamThinkState.carry = ''
+              const parts = splitThinkTaggedText(content)
+              const nextContent = toDisplayText(parts.content) || content
+              const nextThought = toDisplayText(parts.thought)
+              if (nextContent || nextThought) {
                 updateMessageById(assistantMessageId, (msg) => ({
                   ...msg,
-                  content,
+                  thought: mergeThoughtText(msg.thought, nextThought),
+                  content: nextContent,
                   isThinking: false,
                   backendMessageId: backendMessageId || msg.backendMessageId
                 }))
@@ -1594,16 +1778,26 @@ async function handleSend() {
               updateStreamMeta(payload)
               const backendMessageId = extractBackendMessageId(payload)
               const finalText = extractContentText(payload)
+              const finalParts = splitThinkTaggedText(finalText)
+              const carryParts = flushThinkStreamCarry(streamThinkState)
+              const nextThought = mergeThoughtText(
+                toDisplayText(finalParts.thought),
+                toDisplayText(carryParts.thought)
+              )
+              const nextContent = `${toDisplayText(finalParts.content) || ''}${
+                toDisplayText(carryParts.content) || ''
+              }`
               updateMessageById(assistantMessageId, (msg) => ({
                 ...msg,
-                content: msg.content || finalText,
+                thought: mergeThoughtText(msg.thought, nextThought),
+                content: msg.content || nextContent || finalText,
                 isThinking: false,
                 backendMessageId: backendMessageId || msg.backendMessageId
               }))
-              const assistantMessage = getMessageById(assistantMessageId)
-              if (assistantMessage?.backendMessageId) {
-                void loadSuggestedQuestions(assistantMessage)
-              }
+              markThoughtSettling(assistantMessageId)
+              // if (assistantMessage?.backendMessageId) {
+              //   void loadSuggestedQuestions(assistantMessage)
+              // }
             } else if (event.event === 'error') {
               const payload = normalizeStreamPayload(event.data)
               const message = extractErrorMessage(payload)
@@ -1617,7 +1811,7 @@ async function handleSend() {
           onError: (error) => {
             const message = extractErrorMessage(error)
             const current = getMessageById(assistantMessageId)
-            if (!current || !current.content) {
+            if (!current || (!current.content && !current.thought)) {
               updateMessageById(assistantMessageId, (msg) => ({
                 ...msg,
                 content: `请求失败：${message}`,
@@ -1634,19 +1828,27 @@ async function handleSend() {
     if (!previousConversationId && latestConversationId) {
       // ★ 核心修复：传 silent=true，静默刷新侧边栏列表，不触发 loading 状态，彻底消除抖动
       await loadConversations(latestConversationId, false, true)
+      const fallbackTitle = question.replace(/\s+/g, ' ').trim().slice(0, 28)
+      if (fallbackTitle) {
+        conversations.value = conversations.value.map((item) => {
+          if (item.id !== latestConversationId) return item
+          if (!isFallbackConversationName(item.name)) return item
+          return { ...item, name: fallbackTitle }
+        })
+      }
     }
   } catch (error: unknown) {
     if (!controller.signal.aborted) {
       const message = extractErrorMessage(error)
       const current = getMessageById(assistantMessageId)
-      if (!current || !current.content) {
+      if (!current || (!current.content && !current.thought)) {
         updateMessageById(assistantMessageId, (msg) => ({
           ...msg,
           content: `请求失败：${message}`,
           isThinking: false
         }))
+        ElMessage.error(message)
       }
-      ElMessage.error(message)
     }
   } finally {
     if (streamController.value === controller) {
@@ -1705,6 +1907,9 @@ onBeforeUnmount(() => {
   }
   activeAssistantMessageId.value = null
   stopLoading.value = false
+  thoughtSettlingTimers.forEach((timerId) => window.clearTimeout(timerId))
+  thoughtSettlingTimers.clear()
+  thoughtSettlingByMessageId.value = {}
   releaseAudioResources()
   chatStore.setGenerating(false)
 })
@@ -1979,7 +2184,7 @@ onBeforeUnmount(() => {
                           <details
                             v-if="message.thought || message.isThinking"
                             class="thought-panel"
-                            :open="message.isThinking"
+                            :open="isThoughtPanelOpen(message)"
                           >
                             <summary class="thought-summary">
                               <span class="thinking-icon" :class="{ active: message.isThinking }">
@@ -2008,6 +2213,9 @@ onBeforeUnmount(() => {
                           <div
                             v-if="message.content"
                             class="assistant-content"
+                            :class="{
+                              'assistant-content-transitioning': isThoughtSettling(message.id)
+                            }"
                             v-html="renderMarkdown(message.content)"
                           ></div>
 
@@ -3486,6 +3694,16 @@ onBeforeUnmount(() => {
   word-break: break-word;
   white-space: normal;
   overflow-wrap: anywhere;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.28s ease,
+    transform 0.28s ease;
+}
+
+.assistant-content-transitioning {
+  opacity: 0.65;
+  transform: translateY(3px);
 }
 
 .assistant-content :deep(p) {

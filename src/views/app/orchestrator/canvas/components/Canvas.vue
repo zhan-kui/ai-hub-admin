@@ -24,6 +24,7 @@ import LlmNode from './nodes/LlmNode.vue'
 import IfElseNode from './nodes/IfElseNode.vue'
 import KnowledgeNode from './nodes/KnowledgeNode.vue'
 import AnswerNode from './nodes/AnswerNode.vue'
+import { DEFAULT_VIEWPORT } from '../constants'
 import type { CanvasGraphEdge, CanvasGraphNode, CanvasNodeType } from '../types'
 
 interface Props {
@@ -71,6 +72,7 @@ const defaultEdgeOptions = {
     strokeWidth: 2
   }
 }
+const defaultViewport = { ...DEFAULT_VIEWPORT }
 
 const flowNodes = computed({
   get: () => props.nodes,
@@ -118,6 +120,7 @@ function handleEdgeClick(event: EdgeMouseEvent | any, maybeEdge?: Edge) {
       :node-types="nodeTypes"
       :is-valid-connection="isValidConnection"
       :default-edge-options="defaultEdgeOptions"
+      :default-viewport="defaultViewport"
       :nodes-draggable="true"
       :nodes-connectable="true"
       :elements-selectable="true"
@@ -125,7 +128,6 @@ function handleEdgeClick(event: EdgeMouseEvent | any, maybeEdge?: Edge) {
       :delete-key-code="null"
       :connection-mode="ConnectionMode.Loose"
       :auto-connect="false"
-      fit-view-on-init
       @connect="emit('connect', $event)"
       @viewport-change="emit('viewportChange', $event)"
       @pane-ready="emit('paneReady', $event)"

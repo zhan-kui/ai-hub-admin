@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type {
   Connection,
   Edge,
@@ -20,7 +20,7 @@ import LlmInspector from './components/inspectors/LlmInspector.vue'
 import IfElseInspector from './components/inspectors/IfElseInspector.vue'
 import AnswerInspector from './components/inspectors/AnswerInspector.vue'
 import KnowledgeInspector from './components/inspectors/KnowledgeInspector.vue'
-import { DEFAULT_ICON, DEFAULT_ICON_BG, MAX_NODES } from './constants'
+import { DEFAULT_ICON, DEFAULT_ICON_BG, DEFAULT_VIEWPORT, MAX_NODES } from './constants'
 import { buildCanvasSnapshot, restoreCanvasSnapshot } from './snapshot-builder'
 import { useCanvasState } from './useCanvasState'
 import { useValidation } from './useValidation'
@@ -36,6 +36,7 @@ import type {
 import { genEdgeId, isDuplicateEdge } from './utils'
 
 const router = useRouter()
+const route = useRoute()
 const props = defineProps<{
   editId?: number
 }>()
@@ -424,7 +425,30 @@ function handleFitView() {
 }
 
 function handleCancel() {
-  router.push('/apps')
+  navigateBack()
+}
+
+function resolveReturnPath(): string | null {
+  const rawFrom = route.query.from
+  const from = Array.isArray(rawFrom) ? rawFrom[0] : rawFrom
+  if (typeof from !== 'string') return null
+  const trimmed = from.trim()
+  if (!trimmed.startsWith('/')) return null
+  if (trimmed.startsWith('/apps/orchestrator/create')) return null
+  return trimmed
+}
+
+function navigateBack() {
+  const returnPath = resolveReturnPath()
+  if (returnPath) {
+    void router.push(returnPath)
+    return
+  }
+  if (window.history.length > 1) {
+    router.back()
+    return
+  }
+  void router.push('/dashboard/home')
 }
 
 function handlePaneReady(store: VueFlowStore) {
@@ -499,7 +523,7 @@ async function loadEditCanvas(editId: number) {
     edges: restored.edges as any[],
     viewport: restored.viewport
   })
-  pendingRestoreViewport = restored.viewport || { x: 0, y: 0, zoom: 1 }
+  pendingRestoreViewport = restored.viewport || { ...DEFAULT_VIEWPORT }
   version.value = Number.isFinite(Number(response?.version)) ? Number(response.version) : undefined
 }
 
@@ -585,7 +609,7 @@ onMounted(async () => {
       await loadEditCanvas(props.editId)
     } catch (error: unknown) {
       ElMessage.error(getRequestMessage(error, '画布配置加载失败'))
-      router.push('/apps')
+      navigateBack()
       return
     }
   }

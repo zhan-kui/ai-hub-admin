@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, Clock, Edit, MoreFilled, Search } from '@element-plus/icons-vue'
 import { ContentWrap } from '@/components/ContentWrap'
 import IconUploader from './components/IconUploader.vue'
@@ -23,6 +23,7 @@ type AppBasicForm = Omit<UpdateAppBasicRequest, 'appName' | 'iconImage'> & {
 }
 
 const router = useRouter()
+const route = useRoute()
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -157,10 +158,16 @@ function avatarColor(row: AppRow): string {
 
 function onCreateCommand(command: 'template' | 'blank') {
   if (command === 'template') {
-    router.push('/apps/orchestrator/create?mode=template')
+    router.push({
+      path: '/apps/orchestrator/create',
+      query: { mode: 'template', from: route.fullPath }
+    })
     return
   }
-  router.push('/apps/orchestrator/create?mode=blank')
+  router.push({
+    path: '/apps/orchestrator/create',
+    query: { mode: 'blank', from: route.fullPath }
+  })
 }
 
 async function loadApps() {
@@ -260,11 +267,17 @@ async function submitBasicEdit() {
 function handleEditFlow(row: AppRow) {
   const sourceType = resolveSourceType(row)
   if (sourceType === 'canvas') {
-    router.push(`/apps/orchestrator/create?mode=blank&edit=${row.id}`)
+    router.push({
+      path: '/apps/orchestrator/create',
+      query: { mode: 'blank', edit: String(row.id), from: route.fullPath }
+    })
     return
   }
   if (sourceType === 'template') {
-    router.push(`/apps/orchestrator/create?mode=template&edit=${row.id}`)
+    router.push({
+      path: '/apps/orchestrator/create',
+      query: { mode: 'template', edit: String(row.id), from: route.fullPath }
+    })
     return
   }
   ElMessage.warning('该应用缺少编排来源，无法进入流程编辑')
