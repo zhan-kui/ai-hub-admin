@@ -880,6 +880,13 @@ function extractErrorMessage(error: unknown): string {
   return '请求失败'
 }
 
+function extractErrorCode(error: unknown): number | undefined {
+  const record = toRecord(error)
+  if (!record) {
+    return undefined
+  }
+  return toFiniteNumber(record.code ?? toRecord(record.response)?.status)
+}
 function toFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
@@ -1561,6 +1568,11 @@ async function handleDeleteConversation(conversationId: string) {
 
     ElMessage.success('会话删除成功')
   } catch (error: unknown) {
+    if (extractErrorCode(error) === 404) {
+      ElMessage.warning('会话不存在或已删除')
+      await loadConversations(undefined, false, true)
+      return
+    }
     ElMessage.error(extractErrorMessage(error) || '会话删除失败')
   } finally {
     deletingConversationId.value = null

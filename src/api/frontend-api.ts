@@ -510,7 +510,13 @@ async function unwrap<T>(promise: Promise<AxiosResponse<R<T>>>): Promise<T> {
   const body = resp.data
   const isSuccess = body?.code === 0 || body?.code === 200
   if (!isSuccess) {
-    throw new Error(body.message || `API Error: ${body.code}`)
+    const error = new Error(body.message || `API Error: ${body?.code}`) as Error & {
+      code?: number
+      data?: unknown
+    }
+    error.code = typeof body?.code === 'number' ? body.code : undefined
+    error.data = body?.data
+    throw error
   }
   return body.data
 }
