@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, Clock, Edit, MoreFilled, Search } from '@element-plus/icons-vue'
+import { ArrowDown, Clock, MoreFilled, Plus, Search } from '@element-plus/icons-vue'
 import { ContentWrap } from '@/components/ContentWrap'
 import IconUploader from './components/IconUploader.vue'
 import {
@@ -350,6 +350,10 @@ async function publishApp(row: AppRow) {
 }
 
 function handleMoreCommand(command: string, row: AppRow) {
+  if (command === 'flow') {
+    handleEditFlow(row)
+    return
+  }
   if (command === 'publish') {
     void publishApp(row)
     return
@@ -382,6 +386,12 @@ function handleStatusChange() {
   void loadApps()
 }
 
+function setStatusFilter(status: PublishStatus) {
+  if (statusFilter.value === status) return
+  statusFilter.value = status
+  handleStatusChange()
+}
+
 function handlePageChange(nextPage: number) {
   pageNum.value = nextPage
   void loadApps()
@@ -393,119 +403,174 @@ onMounted(() => {
 </script>
 
 <template>
-  <ContentWrap title="应用管理" message="管理员维护 AI 应用配置">
-    <div class="toolbar">
-      <el-dropdown trigger="click" @command="onCreateCommand">
-        <el-button type="primary">
-          创建智能体
-          <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-        </el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="template">从模板创建</el-dropdown-item>
-            <el-dropdown-item command="blank">从空白编排</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-
-      <el-select v-model="statusFilter" class="status-filter" @change="handleStatusChange">
-        <el-option label="全部" value="" />
-        <el-option label="已发布" value="PUBLISHED" />
-        <el-option label="未发布" value="UNPUBLISHED" />
-      </el-select>
-
-      <el-input
-        v-model="keyword"
-        class="search-input"
-        placeholder="搜索应用名称"
-        clearable
-        @keyup.enter="handleSearch"
-      >
-        <template #suffix>
-          <el-icon class="search-suffix-icon" @click.stop="handleSearch">
-            <Search />
-          </el-icon>
-        </template>
-      </el-input>
-    </div>
-
-    <div v-loading="loading" class="card-grid">
-      <div
-        v-for="row in appList"
-        :key="row.id"
-        class="app-card"
-        :class="{ 'is-unpublished': !isPublished(row) }"
-        @click="handleCardClick(row)"
-      >
-        <el-tag v-if="!isPublished(row)" class="corner-tag" type="info" size="small">未发布</el-tag>
-
-        <div class="card-head">
-          <div
-            v-if="!row.iconImage && !row.icon"
-            class="avatar-fallback"
-            :style="{ backgroundColor: avatarColor(row) }"
-          >
-            {{ avatarText(row) }}
-          </div>
-          <img v-else class="avatar" :src="row.iconImage || row.icon" alt="icon" />
-
-          <div class="head-main">
-            <div class="app-name">{{ row.appName || '-' }}</div>
-            <div class="tag-row">
-              <el-tag size="small" :type="getPublishStatusTagType(row.publishStatus)">
-                {{ getPublishStatusText(row.publishStatus) }}
-              </el-tag>
-              <el-tag size="small" type="info">{{ row.appType || 'UNKNOWN' }}</el-tag>
-            </div>
-          </div>
-        </div>
-
-        <div class="card-description">{{ row.description || '暂无描述' }}</div>
-
-        <div class="card-footer">
-          <div class="card-time">
-            <el-icon><Clock /></el-icon>
-            <span>{{ formatTimeAgo(row.lastEditedAt) }}</span>
+  <ContentWrap>
+    <div class="app-page">
+      <div class="page-header">
+        <div class="eyebrow">APPLICATIONS · {{ total }}</div>
+        <div class="page-header-row">
+          <div class="header-copy">
+            <h1>应用管理</h1>
+            <p>在此创建、配置和管理你的 AI 应用。</p>
           </div>
 
-          <div class="card-actions">
-            <el-button text type="primary" @click.stop="handleEditFlow(row)">
-              <el-icon><Edit /></el-icon>
-              编辑
-            </el-button>
-
-            <el-dropdown trigger="click" @command="(command) => handleMoreCommand(command, row)">
-              <el-button text @click.stop>
-                更多
-                <el-icon class="el-icon--right"><MoreFilled /></el-icon>
+          <div class="page-actions">
+            <el-dropdown trigger="click" @command="onCreateCommand">
+              <el-button type="primary">
+                <el-icon><Plus /></el-icon>
+                新增应用
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item :disabled="publishingId === Number(row.id)" command="publish">
-                    {{ row.publishStatus === 'PUBLISHED' ? '重新发布' : '发布' }}
-                  </el-dropdown-item>
-                  <el-dropdown-item command="basic">改基本信息</el-dropdown-item>
-                  <el-dropdown-item command="params">参数</el-dropdown-item>
-                  <el-dropdown-item command="delete">
-                    <span class="danger-text">删除</span>
-                  </el-dropdown-item>
+                  <el-dropdown-item command="template">从模板创建</el-dropdown-item>
+                  <el-dropdown-item command="blank">从空白编排</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="footer-bar">
-      <span>共 {{ total }} 条</span>
-      <el-pagination
-        layout="prev, pager, next, jumper"
-        :current-page="pageNum"
-        :page-size="20"
-        :total="total"
-        @current-change="handlePageChange"
-      />
+      <div class="filter-bar">
+        <div class="filter-tabs">
+          <button
+            type="button"
+            class="filter-tab"
+            :class="{ active: statusFilter === '' }"
+            @click="setStatusFilter('')"
+          >
+            全部
+          </button>
+          <button
+            type="button"
+            class="filter-tab"
+            :class="{ active: statusFilter === 'PUBLISHED' }"
+            @click="setStatusFilter('PUBLISHED')"
+          >
+            已发布
+          </button>
+          <button
+            type="button"
+            class="filter-tab"
+            :class="{ active: statusFilter === 'UNPUBLISHED' }"
+            @click="setStatusFilter('UNPUBLISHED')"
+          >
+            未发布
+          </button>
+        </div>
+
+        <div class="filter-divider"></div>
+
+        <el-input
+          v-model="keyword"
+          class="search-input"
+          placeholder="按名称搜索"
+          clearable
+          @keyup.enter="handleSearch"
+        >
+          <template #suffix>
+            <el-icon class="search-suffix-icon" @click.stop="handleSearch">
+              <Search />
+            </el-icon>
+          </template>
+        </el-input>
+      </div>
+
+      <div v-loading="loading" class="card-grid">
+        <el-dropdown class="create-dropdown" trigger="click" @command="onCreateCommand">
+          <button type="button" class="app-card create-card">
+            <span class="create-plus">
+              <el-icon><Plus /></el-icon>
+            </span>
+            <span class="create-title">创建新应用</span>
+            <span class="create-subtitle">从模板或空白编排开始</span>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="template">从模板创建</el-dropdown-item>
+              <el-dropdown-item command="blank">从空白编排</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
+        <div
+          v-for="row in appList"
+          :key="row.id"
+          class="app-card"
+          :class="{ 'is-unpublished': !isPublished(row) }"
+          @click="handleCardClick(row)"
+        >
+          <el-dropdown
+            class="more-menu"
+            trigger="click"
+            @command="(command) => handleMoreCommand(command, row)"
+          >
+            <el-button text circle @click.stop>
+              <el-icon><MoreFilled /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="flow">编辑流程</el-dropdown-item>
+                <el-dropdown-item :disabled="publishingId === Number(row.id)" command="publish">
+                  {{ row.publishStatus === 'PUBLISHED' ? '重新发布' : '发布' }}
+                </el-dropdown-item>
+                <el-dropdown-item command="basic">改基本信息</el-dropdown-item>
+                <el-dropdown-item command="params">参数</el-dropdown-item>
+                <el-dropdown-item command="delete">
+                  <span class="danger-text">删除</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+
+          <div class="card-head">
+            <div
+              v-if="!row.iconImage && !row.icon"
+              class="avatar-fallback"
+              :style="{ backgroundColor: avatarColor(row) }"
+            >
+              {{ avatarText(row) }}
+            </div>
+            <img v-else class="avatar" :src="row.iconImage || row.icon" alt="icon" />
+
+            <div class="head-main">
+              <div class="app-name">{{ row.appName || '-' }}</div>
+              <div class="tag-row">
+                <el-tag size="small" :type="getPublishStatusTagType(row.publishStatus)">
+                  {{ getPublishStatusText(row.publishStatus) }}
+                </el-tag>
+                <el-tag size="small" type="info">{{ row.appType || 'UNKNOWN' }}</el-tag>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-description">{{ row.description || '暂无描述' }}</div>
+
+          <div class="card-footer">
+            <div class="card-meta">
+              <span>{{ row.appCode || 'APP' }}</span>
+              <span>·</span>
+              <span>v{{ row.version || 0 }}</span>
+            </div>
+
+            <div class="card-time">
+              <el-icon><Clock /></el-icon>
+              <span>{{ formatTimeAgo(row.lastEditedAt) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-bar">
+        <span>共 {{ total }} 条</span>
+        <el-pagination
+          layout="prev, pager, next, jumper"
+          :current-page="pageNum"
+          :page-size="20"
+          :total="total"
+          @current-change="handlePageChange"
+        />
+      </div>
     </div>
   </ContentWrap>
 
@@ -554,20 +619,109 @@ onMounted(() => {
 </template>
 
 <style scoped lang="less">
-.toolbar {
-  display: grid;
-  grid-template-columns: auto 180px minmax(240px, 320px);
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+.app-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
-.status-filter {
-  width: 100%;
+.page-header {
+  padding-bottom: 4px;
+}
+
+.eyebrow {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--el-text-color-placeholder);
+}
+
+.page-header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.header-copy {
+  min-width: 0;
+}
+
+.header-copy h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--el-text-color-primary);
+}
+
+.header-copy p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+}
+
+.page-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-bar {
+  display: flex;
+  min-height: 48px;
+  padding: 7px;
+  background: var(--el-fill-color-lighter);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  align-items: center;
+  gap: 12px;
+}
+
+.filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-tab {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.filter-tab:hover {
+  color: var(--el-color-primary);
+  background: var(--el-fill-color-light);
+}
+
+.filter-tab.active {
+  color: var(--el-color-primary);
+  background: var(--el-bg-color);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
+}
+
+.filter-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--el-border-color);
 }
 
 .search-input {
-  justify-self: end;
+  width: min(320px, 100%);
+  margin-left: auto;
 }
 
 .search-suffix-icon {
@@ -585,23 +739,25 @@ onMounted(() => {
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 16px;
-  margin-bottom: 24px;
 }
 
 .app-card {
   position: relative;
   display: flex;
-  height: 184px;
-  padding: 14px 14px 12px;
+  height: 190px;
+  min-width: 0;
+  padding: 16px;
   overflow: hidden;
+  font-family: inherit;
   cursor: pointer;
   background: var(--el-fill-color-blank);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   box-shadow: 0 1px 3px rgb(0 0 0 / 5%);
   transition:
+    border-color 0.2s ease,
     box-shadow 0.2s ease,
     transform 0.2s ease,
     opacity 0.2s ease;
@@ -609,31 +765,78 @@ onMounted(() => {
 }
 
 .app-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+  border-color: var(--el-border-color);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 8%);
 }
 
 .app-card.is-unpublished {
-  cursor: not-allowed;
-  opacity: 0.6;
+  cursor: default;
+  opacity: 0.82;
 }
 
-.corner-tag {
+.create-dropdown {
+  width: 100%;
+  min-width: 0;
+}
+
+.create-card {
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--el-text-color-secondary);
+  border-style: dashed;
+}
+
+.create-card:hover {
+  color: var(--el-color-primary);
+  border-color: var(--el-color-primary-light-5);
+}
+
+.create-plus {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.create-title {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+.create-subtitle {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.more-menu {
   position: absolute;
   top: 10px;
   right: 10px;
+  z-index: 1;
 }
 
 .card-head {
   display: flex;
+  min-width: 0;
+  padding-right: 34px;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
 }
 
 .avatar,
 .avatar-fallback {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   flex-shrink: 0;
 }
@@ -644,7 +847,7 @@ onMounted(() => {
 
 .avatar-fallback {
   display: flex;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   color: #fff;
   align-items: center;
@@ -659,7 +862,8 @@ onMounted(() => {
 .app-name {
   overflow: hidden;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1.35;
   color: var(--el-text-color-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -667,17 +871,19 @@ onMounted(() => {
 
 .tag-row {
   display: flex;
+  min-width: 0;
   margin-top: 8px;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .card-description {
   display: -webkit-box;
-  margin-top: 14px;
+  margin-top: 18px;
   overflow: hidden;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.65;
   color: var(--el-text-color-regular);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -685,46 +891,33 @@ onMounted(() => {
 }
 
 .card-footer {
-  position: relative;
-  height: 28px;
-  margin-top: 8px;
+  display: flex;
+  min-width: 0;
+  padding-top: 12px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border-top: 1px solid var(--el-border-color-lighter);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-meta {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .card-time {
   display: inline-flex;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
+  min-width: max-content;
   align-items: center;
   gap: 4px;
-  transition: opacity 0.2s ease;
-}
-
-.card-actions {
-  position: absolute;
-  right: 0;
-  bottom: -12px;
-  left: 0;
-  display: flex;
-  padding: 8px 12px;
-  background: #fff;
-  border-top: 0.5px solid var(--el-border-color-lighter);
-  border-radius: 0 0 8px 8px;
-  opacity: 0;
-  transform: translateY(100%);
-  transition:
-    transform 0.2s ease,
-    opacity 0.2s ease;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.app-card:hover .card-actions {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.app-card:hover .card-time {
-  opacity: 0;
 }
 
 .danger-text {
@@ -733,6 +926,7 @@ onMounted(() => {
 
 .footer-bar {
   display: flex;
+  padding-top: 2px;
   align-items: center;
   justify-content: space-between;
 }
@@ -751,31 +945,52 @@ onMounted(() => {
 }
 
 @media (width <= 960px) {
-  .toolbar {
-    grid-template-columns: 1fr 1fr;
+  .page-header-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .filter-divider {
+    display: none;
   }
 
   .search-input {
-    grid-column: span 2;
-    justify-self: stretch;
-  }
-
-  .card-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    margin-left: 0;
   }
 }
 
 @media (width <= 720px) {
-  .toolbar {
-    grid-template-columns: 1fr;
+  .page-actions {
+    width: 100%;
   }
 
-  .search-input {
-    grid-column: span 1;
+  .page-actions :deep(.el-dropdown),
+  .page-actions :deep(.el-button) {
+    width: 100%;
+  }
+
+  .filter-tabs {
+    overflow-x: auto;
+  }
+
+  .filter-tab {
+    flex-shrink: 0;
   }
 
   .card-grid {
     grid-template-columns: 1fr;
+  }
+
+  .footer-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
   }
 }
 </style>
