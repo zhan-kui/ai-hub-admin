@@ -23,7 +23,7 @@ const loginTransition = ref(false)
 const captchaRaw = ref('')
 const formRef = ref<FormInstance>()
 
-const LOGIN_TRANSITION_DELAY = 720
+const LOGIN_TRANSITION_DELAY = 600
 
 const form = reactive<LoginForm>({
   username: 'admin',
@@ -99,214 +99,151 @@ onMounted(async () => {
   <div class="login-page">
     <Transition name="login-gateway">
       <div v-if="loginTransition" class="login-gateway-mask">
-        <div class="gateway-logo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
-            <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
-          </svg>
+        <div class="gateway-orbit">
+          <div class="gateway-spinner"></div>
         </div>
         <div class="gateway-title">正在进入 AI Hub</div>
-        <div class="gateway-subtitle">同步权限与菜单配置</div>
-        <div class="gateway-progress">
-          <span></span>
-        </div>
+        <div class="gateway-subtitle">同步权限、菜单与应用配置</div>
       </div>
     </Transition>
 
     <!-- ========== 左侧品牌展示区 ========== -->
     <aside class="brand-side">
-      <!-- 背景层 -->
-      <div class="brand-grid"></div>
-      <div class="brand-glow"></div>
+      <div class="brand-bg-grid"></div>
+      <div class="brand-glow brand-glow--one"></div>
+      <div class="brand-glow brand-glow--two"></div>
 
-      <!-- 装饰性数据可视化 -->
-      <svg class="brand-viz" viewBox="0 0 500 500" fill="none" aria-hidden="true">
-        <!-- 外圈 -->
-        <circle cx="250" cy="250" r="200" stroke="rgba(56, 189, 248, 0.15)" stroke-width="1" />
-        <circle
-          cx="250"
-          cy="250"
-          r="160"
-          stroke="rgba(56, 189, 248, 0.2)"
-          stroke-width="1"
-          stroke-dasharray="4 8"
-        />
-        <circle cx="250" cy="250" r="120" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1" />
-        <circle
-          cx="250"
-          cy="250"
-          r="80"
-          stroke="rgba(56, 189, 248, 0.3)"
-          stroke-width="1"
-          stroke-dasharray="2 4"
-        />
-        <!-- 节点 -->
-        <circle cx="250" cy="50" r="4" fill="#38bdf8" />
-        <circle cx="450" cy="250" r="3" fill="#38bdf8" />
-        <circle cx="250" cy="450" r="4" fill="#38bdf8" />
-        <circle cx="50" cy="250" r="3" fill="#38bdf8" />
-        <circle cx="391" cy="109" r="2.5" fill="#22d3ee" />
-        <circle cx="391" cy="391" r="2.5" fill="#22d3ee" />
-        <circle cx="109" cy="391" r="2.5" fill="#22d3ee" />
-        <circle cx="109" cy="109" r="2.5" fill="#22d3ee" />
-        <!-- 连线 -->
-        <line
-          x1="250"
-          y1="50"
-          x2="250"
-          y2="450"
-          stroke="rgba(56, 189, 248, 0.15)"
-          stroke-width="1"
-        />
-        <line
-          x1="50"
-          y1="250"
-          x2="450"
-          y2="250"
-          stroke="rgba(56, 189, 248, 0.15)"
-          stroke-width="1"
-        />
-        <line
-          x1="109"
-          y1="109"
-          x2="391"
-          y2="391"
-          stroke="rgba(56, 189, 248, 0.1)"
-          stroke-width="1"
-        />
-        <line
-          x1="391"
-          y1="109"
-          x2="109"
-          y2="391"
-          stroke="rgba(56, 189, 248, 0.1)"
-          stroke-width="1"
-        />
-        <!-- 中心 -->
-        <circle cx="250" cy="250" r="6" fill="#38bdf8">
-          <animate attributeName="r" values="6;9;6" dur="2.5s" repeatCount="indefinite" />
-        </circle>
-        <circle
-          cx="250"
-          cy="250"
-          r="18"
-          fill="none"
-          stroke="#38bdf8"
-          stroke-width="1.5"
-          opacity="0.6"
-        >
-          <animate attributeName="r" values="18;40;18" dur="2.5s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.6;0;0.6" dur="2.5s" repeatCount="indefinite" />
-        </circle>
-      </svg>
-
-      <!-- 品牌信息 -->
       <div class="brand-content">
         <div class="brand-logo">
           <div class="logo-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
               <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
-              <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
+              <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.4" />
             </svg>
           </div>
-          <span class="logo-text">AI HUB</span>
+          <span class="logo-text">AI Hub</span>
         </div>
 
+        <div class="brand-kicker">ENTERPRISE AI PLATFORM</div>
         <h1 class="brand-headline">
-          下一代<br />
-          <span class="accent">智能控制台</span>
+          构建你的 AI 应用<br />
+          <span>就在此处。</span>
         </h1>
         <p class="brand-desc">
-          集成大模型、数据分析与自动化工作流，<br />
-          为企业构建稳定、安全、可扩展的 AI 基础设施。
+          一站式企业 AI 应用平台，连接模型、数据与业务流程，让团队更高效地构建、管理和交付智能应用。
         </p>
 
-        <!-- 特性列表 -->
-        <ul class="feature-list">
-          <li>
-            <span class="feature-dot"></span>
-            <div>
-              <div class="feature-title">统一模型管理</div>
-              <div class="feature-desc">多模型编排 · 成本可视化</div>
+        <div class="capability-grid">
+          <div class="capability-card">
+            <div class="capability-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
             </div>
-          </li>
-          <li>
-            <span class="feature-dot"></span>
             <div>
-              <div class="feature-title">企业级安全</div>
-              <div class="feature-desc">RBAC 权限 · 审计日志</div>
+              <div class="capability-title">统一接入</div>
+              <div class="capability-desc">集中管理模型、应用与业务能力</div>
             </div>
-          </li>
-          <li>
-            <span class="feature-dot"></span>
+          </div>
+
+          <div class="capability-card">
+            <div class="capability-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+            </div>
             <div>
-              <div class="feature-title">实时数据分析</div>
-              <div class="feature-desc">全链路监控 · 智能告警</div>
+              <div class="capability-title">安全可控</div>
+              <div class="capability-desc">权限、数据与流程可按企业要求配置</div>
             </div>
-          </li>
-        </ul>
+          </div>
+
+          <div class="capability-card">
+            <div class="capability-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+                <path d="M8 13h8M8 17h5" />
+              </svg>
+            </div>
+            <div>
+              <div class="capability-title">持续演进</div>
+              <div class="capability-desc">从原型验证到生产应用，支持长期迭代</div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- 底部状态 -->
       <div class="brand-footer">
-        <span class="status-dot"></span>
-        SYSTEM ONLINE · v2.6.1
+        <span>© 2026 AI Hub</span>
+        <span>企业级 AI 应用控制台</span>
       </div>
     </aside>
 
     <!-- ========== 右侧登录表单区 ========== -->
     <main class="form-side">
-      <div class="form-container">
-        <div class="form-header">
-          <div class="form-tag">ACCOUNT LOGIN</div>
-          <h2 class="form-title">登录到 AI Hub</h2>
-          <p class="form-hint">输入账号信息以进入智能控制台</p>
+      <div class="form-shell">
+        <div class="mobile-logo">
+          <div class="logo-icon compact">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+              <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.4" />
+            </svg>
+          </div>
+          <span>AI Hub</span>
         </div>
 
-        <el-form
-          ref="formRef"
-          :model="form"
-          :rules="rules"
-          label-position="top"
-          class="login-form"
-          @keyup.enter="submit"
-        >
-          <el-form-item label="用户名" prop="username">
-            <el-input v-model="form.username" placeholder="输入用户名" />
-          </el-form-item>
+        <div class="form-container">
+          <div class="form-header">
+            <div class="form-kicker">WELCOME BACK</div>
+            <h2 class="form-title">登录控制台</h2>
+            <p class="form-hint">继续构建、管理和交付企业智能应用。</p>
+          </div>
 
-          <el-form-item label="密码" prop="password">
-            <el-input
-              v-model="form.password"
-              type="password"
-              placeholder="输入密码"
-              show-password
-            />
-          </el-form-item>
+          <el-form
+            ref="formRef"
+            :model="form"
+            :rules="rules"
+            label-position="top"
+            class="login-form"
+            @keyup.enter="submit"
+          >
+            <el-form-item label="用户名" prop="username">
+              <el-input v-model="form.username" placeholder="请输入用户名" />
+            </el-form-item>
 
-          <el-form-item label="验证码" prop="captchaCode">
-            <div class="captcha-row">
-              <el-input v-model="form.captchaCode" placeholder="输入验证码" />
-              <div class="captcha-box" @click="refreshCaptcha">
-                <img :src="captchaImage" alt="captcha" />
+            <el-form-item label="密码" prop="password">
+              <el-input
+                v-model="form.password"
+                type="password"
+                placeholder="请输入密码"
+                show-password
+              />
+            </el-form-item>
+
+            <el-form-item label="验证码" prop="captchaCode">
+              <div class="captcha-row">
+                <el-input v-model="form.captchaCode" placeholder="请输入验证码" />
+                <button
+                  type="button"
+                  class="captcha-box"
+                  title="点击刷新验证码"
+                  @click="refreshCaptcha"
+                >
+                  <img :src="captchaImage" alt="captcha" />
+                </button>
               </div>
-            </div>
-          </el-form-item>
+            </el-form-item>
 
-          <el-button type="primary" class="login-btn" :loading="loading" @click="submit">
-            <span>登 录</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M5 12h14M13 5l7 7-7 7" />
-            </svg>
-          </el-button>
-        </el-form>
+            <el-button type="primary" class="login-btn" :loading="loading" @click="submit">
+              登录 AI Hub
+            </el-button>
+          </el-form>
 
-        <div class="form-footer">
-          <span>© 2026 AI Hub</span>
-          <span class="sep">·</span>
-          <a href="#">帮助中心</a>
-          <span class="sep">·</span>
-          <a href="#">隐私政策</a>
+          <div class="form-footer">
+            <span>安全登录 · 权限同步 · 企业工作台</span>
+          </div>
         </div>
       </div>
     </main>
@@ -314,43 +251,64 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-@keyframes gatewaySpin {
-  0% {
-    transform: rotate(0deg) scale(1);
-  }
-
-  55% {
-    transform: rotate(220deg) scale(1.08);
-  }
-
-  100% {
-    transform: rotate(360deg) scale(1);
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-@keyframes gatewayProgress {
-  0% {
-    transform: translateX(-120%);
-  }
-
-  100% {
-    transform: translateX(260%);
-  }
-}
-
-@keyframes pulse {
+@keyframes valueCardPulse {
   0%,
+  30%,
   100% {
-    opacity: 1;
+    background: rgb(255 255 255 / 68%);
+    border-color: rgb(213 223 239 / 76%);
+    transform: translateY(0);
+    box-shadow: 0 12px 30px rgb(15 23 42 / 4%);
   }
 
-  50% {
-    opacity: 0.4;
+  9%,
+  20% {
+    background: rgb(255 255 255 / 92%);
+    border-color: rgb(37 99 235 / 30%);
+    transform: translateY(-4px);
+    box-shadow: 0 18px 38px rgb(37 99 235 / 10%);
+  }
+}
+
+@keyframes valueIconPulse {
+  0%,
+  30%,
+  100% {
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-color: #d8e5ff;
+  }
+
+  9%,
+  20% {
+    color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
   }
 }
 
 /* 响应式 */
-@media (width <= 960px) {
+@media (width <= 1100px) {
+  .login-page {
+    grid-template-columns: 0.9fr 1fr;
+  }
+
+  .brand-side {
+    padding: 44px;
+  }
+
+  .brand-headline {
+    font-size: 46px;
+  }
+}
+
+@media (width <= 900px) {
   .login-page {
     grid-template-columns: 1fr;
   }
@@ -360,388 +318,458 @@ onMounted(async () => {
   }
 
   .form-side {
-    min-height: 100vh;
+    padding: 28px 20px;
+  }
+
+  .mobile-logo {
+    display: flex;
+  }
+
+  .form-container {
+    padding: 30px 24px;
+  }
+}
+
+@media (width <= 520px) {
+  .captcha-row {
+    grid-template-columns: 1fr;
+  }
+
+  .captcha-box {
+    width: 100%;
   }
 }
 
 .login-page {
+  --page-bg: #f5f7fb;
+  --panel-bg: #fff;
+  --panel-soft: #f8faff;
+  --border: #e4eaf3;
+  --border-strong: #d5dfef;
+  --primary: #2563eb;
+  --primary-strong: #1d4ed8;
+  --primary-soft: #eaf1ff;
+  --text-main: #1f2937;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --success: #16a34a;
+
   display: grid;
   width: 100%;
   min-height: 100vh;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', sans-serif;
-  background: #0f172a;
-  grid-template-columns: 1.1fr 1fr;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Microsoft YaHei',
+    sans-serif;
+  color: var(--text-main);
+  background: var(--page-bg);
+  grid-template-columns: minmax(520px, 1.05fr) minmax(420px, 0.95fr);
 }
 
+/* ===== 登录过渡遮罩 ===== */
 .login-gateway-mask {
   position: fixed;
   z-index: 1000;
   display: flex;
-  color: #e2e8f0;
-  background: radial-gradient(circle at 50% 45%, rgb(56 189 248 / 20%), transparent 34%),
-    linear-gradient(135deg, rgb(12 22 40 / 98%), rgb(10 18 32 / 98%));
+  color: var(--text-main);
+  background: rgb(245 247 251 / 86%);
   inset: 0;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(10px);
 }
 
-:global(.login-success-message) {
-  min-width: 240px;
-  background: rgb(15 23 42 / 90%) !important;
-  border: 1px solid rgb(56 189 248 / 24%) !important;
-  border-radius: 10px !important;
-  box-shadow:
-    0 16px 40px rgb(2 8 23 / 22%),
-    0 0 0 1px rgb(255 255 255 / 4%) inset !important;
-  backdrop-filter: blur(14px);
+.gateway-orbit {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 18px 42px rgb(15 23 42 / 10%);
+  place-items: center;
 }
 
-:global(.login-success-message .el-message__content) {
-  font-weight: 600;
-  color: #e2e8f0 !important;
-}
-
-:global(.login-success-message .el-message__icon) {
-  color: #38bdf8 !important;
-}
-
-.gateway-logo {
-  width: 68px;
-  height: 68px;
-  color: #38bdf8;
-  filter: drop-shadow(0 0 18px rgb(56 189 248 / 65%));
-  animation: gatewaySpin 1.2s cubic-bezier(0.45, 0, 0.25, 1) infinite;
-}
-
-.gateway-logo svg {
-  width: 100%;
-  height: 100%;
+.gateway-spinner {
+  width: 26px;
+  height: 26px;
+  border: 2.5px solid #dbe5f5;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
 
 .gateway-title {
-  margin-top: 22px;
-  font-size: 18px;
+  margin-top: 20px;
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.04em;
 }
 
 .gateway-subtitle {
-  margin-top: 8px;
+  margin-top: 6px;
   font-size: 13px;
-  color: #94a3b8;
-}
-
-.gateway-progress {
-  width: 180px;
-  height: 3px;
-  margin-top: 26px;
-  overflow: hidden;
-  background: rgb(148 163 184 / 18%);
-  border-radius: 999px;
-}
-
-.gateway-progress span {
-  display: block;
-  width: 42%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, #38bdf8, #67e8f9);
-  border-radius: inherit;
-  animation: gatewayProgress 1.05s ease-in-out infinite;
+  color: var(--text-secondary);
 }
 
 .login-gateway-enter-active,
 .login-gateway-leave-active {
-  transition:
-    opacity 0.32s ease,
-    transform 0.32s ease;
+  transition: opacity 0.3s ease;
 }
 
 .login-gateway-enter-from,
 .login-gateway-leave-to {
   opacity: 0;
-  transform: scale(1.02);
+}
+
+:global(.login-success-message) {
+  border-radius: 10px !important;
 }
 
 /* ===== 左侧品牌展示 ===== */
 .brand-side {
   position: relative;
   display: flex;
+  min-height: 100vh;
   padding: 56px 64px;
   overflow: hidden;
-  color: #e2e8f0;
-  background: linear-gradient(135deg, #0c1628 0%, #0f172a 50%, #0a1426 100%);
+  background: radial-gradient(circle at 12% 16%, rgb(37 99 235 / 16%), transparent 28%),
+    radial-gradient(circle at 86% 72%, rgb(14 116 144 / 10%), transparent 28%),
+    linear-gradient(145deg, #f8fbff 0%, #eef4ff 50%, #f6fbff 100%);
+  border-right: 1px solid var(--border);
   flex-direction: column;
   justify-content: space-between;
 }
 
-.brand-grid {
+.brand-bg-grid {
   position: absolute;
-  pointer-events: none;
-  background-image: linear-gradient(rgb(56 189 248 / 6%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(56 189 248 / 6%) 1px, transparent 1px);
-  background-size: 48px 48px;
+  background-image: linear-gradient(rgb(37 99 235 / 7%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(37 99 235 / 7%) 1px, transparent 1px);
+  background-size: 36px 36px;
+  opacity: 0.5;
   inset: 0;
-  mask-image: radial-gradient(ellipse at 30% 50%, black 30%, transparent 80%);
+  mask-image: linear-gradient(90deg, #000 0%, transparent 88%);
 }
 
 .brand-glow {
   position: absolute;
-  top: 50%;
-  left: -200px;
-  width: 700px;
-  height: 700px;
   pointer-events: none;
-  background: radial-gradient(circle, rgb(14 165 233 / 25%) 0%, transparent 60%);
-  filter: blur(40px);
-  transform: translateY(-50%);
+  border-radius: 999px;
+  filter: blur(4px);
 }
 
-.brand-viz {
-  position: absolute;
-  top: 50%;
-  right: -100px;
-  width: 580px;
-  height: 580px;
-  pointer-events: none;
-  opacity: 0.45;
-  transform: translateY(-50%);
+.brand-glow--one {
+  top: 120px;
+  right: 90px;
+  width: 180px;
+  height: 180px;
+  background: rgb(37 99 235 / 9%);
 }
 
-/* 品牌 LOGO */
+.brand-glow--two {
+  right: -60px;
+  bottom: 120px;
+  width: 260px;
+  height: 260px;
+  background: rgb(14 116 144 / 8%);
+}
+
 .brand-content {
   position: relative;
   z-index: 2;
-  max-width: 460px;
+  max-width: 620px;
 }
 
 .brand-logo {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 80px;
+  margin-bottom: 88px;
 }
 
 .logo-icon {
-  width: 36px;
-  height: 36px;
-  color: #38bdf8;
-  filter: drop-shadow(0 0 8px rgb(56 189 248 / 50%));
+  display: grid;
+  width: 38px;
+  height: 38px;
+  color: #fff;
+  background: var(--primary);
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgb(37 99 235 / 20%);
+  place-items: center;
+}
+
+.logo-icon.compact {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
 }
 
 .logo-icon svg {
-  width: 100%;
-  height: 100%;
+  width: 22px;
+  height: 22px;
 }
 
 .logo-text {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  color: #f1f5f9;
-}
-
-/* 大标题 */
-.brand-headline {
-  margin: 0 0 24px;
-  font-size: 48px;
-  font-weight: 700;
-  line-height: 1.15;
+  font-size: 18px;
+  font-weight: 800;
   letter-spacing: -0.02em;
-  color: #f8fafc;
+  color: var(--text-main);
 }
 
-.brand-headline .accent {
-  background: linear-gradient(135deg, #38bdf8 0%, #22d3ee 50%, #67e8f9 100%);
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+.brand-kicker,
+.form-kicker {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--primary);
+}
+
+.brand-headline {
+  max-width: 720px;
+  margin: 12px 0 18px;
+  font-size: clamp(44px, 5.2vw, 68px);
+  font-weight: 760;
+  line-height: 1.08;
+  letter-spacing: -0.05em;
+  color: #142033;
+}
+
+.brand-headline span {
+  font-size: 1.08em;
+  font-weight: 850;
+  color: var(--primary-strong);
 }
 
 .brand-desc {
-  margin: 0 0 48px;
-  font-size: 15px;
-  line-height: 1.7;
-  color: #94a3b8;
+  max-width: 560px;
+  margin: 0 0 34px;
+  font-size: 16px;
+  line-height: 1.85;
+  color: var(--text-secondary);
 }
 
-/* 特性列表 */
-.feature-list {
-  display: flex;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-  flex-direction: column;
-  gap: 20px;
+.capability-grid {
+  display: grid;
+  max-width: 560px;
+  gap: 12px;
 }
 
-.feature-list li {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.feature-dot {
+.capability-card {
   position: relative;
-  width: 8px;
-  height: 8px;
-  margin-top: 8px;
-  background: #38bdf8;
-  border-radius: 50%;
-  box-shadow: 0 0 12px rgb(56 189 248 / 70%);
+  display: flex;
+  padding: 14px 16px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 68%);
+  border: 1px solid rgb(213 223 239 / 76%);
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgb(15 23 42 / 4%);
+  align-items: center;
+  gap: 12px;
+  transition:
+    background-color 0.22s ease,
+    border-color 0.22s ease,
+    box-shadow 0.22s ease,
+    transform 0.22s ease;
+}
+
+.capability-card:nth-child(1) {
+  animation: valueCardPulse 9s ease-in-out infinite;
+}
+
+.capability-card:nth-child(2) {
+  animation: valueCardPulse 9s ease-in-out infinite;
+  animation-delay: 3s;
+}
+
+.capability-card:nth-child(3) {
+  animation: valueCardPulse 9s ease-in-out infinite;
+  animation-delay: 6s;
+}
+
+.capability-card:hover {
+  background: rgb(255 255 255 / 96%);
+  border-color: rgb(37 99 235 / 34%);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 42px rgb(37 99 235 / 12%);
+}
+
+.capability-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border: 1px solid #d8e5ff;
+  border-radius: 13px;
+  place-items: center;
   flex-shrink: 0;
+  transition:
+    color 0.22s ease,
+    background-color 0.22s ease,
+    border-color 0.22s ease;
 }
 
-.feature-dot::before {
-  position: absolute;
-  border: 1px solid rgb(56 189 248 / 40%);
-  border-radius: 50%;
-  content: '';
-  inset: -4px;
+.capability-card:nth-child(1) .capability-icon {
+  animation: valueIconPulse 9s ease-in-out infinite;
 }
 
-.feature-title {
-  margin-bottom: 2px;
+.capability-card:nth-child(2) .capability-icon {
+  animation: valueIconPulse 9s ease-in-out infinite;
+  animation-delay: 3s;
+}
+
+.capability-card:nth-child(3) .capability-icon {
+  animation: valueIconPulse 9s ease-in-out infinite;
+  animation-delay: 6s;
+}
+
+.capability-card:hover .capability-icon {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.capability-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.capability-title {
+  margin-bottom: 3px;
   font-size: 14px;
-  font-weight: 600;
-  color: #e2e8f0;
+  font-weight: 750;
+  color: var(--text-main);
 }
 
-.feature-desc {
-  font-size: 12px;
-  letter-spacing: 0.02em;
-  color: #64748b;
+.capability-desc {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
-/* 左下状态 */
 .brand-footer {
   position: relative;
   z-index: 2;
   display: flex;
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.15em;
-  color: #64748b;
-  align-items: center;
-  gap: 8px;
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  background: #22c55e;
-  border-radius: 50%;
-  box-shadow: 0 0 8px #22c55e;
-  animation: pulse 2s ease-in-out infinite;
+  font-size: 12px;
+  color: var(--text-muted);
+  justify-content: space-between;
+  gap: 18px;
 }
 
 /* ===== 右侧表单区 ===== */
 .form-side {
   position: relative;
   display: flex;
+  min-height: 100vh;
   padding: 40px;
-  background: #0a1220;
+  background: radial-gradient(circle at 80% 10%, rgb(37 99 235 / 8%), transparent 32%),
+    linear-gradient(180deg, #fff 0%, #f8faff 100%);
   align-items: center;
   justify-content: center;
 }
 
-.form-side::before {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 1px;
-  background: linear-gradient(to bottom, transparent, rgb(56 189 248 / 30%), transparent);
-  content: '';
+.form-shell {
+  width: 100%;
+  max-width: 430px;
+}
+
+.mobile-logo {
+  display: none;
+  margin-bottom: 28px;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 800;
 }
 
 .form-container {
   width: 100%;
-  max-width: 400px;
+  padding: 36px;
+  background: rgb(255 255 255 / 82%);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow:
+    0 24px 64px rgb(15 23 42 / 8%),
+    inset 0 1px 0 rgb(255 255 255 / 80%);
+  backdrop-filter: blur(14px);
 }
 
 .form-header {
-  margin-bottom: 40px;
-}
-
-.form-tag {
-  display: inline-block;
-  padding: 4px 10px;
-  margin-bottom: 20px;
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.2em;
-  color: #38bdf8;
-  background: rgb(56 189 248 / 8%);
-  border: 1px solid rgb(56 189 248 / 25%);
-  border-radius: 4px;
+  margin-bottom: 30px;
 }
 
 .form-title {
-  margin: 0 0 8px;
+  margin: 8px 0;
   font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: #f1f5f9;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-main);
 }
 
 .form-hint {
+  max-width: 330px;
   margin: 0;
   font-size: 14px;
-  color: #64748b;
+  line-height: 1.7;
+  color: var(--text-secondary);
 }
 
-/* ===== Element Plus 重写：科技风 ===== */
+/* ===== Element Plus 重写：企业蓝灰 ===== */
 :deep(.el-form-item) {
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 :deep(.el-form-item__label) {
-  padding-bottom: 8px !important;
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-  letter-spacing: 0.05em !important;
-  color: #94a3b8 !important;
-  text-transform: uppercase;
+  padding-bottom: 7px !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+  color: var(--text-secondary) !important;
 }
 
 :deep(.el-input__wrapper) {
-  height: 44px;
+  height: 46px;
   padding: 2px 14px !important;
-  background-color: rgb(15 23 42 / 60%) !important;
-  border-radius: 6px !important;
-  box-shadow: 0 0 0 1px rgb(56 189 248 / 15%) inset !important;
-  transition: all 0.2s ease;
+  background-color: #f8faff !important;
+  border-radius: 12px !important;
+  box-shadow: 0 0 0 1px var(--border) inset !important;
+  transition:
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 :deep(.el-input__wrapper:hover) {
-  background-color: rgb(15 23 42 / 90%) !important;
-  box-shadow: 0 0 0 1px rgb(56 189 248 / 35%) inset !important;
+  background-color: #fff !important;
+  box-shadow: 0 0 0 1px #c8d8f5 inset !important;
 }
 
 :deep(.el-input__wrapper.is-focus) {
-  background-color: rgb(15 23 42 / 100%) !important;
+  background-color: #fff !important;
   box-shadow:
-    0 0 0 1px #38bdf8 inset,
-    0 0 0 3px rgb(56 189 248 / 15%),
-    0 0 20px rgb(56 189 248 / 15%) !important;
+    0 0 0 1px var(--primary) inset,
+    0 0 0 4px rgb(37 99 235 / 10%) !important;
 }
 
 :deep(.el-input__inner) {
   font-size: 14px !important;
-  color: #e2e8f0 !important;
+  color: var(--text-main) !important;
 }
 
 :deep(.el-input__inner::placeholder) {
-  color: #475569 !important;
+  color: var(--text-muted) !important;
 }
 
 :deep(.el-input__suffix),
-:deep(.el-input__clear) {
-  color: #64748b !important;
+:deep(.el-input__clear),
+:deep(.el-input__password) {
+  color: var(--text-muted) !important;
 }
 
 /* 验证码 */
@@ -753,111 +781,63 @@ onMounted(async () => {
 }
 
 .captcha-box {
-  position: relative;
   width: 124px;
-  height: 44px;
+  height: 46px;
+  padding: 0;
   overflow: hidden;
   cursor: pointer;
-  background: rgb(15 23 42 / 60%);
-  border: 1px solid rgb(56 189 248 / 25%);
-  border-radius: 6px;
-  transition: all 0.2s ease;
+  background: #f8faff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .captcha-box:hover {
-  border-color: #38bdf8;
-  box-shadow: 0 0 12px rgb(56 189 248 / 30%);
+  border-color: #bfd0f4;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgb(37 99 235 / 10%);
 }
 
 .captcha-box img {
   display: block;
   width: 100%;
   height: 100%;
-  filter: brightness(0.95) contrast(1.1);
   object-fit: fill;
 }
 
 /* 登录按钮 */
 .login-btn {
-  position: relative;
-  display: flex;
   width: 100%;
   height: 48px !important;
-  margin-top: 16px;
-  overflow: hidden;
-  font-size: 14px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.15em;
-  color: #f0f9ff !important;
-  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%) !important;
+  margin-top: 8px;
+  font-size: 15px !important;
+  font-weight: 750 !important;
+  letter-spacing: 0.02em;
+  color: #fff !important;
+  background: var(--primary) !important;
   border: none !important;
-  border-radius: 6px !important;
-  box-shadow:
-    0 4px 16px rgb(14 165 233 / 30%),
-    inset 0 1px 0 rgb(255 255 255 / 20%);
-  transition: all 0.25s ease;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
-.login-btn::before {
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 60%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 25%), transparent);
-  content: '';
-  transform: skewX(-20deg);
-  transition: left 0.6s;
+  border-radius: 12px !important;
+  box-shadow: 0 14px 28px rgb(37 99 235 / 22%);
+  transition:
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
 }
 
 .login-btn:hover {
+  background: var(--primary-strong) !important;
   transform: translateY(-1px);
-  box-shadow:
-    0 8px 24px rgb(14 165 233 / 50%),
-    inset 0 1px 0 rgb(255 255 255 / 30%);
-}
-
-.login-btn:hover::before {
-  left: 150%;
-}
-
-.login-btn svg {
-  width: 16px;
-  height: 16px;
-  transition: transform 0.2s;
-}
-
-.login-btn:hover svg {
-  transform: translateX(3px);
+  box-shadow: 0 18px 34px rgb(37 99 235 / 28%);
 }
 
 /* 表单底部 */
 .form-footer {
-  margin-top: 32px;
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
+  margin-top: 22px;
   font-size: 12px;
-  letter-spacing: 0.03em;
-  color: #475569;
+  color: var(--text-muted);
   text-align: center;
 }
-
-.form-footer a {
-  color: #64748b;
-  text-decoration: none;
-  transition: color 0.15s;
-}
-
-.form-footer a:hover {
-  color: #38bdf8;
-}
-
-.form-footer .sep {
-  margin: 0 10px;
-  color: #334155;
-}
-
-/* ========== 科技风格 - 深蓝青色系，左右分栏 ========== */
 </style>

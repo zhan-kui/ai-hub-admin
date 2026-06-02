@@ -8,7 +8,6 @@ import {
   type UploadFile,
   type UploadUserFile
 } from 'element-plus'
-import { ContentWrap } from '@/components/ContentWrap'
 import {
   knowledgeApi,
   type CreateKnowledgeBaseRequest,
@@ -47,7 +46,6 @@ const selectedKbId = ref<KnowledgeId | null>(null)
 
 const activeTab = ref<'documents' | 'segments' | 'retrieve'>('documents')
 
-const kbDialogVisible = ref(false)
 const kbFormRef = ref<FormInstance>()
 const kbForm = reactive({
   kbName: '',
@@ -193,6 +191,40 @@ const selectedKb = computed(
   () => kbList.value.find((item) => String(item.id) === String(selectedKbId.value)) || null
 )
 
+const pageMode = ref<'list' | 'detail' | 'create'>('list')
+const createStep = ref(1)
+const createSteps = [
+  { title: '基本信息', description: '命名并说明用途' },
+  { title: '连接数据集', description: '配置 Dify 凭据' },
+  { title: '索引设置', description: '选择检索质量' },
+  { title: '确认创建', description: '检查配置并完成' }
+]
+
+const totalDocuments = computed(() =>
+  kbList.value.reduce(
+    (sum, item) => sum + Number(item.documentCount ?? item.document_count ?? 0),
+    0
+  )
+)
+
+const totalWords = computed(() =>
+  kbList.value.reduce((sum, item) => sum + Number(item.wordCount ?? item.word_count ?? 0), 0)
+)
+
+const availableDocCount = computed(
+  () => docs.value.filter((item) => resolveDocStatus(item).toLowerCase() === 'available').length
+)
+
+const selectedKbDocumentCount = computed(() =>
+  selectedKb.value
+    ? Number(selectedKb.value.documentCount ?? selectedKb.value.document_count ?? 0)
+    : 0
+)
+
+const selectedKbWordCount = computed(() =>
+  selectedKb.value ? Number(selectedKb.value.wordCount ?? selectedKb.value.word_count ?? 0) : 0
+)
+
 const docOptions = computed(() =>
   docs.value.map((doc) => ({
     label: doc.name || String(doc.id),
@@ -209,6 +241,43 @@ const currentChildChunks = computed(() => {
 
 function resolveKbName(row: KbRow): string {
   return row.kbName || row.name || String(row.id)
+}
+
+function resolveKbDocumentCount(row: KbRow): number {
+  return Number(row.documentCount ?? row.document_count ?? 0)
+}
+
+function resolveKbWordCount(row: KbRow): number {
+  return Number(row.wordCount ?? row.word_count ?? 0)
+}
+
+function formatCompactNumber(value: unknown): string {
+  const num = Number(value || 0)
+  if (!Number.isFinite(num)) return '0'
+  if (num >= 10000) return `${(num / 10000).toFixed(num >= 100000 ? 0 : 1)}w`
+  if (num >= 1000) return `${(num / 1000).toFixed(num >= 10000 ? 0 : 1)}k`
+  return String(num)
+}
+
+function kbInitial(row: KbRow): string {
+  const name = resolveKbName(row).trim()
+  return name ? name.charAt(0).toUpperCase() : 'K'
+}
+
+function isDocSelected(row: DocRow): boolean {
+  return selectedDocumentIds.value.includes(String(row.id))
+}
+
+function toggleDocumentSelection(row: DocRow, checked: boolean) {
+  const id = String(row.id || '')
+  if (!id) return
+  if (checked) {
+    if (!selectedDocumentIds.value.includes(id)) {
+      selectedDocumentIds.value = [...selectedDocumentIds.value, id]
+    }
+    return
+  }
+  selectedDocumentIds.value = selectedDocumentIds.value.filter((item) => item !== id)
 }
 
 function resolveDocStatus(row: DocRow): string {
@@ -351,7 +420,11 @@ async function loadKnowledgeBases() {
     }
     const exists = kbList.value.some((item) => String(item.id) === String(selectedKbId.value))
     if (!exists) {
-      selectedKbId.value = kbList.value[0].id
+      selectedKbId.value = null
+      if (pageMode.value === 'detail') {
+        pageMode.value = 'list'
+      }
+      resetDocumentState()
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '知识库列表加载失败')
@@ -414,8 +487,10 @@ async function submitKb() {
     const created = await knowledgeApi.create(payload)
     ElMessage.success('知识库创建成功')
     selectedKbId.value = created.id
-    kbDialogVisible.value = false
     await loadKnowledgeBases()
+    pageMode.value = 'detail'
+    createStep.value = 1
+    activeTab.value = 'documents'
   } catch (error: any) {
     ElMessage.error(error?.message || '知识库创建失败')
   } finally {
@@ -432,6 +507,7 @@ async function removeKb(row: KbRow) {
     ElMessage.success('知识库删除成功')
     if (String(selectedKbId.value) === String(row.id)) {
       selectedKbId.value = null
+      pageMode.value = 'list'
       resetDocumentState()
     }
     await loadKnowledgeBases()
@@ -444,7 +520,61 @@ async function removeKb(row: KbRow) {
 
 function openCreateKb() {
   resetKbForm()
-  kbDialogVisible.value = true
+  selectedKbId.value = null
+  resetDocumentState()
+  createStep.value = 1
+  pageMode.value = 'create'
+}
+
+function openKnowledgeDetail(row: KbRow) {
+  selectedKbId.value = row.id
+  activeTab.value = 'documents'
+  pageMode.value = 'detail'
+}
+
+function backToKnowledgeList() {
+  pageMode.value = 'list'
+  selectedKbId.value = null
+  resetDocumentState()
+}
+
+function cancelCreateKb() {
+  resetKbForm()
+  createStep.value = 1
+  pageMode.value = 'list'
+}
+
+function validateCreateStep(step = createStep.value): boolean {
+  if (step === 1) {
+    if (!kbForm.kbName.trim()) {
+      ElMessage.warning('请输入知识库名称')
+      return false
+    }
+    if (!kbForm.kbCode.trim()) {
+      ElMessage.warning('请输入知识库编码')
+      return false
+    }
+  }
+  if (step === 2) {
+    if (!kbForm.difyApiKey.trim()) {
+      ElMessage.warning('请输入 Dify API Key')
+      return false
+    }
+    if (!kbForm.difyDatasetId.trim()) {
+      ElMessage.warning('请输入 Dify Dataset ID')
+      return false
+    }
+  }
+  return true
+}
+
+function nextCreateStep() {
+  if (!validateCreateStep()) return
+  createStep.value = Math.min(4, createStep.value + 1)
+}
+
+function prevCreateStep() {
+  createStep.value = Math.max(1, createStep.value - 1)
 }
 
 function openCreateTextDoc() {
@@ -863,98 +993,324 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ContentWrap title="知识库管理" message="列表、文档维护、索引状态、分段与检索测试">
-    <div class="layout-grid">
-      <el-card shadow="never" class="left-panel" v-loading="kbLoading">
-        <template #header>
-          <div class="panel-header">
-            <span>知识库列表</span>
-            <el-space>
-              <el-button text type="primary" @click="loadKnowledgeBases">刷新</el-button>
-              <el-button size="small" type="primary" @click="openCreateKb">新建</el-button>
-            </el-space>
-          </div>
-        </template>
+  <div class="knowledge-page" :class="`mode-${pageMode}`">
+    <template v-if="pageMode === 'list'">
+      <section class="knowledge-hero list-hero">
+        <div class="hero-copy">
+          <div class="eyebrow">KNOWLEDGE BASE</div>
+          <h1>知识库</h1>
+          <p>像管理智能体一样管理企业知识。这里仅展示知识库卡片，进入后再维护文档、分段和检索。</p>
+        </div>
+        <div class="hero-actions">
+          <el-input
+            v-model="kbKeyword"
+            class="hero-search"
+            placeholder="搜索知识库名称 / 编码"
+            clearable
+          />
+          <el-button @click="loadKnowledgeBases">刷新</el-button>
+        </div>
+      </section>
 
-        <el-input v-model="kbKeyword" class="mb-10px" placeholder="按名称/描述/ID 过滤" clearable />
+      <section class="kb-gallery" v-loading="kbLoading">
+        <button type="button" class="kb-tile create-tile" @click="openCreateKb">
+          <span class="tile-plus">+</span>
+          <span class="tile-title">创建知识库</span>
+          <span class="tile-desc">通过分步向导连接数据集、设置索引并完成创建</span>
+          <span class="tile-link">开始创建 →</span>
+        </button>
 
-        <el-table
-          :data="filteredKbList"
-          row-key="id"
-          size="small"
-          border
-          max-height="600"
-          highlight-current-row
-          :current-row-key="selectedKbId || undefined"
-          @row-click="(row: KbRow) => (selectedKbId = row.id)"
+        <button
+          v-for="item in filteredKbList"
+          :key="item.id"
+          type="button"
+          class="kb-tile"
+          @click="openKnowledgeDetail(item)"
         >
-          <el-table-column label="名称" min-width="170" show-overflow-tooltip>
-            <template #default="{ row }">{{ resolveKbName(row) }}</template>
-          </el-table-column>
-          <el-table-column label="编码" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.kbCode || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="文档数" width="90" align="center">
-            <template #default="{ row }">{{
-              row.documentCount ?? row.document_count ?? 0
-            }}</template>
-          </el-table-column>
-          <el-table-column label="词数" width="110" align="center">
-            <template #default="{ row }">{{ row.wordCount ?? row.word_count ?? 0 }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="90" fixed="right">
-            <template #default="{ row }">
-              <el-button type="danger" link @click.stop="removeKb(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
-
-      <el-card shadow="never" class="right-panel">
-        <template #header>
-          <div class="panel-header">
-            <span v-if="selectedKb">当前知识库：{{ resolveKbName(selectedKb) }}</span>
-            <span v-else>请先在左侧选择知识库</span>
+          <div class="tile-head">
+            <div class="kb-avatar">{{ kbInitial(item) }}</div>
+            <div class="tile-title-area">
+              <div class="tile-title">{{ resolveKbName(item) }}</div>
+              <div class="tile-code">{{ item.kbCode || '未设置编码' }}</div>
+            </div>
           </div>
-        </template>
+          <p class="tile-desc">{{
+            item.description || '暂无描述。建议补充知识库用途、覆盖范围和维护规则。'
+          }}</p>
+          <div class="tile-meta">
+            <span>{{ resolveKbDocumentCount(item) }} 文档</span>
+            <span>{{ formatCompactNumber(resolveKbWordCount(item)) }} 词</span>
+            <span>{{ item.indexingTechnique || 'high_quality' }}</span>
+          </div>
+          <div class="tile-footer">
+            <span>进入知识库</span>
+            <el-button link type="danger" @click.stop="removeKb(item)">删除</el-button>
+          </div>
+        </button>
 
-        <el-empty v-if="!selectedKbId" description="暂无已选知识库" />
+        <div v-if="filteredKbList.length === 0 && !kbLoading" class="empty-gallery-card">
+          <div class="empty-illustration">KB</div>
+          <h3>暂无知识库</h3>
+          <p>创建一个知识库后，可以进入详情页上传文档、维护分段并做检索测试。</p>
+          <el-button type="primary" @click="openCreateKb">创建知识库</el-button>
+        </div>
+      </section>
+    </template>
 
-        <template v-else>
-          <el-tabs v-model="activeTab">
-            <el-tab-pane label="文档管理" name="documents">
-              <div class="doc-toolbar">
+    <template v-else-if="pageMode === 'create'">
+      <section class="create-shell">
+        <div class="create-aside">
+          <button type="button" class="back-link" @click="cancelCreateKb">← 返回知识库</button>
+          <div class="create-title-block">
+            <div class="eyebrow">CREATE KNOWLEDGE</div>
+            <h1>创建知识库</h1>
+            <p>按照 Dify 类似的流程逐步完成知识库配置。每一步只处理一类信息，减少表单压力。</p>
+          </div>
+          <div class="create-step-list">
+            <button
+              v-for="(step, index) in createSteps"
+              :key="step.title"
+              type="button"
+              class="create-step-item"
+              :class="{ active: createStep === index + 1, done: createStep > index + 1 }"
+              @click="createStep > index + 1 ? (createStep = index + 1) : undefined"
+            >
+              <span class="step-index">{{ index + 1 }}</span>
+              <span>
+                <strong>{{ step.title }}</strong>
+                <em>{{ step.description }}</em>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <main class="create-main-card">
+          <el-form ref="kbFormRef" :model="kbForm" :rules="kbRules" label-position="top">
+            <section v-if="createStep === 1" class="step-panel">
+              <div class="step-panel-head">
+                <span>Step 1</span>
+                <h2>先定义知识库的身份</h2>
+                <p>这部分信息会展示在知识库卡片上，帮助团队快速识别用途。</p>
+              </div>
+              <div class="form-grid two">
+                <el-form-item label="知识库名称" prop="kbName">
+                  <el-input
+                    v-model="kbForm.kbName"
+                    maxlength="100"
+                    show-word-limit
+                    placeholder="例如：产品帮助中心"
+                  />
+                </el-form-item>
+                <el-form-item label="知识库编码" prop="kbCode">
+                  <el-input
+                    v-model="kbForm.kbCode"
+                    maxlength="50"
+                    show-word-limit
+                    placeholder="例如：product_help"
+                  />
+                </el-form-item>
+              </div>
+              <el-form-item label="描述">
                 <el-input
-                  v-model="docKeyword"
-                  placeholder="按文档名称搜索"
-                  clearable
-                  @keyup.enter="
-                    () => {
-                      docPager.page = 1
-                      loadDocuments()
-                    }
-                  "
+                  v-model="kbForm.description"
+                  type="textarea"
+                  :rows="5"
+                  maxlength="400"
+                  show-word-limit
+                  placeholder="说明这个知识库覆盖的业务范围、适用场景和维护人。"
                 />
-                <el-select
-                  v-model="docStatus"
-                  class="status-select"
-                  placeholder="状态"
-                  clearable
-                  @change="
-                    () => {
-                      docPager.page = 1
-                      loadDocuments()
-                    }
-                  "
+              </el-form-item>
+              <div class="form-grid two">
+                <el-form-item label="图标标识">
+                  <el-input v-model="kbForm.icon" placeholder="可选：图标 URL 或标识" />
+                </el-form-item>
+                <el-form-item label="排序">
+                  <el-input-number v-model="kbForm.sort" class="w-full" :min="1" />
+                </el-form-item>
+              </div>
+            </section>
+
+            <section v-else-if="createStep === 2" class="step-panel">
+              <div class="step-panel-head">
+                <span>Step 2</span>
+                <h2>连接 Dify 数据集</h2>
+                <p>知识库创建后会基于这些连接信息维护文档和索引。</p>
+              </div>
+              <el-form-item label="Dify API Key" prop="difyApiKey">
+                <el-input
+                  v-model="kbForm.difyApiKey"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="请输入 Dify 知识库 API Key"
+                />
+              </el-form-item>
+              <div class="form-grid two">
+                <el-form-item label="Dify Dataset ID" prop="difyDatasetId">
+                  <el-input v-model="kbForm.difyDatasetId" placeholder="请输入数据集 ID" />
+                </el-form-item>
+                <el-form-item label="Dify Base URL">
+                  <el-input
+                    v-model="kbForm.difyBaseUrl"
+                    placeholder="可选，例如：https://api.dify.ai"
+                  />
+                </el-form-item>
+              </div>
+            </section>
+
+            <section v-else-if="createStep === 3" class="step-panel">
+              <div class="step-panel-head">
+                <span>Step 3</span>
+                <h2>设置索引与嵌入模型</h2>
+                <p>保持默认高质量策略即可，也可以根据业务场景调整。</p>
+              </div>
+              <div class="option-grid">
+                <label
+                  class="option-card"
+                  :class="{ active: kbForm.indexingTechnique === 'high_quality' }"
                 >
-                  <el-option label="可用" value="available" />
-                  <el-option label="排队中" value="queuing" />
-                  <el-option label="索引中" value="indexing" />
-                  <el-option label="异常" value="error" />
-                  <el-option label="已禁用" value="disabled" />
-                  <el-option label="已归档" value="archived" />
-                </el-select>
-                <el-space wrap>
+                  <input v-model="kbForm.indexingTechnique" type="radio" value="high_quality" />
+                  <strong>高质量索引</strong>
+                  <span>适合企业知识问答，召回质量更稳定。</span>
+                </label>
+                <label
+                  class="option-card"
+                  :class="{ active: kbForm.indexingTechnique === 'economy' }"
+                >
+                  <input v-model="kbForm.indexingTechnique" type="radio" value="economy" />
+                  <strong>经济模式</strong>
+                  <span>适合轻量测试或成本敏感场景。</span>
+                </label>
+              </div>
+              <el-form-item label="嵌入模型">
+                <el-input
+                  v-model="kbForm.embeddingModel"
+                  placeholder="可选：为空则使用默认嵌入模型"
+                />
+              </el-form-item>
+            </section>
+
+            <section v-else class="step-panel confirm-panel">
+              <div class="step-panel-head">
+                <span>Step 4</span>
+                <h2>确认配置</h2>
+                <p>确认无误后创建知识库，创建完成后会进入该知识库详情页。</p>
+              </div>
+              <div class="confirm-card">
+                <div class="confirm-avatar">{{
+                  kbForm.kbName ? kbForm.kbName.charAt(0).toUpperCase() : 'K'
+                }}</div>
+                <div>
+                  <h3>{{ kbForm.kbName || '未命名知识库' }}</h3>
+                  <p>{{ kbForm.description || '暂无描述' }}</p>
+                  <div class="detail-tags">
+                    <span>{{ kbForm.kbCode || '未设置编码' }}</span>
+                    <span>{{ kbForm.indexingTechnique || 'high_quality' }}</span>
+                    <span>{{ kbForm.embeddingModel || '默认嵌入模型' }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="confirm-list">
+                <div
+                  ><span>Dify Dataset ID</span
+                  ><strong>{{ kbForm.difyDatasetId || '-' }}</strong></div
+                >
+                <div
+                  ><span>Dify Base URL</span
+                  ><strong>{{ kbForm.difyBaseUrl || '默认' }}</strong></div
+                >
+                <div
+                  ><span>排序</span><strong>{{ kbForm.sort }}</strong></div
+                >
+              </div>
+            </section>
+          </el-form>
+
+          <div class="create-footer">
+            <el-button @click="createStep === 1 ? cancelCreateKb() : prevCreateStep()">
+              {{ createStep === 1 ? '取消' : '上一步' }}
+            </el-button>
+            <el-button v-if="createStep < 4" type="primary" @click="nextCreateStep"
+              >下一步</el-button
+            >
+            <el-button v-else type="primary" :loading="kbSubmitting" @click="submitKb"
+              >完成创建</el-button
+            >
+          </div>
+        </main>
+      </section>
+    </template>
+
+    <template v-else>
+      <section class="detail-page-shell">
+        <button type="button" class="back-link" @click="backToKnowledgeList">← 返回知识库</button>
+
+        <div class="detail-hero">
+          <div class="detail-avatar">{{ selectedKb ? kbInitial(selectedKb) : 'K' }}</div>
+          <div class="detail-copy">
+            <div class="detail-kicker">KNOWLEDGE DETAIL</div>
+            <h1>{{ selectedKb ? resolveKbName(selectedKb) : '当前知识库' }}</h1>
+            <p>{{
+              selectedKb?.description || '暂无描述。可以补充业务范围、适用应用和维护规则。'
+            }}</p>
+            <div class="detail-tags">
+              <span>{{ selectedKb?.kbCode || '未设置编码' }}</span>
+              <span>{{ selectedKb?.indexingTechnique || 'high_quality' }}</span>
+              <span>{{ selectedKb?.embeddingModel || '默认嵌入模型' }}</span>
+            </div>
+          </div>
+          <div class="detail-metrics">
+            <div
+              ><strong>{{ selectedKbDocumentCount }}</strong
+              ><span>文档</span></div
+            >
+            <div
+              ><strong>{{ formatCompactNumber(selectedKbWordCount) }}</strong
+              ><span>词数</span></div
+            >
+            <div
+              ><strong>{{ availableDocCount }}</strong
+              ><span>可用</span></div
+            >
+          </div>
+        </div>
+
+        <div class="detail-tabs-shell">
+          <el-tabs v-model="activeTab" class="knowledge-tabs">
+            <el-tab-pane label="文档" name="documents">
+              <div class="toolbar-card">
+                <div class="toolbar-left">
+                  <el-input
+                    v-model="docKeyword"
+                    placeholder="按文档名称搜索"
+                    clearable
+                    @keyup.enter="
+                      () => {
+                        docPager.page = 1
+                        loadDocuments()
+                      }
+                    "
+                  />
+                  <el-select
+                    v-model="docStatus"
+                    class="status-select"
+                    placeholder="状态"
+                    clearable
+                    @change="
+                      () => {
+                        docPager.page = 1
+                        loadDocuments()
+                      }
+                    "
+                  >
+                    <el-option label="可用" value="available" />
+                    <el-option label="排队中" value="queuing" />
+                    <el-option label="索引中" value="indexing" />
+                    <el-option label="异常" value="error" />
+                    <el-option label="已禁用" value="disabled" />
+                    <el-option label="已归档" value="archived" />
+                  </el-select>
+                </div>
+                <div class="toolbar-actions">
                   <el-button
                     @click="
                       () => {
@@ -962,71 +1318,66 @@ onMounted(async () => {
                         loadDocuments()
                       }
                     "
+                    >查询</el-button
                   >
-                    查询
-                  </el-button>
                   <el-button type="primary" @click="openCreateTextDoc">新增文本</el-button>
-                  <el-button type="success" @click="openCreateFileDoc">上传文件</el-button>
-                  <el-button
-                    type="warning"
-                    :loading="zipDownloading"
-                    @click="downloadSelectedDocuments"
+                  <el-button type="primary" plain @click="openCreateFileDoc">上传文件</el-button>
+                  <el-button :loading="zipDownloading" @click="downloadSelectedDocuments"
+                    >下载 ZIP</el-button
                   >
-                    下载 ZIP
-                  </el-button>
-                </el-space>
+                </div>
               </div>
 
-              <el-table
-                v-loading="docsLoading"
-                :data="docs"
-                row-key="id"
-                border
-                @selection-change="handleDocSelectionChange"
-              >
-                <el-table-column type="selection" width="48" />
-                <el-table-column type="index" label="#" width="56" />
-                <el-table-column
-                  prop="name"
-                  label="文档名称"
-                  min-width="210"
-                  show-overflow-tooltip
-                />
-                <el-table-column prop="data_source_type" label="来源" min-width="110" />
-                <el-table-column label="状态" min-width="120">
-                  <template #default="{ row }">
-                    <el-tag :type="resolveDocStatusType(resolveDocStatus(row))">
-                      {{ resolveDocStatus(row) }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="word_count" label="词数" width="90" align="center" />
-                <el-table-column label="创建时间" min-width="170">
-                  <template #default="{ row }">{{ formatUnixTime(row.created_at) }}</template>
-                </el-table-column>
-                <el-table-column label="操作" width="280" fixed="right">
-                  <template #default="{ row }">
-                    <el-space wrap>
-                      <el-button type="primary" link @click="bindSegmentDoc(row)">分段</el-button>
-                      <el-button
-                        type="info"
-                        link
-                        @click="
-                          () => {
-                            indexBatch = pickBatch(row)
-                            if (indexBatch) queryIndexStatus()
-                          }
-                        "
-                      >
-                        索引状态
-                      </el-button>
-                      <el-button type="danger" link @click="removeDocument(row)">删除</el-button>
-                    </el-space>
-                  </template>
-                </el-table-column>
-              </el-table>
+              <div v-loading="docsLoading" class="doc-card-grid">
+                <div v-if="!docs.length" class="empty-card">
+                  <div class="empty-illustration">DOC</div>
+                  <h3>暂无文档</h3>
+                  <p>上传文件或新增文本后，这里会展示文档卡片。</p>
+                </div>
+                <article
+                  v-for="doc in docs"
+                  :key="doc.id"
+                  class="doc-card"
+                  :class="{ selected: isDocSelected(doc) }"
+                >
+                  <div class="doc-card-head">
+                    <el-checkbox
+                      :model-value="isDocSelected(doc)"
+                      @change="(checked) => toggleDocumentSelection(doc, Boolean(checked))"
+                    />
+                    <div class="doc-icon">DOC</div>
+                    <div class="doc-title-area">
+                      <div class="doc-name">{{ doc.name || String(doc.id) }}</div>
+                      <div class="doc-source">{{ doc.data_source_type || 'local' }}</div>
+                    </div>
+                    <el-tag :type="resolveDocStatusType(resolveDocStatus(doc))" effect="light">{{
+                      resolveDocStatus(doc)
+                    }}</el-tag>
+                  </div>
+                  <div class="doc-info-row">
+                    <span>{{ doc.word_count || 0 }} 词</span>
+                    <span>{{ formatUnixTime(doc.created_at) }}</span>
+                  </div>
+                  <div class="doc-actions">
+                    <el-button type="primary" link @click="bindSegmentDoc(doc)">分段</el-button>
+                    <el-button
+                      type="info"
+                      link
+                      @click="
+                        () => {
+                          indexBatch = pickBatch(doc)
+                          if (indexBatch) queryIndexStatus()
+                        }
+                      "
+                      >索引状态</el-button
+                    >
+                    <el-button type="danger" link @click="removeDocument(doc)">删除</el-button>
+                  </div>
+                </article>
+              </div>
 
-              <div class="pager">
+              <div class="pager soft-pager">
+                <span class="selected-count">已选 {{ selectedDocumentIds.length }} 个文档</span>
                 <el-pagination
                   v-model:current-page="docPager.page"
                   v-model:page-size="docPager.limit"
@@ -1038,71 +1389,74 @@ onMounted(async () => {
                 />
               </div>
 
-              <el-card shadow="never" class="index-box">
-                <template #header>
-                  <div class="panel-header">
-                    <span>索引状态查询</span>
+              <section class="index-card">
+                <div class="index-card-head">
+                  <div>
+                    <div class="section-title">索引状态查询</div>
+                    <div class="section-subtitle">通过批次 ID 查看文档索引进度。</div>
                   </div>
-                </template>
-                <div class="index-toolbar">
-                  <el-input v-model="indexBatch" placeholder="输入批次 ID" />
-                  <el-button type="primary" :loading="indexLoading" @click="queryIndexStatus">
-                    查询
-                  </el-button>
+                  <div class="index-toolbar">
+                    <el-input v-model="indexBatch" placeholder="输入批次 ID" />
+                    <el-button type="primary" :loading="indexLoading" @click="queryIndexStatus"
+                      >查询</el-button
+                    >
+                  </div>
                 </div>
                 <pre class="json-box">{{ indexResultText || '{}' }}</pre>
-              </el-card>
+              </section>
             </el-tab-pane>
 
-            <el-tab-pane label="分段管理" name="segments">
-              <div class="segment-toolbar">
-                <el-select
-                  v-model="segmentDocId"
-                  placeholder="选择文档"
-                  clearable
-                  filterable
-                  @change="
-                    () => {
-                      segmentPager.page = 1
-                      loadSegments()
-                    }
-                  "
-                >
-                  <el-option
-                    v-for="option in docOptions"
-                    :key="option.value"
-                    :label="option.label"
-                    :value="option.value"
+            <el-tab-pane label="分段" name="segments">
+              <div class="toolbar-card">
+                <div class="toolbar-left wide">
+                  <el-select
+                    v-model="segmentDocId"
+                    placeholder="选择文档"
+                    clearable
+                    filterable
+                    @change="
+                      () => {
+                        segmentPager.page = 1
+                        loadSegments()
+                      }
+                    "
+                  >
+                    <el-option
+                      v-for="option in docOptions"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                    />
+                  </el-select>
+                  <el-input
+                    v-model="segmentKeyword"
+                    placeholder="分段关键词"
+                    clearable
+                    @keyup.enter="
+                      () => {
+                        segmentPager.page = 1
+                        loadSegments()
+                      }
+                    "
                   />
-                </el-select>
-                <el-input
-                  v-model="segmentKeyword"
-                  placeholder="分段关键词"
-                  clearable
-                  @keyup.enter="
-                    () => {
-                      segmentPager.page = 1
-                      loadSegments()
-                    }
-                  "
-                />
-                <el-select
-                  v-model="segmentStatus"
-                  placeholder="状态"
-                  clearable
-                  class="status-select"
-                  @change="
-                    () => {
-                      segmentPager.page = 1
-                      loadSegments()
-                    }
-                  "
-                >
-                  <el-option label="已完成" value="completed" />
-                  <el-option label="索引中" value="indexing" />
-                  <el-option label="异常" value="error" />
-                </el-select>
-                <el-space wrap>
+                  <el-select
+                    v-model="segmentStatus"
+                    placeholder="状态"
+                    clearable
+                    class="status-select"
+                    @change="
+                      () => {
+                        segmentPager.page = 1
+                        loadSegments()
+                      }
+                    "
+                  >
+                    <el-option label="已完成" value="completed" />
+                    <el-option label="索引中" value="indexing" />
+                    <el-option label="异常" value="error" />
+                  </el-select>
+                </div>
+                <div class="toolbar-actions">
                   <el-button
                     @click="
                       () => {
@@ -1110,70 +1464,52 @@ onMounted(async () => {
                         loadSegments()
                       }
                     "
+                    >查询</el-button
                   >
-                    查询
-                  </el-button>
                   <el-button type="primary" @click="openCreateSegment">新增分段</el-button>
-                </el-space>
+                </div>
               </div>
 
               <el-empty v-if="!segmentDocId" description="请先选择文档" />
-
               <template v-else>
-                <el-table
-                  v-loading="segmentsLoading"
-                  :data="segments"
-                  row-key="id"
-                  border
-                  max-height="540"
-                >
-                  <el-table-column type="index" label="#" width="56" />
-                  <el-table-column
-                    prop="content"
-                    label="内容"
-                    min-width="280"
-                    show-overflow-tooltip
-                  />
-                  <el-table-column
-                    prop="answer"
-                    label="答案"
-                    min-width="140"
-                    show-overflow-tooltip
-                  />
-                  <el-table-column label="关键词" min-width="140" show-overflow-tooltip>
-                    <template #default="{ row }">{{
-                      Array.isArray(row.keywords) ? row.keywords.join(', ') : '-'
-                    }}</template>
-                  </el-table-column>
-                  <el-table-column prop="status" label="状态" width="100" />
-                  <el-table-column label="启用" width="80" align="center">
-                    <template #default="{ row }">
-                      <el-tag :type="row.enabled === false ? 'info' : 'success'">{{
-                        row.enabled === false ? '否' : '是'
+                <div v-loading="segmentsLoading" class="segment-list">
+                  <article v-for="segment in segments" :key="segment.id" class="segment-card">
+                    <div class="segment-main">
+                      <div class="segment-content">{{ segment.content }}</div>
+                      <div class="segment-answer">{{ segment.answer || '暂无答案' }}</div>
+                      <div class="segment-keywords">
+                        <span
+                          v-for="keyword in Array.isArray(segment.keywords) ? segment.keywords : []"
+                          :key="keyword"
+                          >{{ keyword }}</span
+                        >
+                      </div>
+                    </div>
+                    <div class="segment-side">
+                      <el-tag :type="segment.enabled === false ? 'info' : 'success'">{{
+                        segment.enabled === false ? '禁用' : '启用'
                       }}</el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="子分段" width="90" align="center">
-                    <template #default="{ row }">{{
-                      Array.isArray(row.child_chunks) ? row.child_chunks.length : 0
-                    }}</template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="260" fixed="right">
-                    <template #default="{ row }">
-                      <el-space wrap>
-                        <el-button type="primary" link @click="openEditSegment(row)"
+                      <div class="child-count"
+                        >{{
+                          Array.isArray(segment.child_chunks) ? segment.child_chunks.length : 0
+                        }}
+                        子分段</div
+                      >
+                      <div class="segment-actions">
+                        <el-button type="primary" link @click="openEditSegment(segment)"
                           >编辑</el-button
                         >
-                        <el-button type="success" link @click="openChunkDrawer(row)"
+                        <el-button type="success" link @click="openChunkDrawer(segment)"
                           >子分段</el-button
                         >
-                        <el-button type="danger" link @click="removeSegment(row)">删除</el-button>
-                      </el-space>
-                    </template>
-                  </el-table-column>
-                </el-table>
-
-                <div class="pager">
+                        <el-button type="danger" link @click="removeSegment(segment)"
+                          >删除</el-button
+                        >
+                      </div>
+                    </div>
+                  </article>
+                </div>
+                <div class="pager soft-pager">
                   <el-pagination
                     v-model:current-page="segmentPager.page"
                     v-model:page-size="segmentPager.limit"
@@ -1188,165 +1524,83 @@ onMounted(async () => {
             </el-tab-pane>
 
             <el-tab-pane label="检索测试" name="retrieve">
-              <el-form label-width="130px" class="retrieve-form">
-                <el-form-item label="问题">
-                  <el-input
-                    v-model="retrieveForm.query"
-                    type="textarea"
-                    :rows="3"
-                    placeholder="输入检索问题"
-                  />
-                </el-form-item>
-                <el-row :gutter="16">
-                  <el-col :span="8">
-                    <el-form-item label="检索方式">
-                      <el-select v-model="retrieveForm.search_method" class="w-full">
-                        <el-option label="语义检索" value="semantic_search" />
-                        <el-option label="关键词检索" value="keyword_search" />
-                        <el-option label="全文检索" value="full_text_search" />
-                        <el-option label="混合检索" value="hybrid_search" />
-                      </el-select>
-                    </el-form-item>
-                  </el-col>
-                  <el-col :span="8">
-                    <el-form-item label="返回条数">
-                      <el-input-number
-                        v-model="retrieveForm.top_k"
-                        class="w-full"
-                        :min="1"
-                        :max="30"
-                      />
-                    </el-form-item>
-                  </el-col>
-                  <el-col :span="8">
-                    <el-form-item label="重排">
-                      <el-switch v-model="retrieveForm.reranking_enable" />
-                    </el-form-item>
-                  </el-col>
-                </el-row>
-                <el-row :gutter="16">
-                  <el-col :span="8">
-                    <el-form-item label="阈值开关">
-                      <el-switch v-model="retrieveForm.score_threshold_enabled" />
-                    </el-form-item>
-                  </el-col>
-                  <el-col :span="8">
-                    <el-form-item label="阈值">
-                      <el-input-number
-                        v-model="retrieveForm.score_threshold"
-                        class="w-full"
-                        :min="0"
-                        :max="1"
-                        :step="0.05"
-                        :disabled="!retrieveForm.score_threshold_enabled"
-                      />
-                    </el-form-item>
-                  </el-col>
-                  <el-col :span="8" class="retrieve-action-col">
-                    <el-button type="primary" :loading="retrieveLoading" @click="runRetrieveTest">
-                      执行测试
-                    </el-button>
-                  </el-col>
-                </el-row>
-              </el-form>
-
+              <section class="retrieve-card">
+                <el-form label-width="120px" class="retrieve-form">
+                  <el-form-item label="问题">
+                    <el-input
+                      v-model="retrieveForm.query"
+                      type="textarea"
+                      :rows="3"
+                      placeholder="输入检索问题"
+                    />
+                  </el-form-item>
+                  <el-row :gutter="16">
+                    <el-col :span="8"
+                      ><el-form-item label="检索方式"
+                        ><el-select v-model="retrieveForm.search_method" class="w-full"
+                          ><el-option label="语义检索" value="semantic_search" /><el-option
+                            label="关键词检索"
+                            value="keyword_search" /><el-option
+                            label="全文检索"
+                            value="full_text_search" /><el-option
+                            label="混合检索"
+                            value="hybrid_search" /></el-select></el-form-item
+                    ></el-col>
+                    <el-col :span="8"
+                      ><el-form-item label="返回条数"
+                        ><el-input-number
+                          v-model="retrieveForm.top_k"
+                          class="w-full"
+                          :min="1"
+                          :max="30" /></el-form-item
+                    ></el-col>
+                    <el-col :span="8"
+                      ><el-form-item label="重排"
+                        ><el-switch v-model="retrieveForm.reranking_enable" /></el-form-item
+                    ></el-col>
+                  </el-row>
+                  <el-row :gutter="16">
+                    <el-col :span="8"
+                      ><el-form-item label="阈值开关"
+                        ><el-switch v-model="retrieveForm.score_threshold_enabled" /></el-form-item
+                    ></el-col>
+                    <el-col :span="8"
+                      ><el-form-item label="阈值"
+                        ><el-input-number
+                          v-model="retrieveForm.score_threshold"
+                          class="w-full"
+                          :min="0"
+                          :max="1"
+                          :step="0.05"
+                          :disabled="!retrieveForm.score_threshold_enabled" /></el-form-item
+                    ></el-col>
+                    <el-col :span="8" class="retrieve-action-col"
+                      ><el-button type="primary" :loading="retrieveLoading" @click="runRetrieveTest"
+                        >执行测试</el-button
+                      ></el-col
+                    >
+                  </el-row>
+                </el-form>
+              </section>
               <div class="retrieve-result">
                 <el-empty v-if="!retrieveResult.length" description="暂无检索结果" />
-                <el-card
-                  v-for="(item, idx) in retrieveResult"
-                  :key="idx"
-                  shadow="never"
-                  class="retrieve-item"
-                >
-                  <div class="retrieve-item-head">
-                    <span>得分：{{ item.score ?? '-' }}</span>
-                  </div>
-                  <div class="retrieve-item-content">
-                    {{ item.segment?.content || item.content || item.segment?.answer || '无内容' }}
-                  </div>
+                <article v-for="(item, idx) in retrieveResult" :key="idx" class="retrieve-item">
+                  <div class="retrieve-item-head"
+                    ><span>结果 {{ idx + 1 }}</span
+                    ><strong>得分：{{ item.score ?? '-' }}</strong></div
+                  >
+                  <div class="retrieve-item-content">{{
+                    item.segment?.content || item.content || item.segment?.answer || '无内容'
+                  }}</div>
                   <pre class="json-box">{{ toPrettyText(item) }}</pre>
-                </el-card>
+                </article>
               </div>
             </el-tab-pane>
           </el-tabs>
-        </template>
-      </el-card>
-    </div>
-  </ContentWrap>
-
-  <el-dialog v-model="kbDialogVisible" title="新建知识库" width="700px" destroy-on-close>
-    <el-form ref="kbFormRef" :model="kbForm" :rules="kbRules" label-width="130px">
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item label="知识库名称" prop="kbName">
-            <el-input v-model="kbForm.kbName" maxlength="100" show-word-limit />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="知识库编码" prop="kbCode">
-            <el-input v-model="kbForm.kbCode" maxlength="50" show-word-limit />
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-form-item label="Dify API 密钥" prop="difyApiKey">
-        <el-input v-model="kbForm.difyApiKey" type="textarea" :rows="2" />
-      </el-form-item>
-
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item label="Dify 数据集 ID" prop="difyDatasetId">
-            <el-input v-model="kbForm.difyDatasetId" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="Dify 基础地址">
-            <el-input v-model="kbForm.difyBaseUrl" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item label="索引策略">
-            <el-input v-model="kbForm.indexingTechnique" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="嵌入模型">
-            <el-input v-model="kbForm.embeddingModel" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item label="图标">
-            <el-input v-model="kbForm.icon" />
-          </el-form-item>
-        </el-col>
-        <el-col :span="12">
-          <el-form-item label="排序">
-            <el-input-number v-model="kbForm.sort" class="w-full" :min="1" />
-          </el-form-item>
-        </el-col>
-      </el-row>
-
-      <el-form-item label="描述">
-        <el-input
-          v-model="kbForm.description"
-          type="textarea"
-          :rows="3"
-          maxlength="400"
-          show-word-limit
-        />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="kbDialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="kbSubmitting" @click="submitKb">保存</el-button>
+        </div>
+      </section>
     </template>
-  </el-dialog>
+  </div>
 
   <el-dialog v-model="textDialogVisible" title="新增文本文档" width="760px" destroy-on-close>
     <el-form ref="textFormRef" :model="textForm" :rules="textRules" label-width="140px">
@@ -1543,58 +1797,802 @@ onMounted(async () => {
 </template>
 
 <style scoped lang="less">
-.layout-grid {
+:global(.layout-main) {
+  padding: 0 !important;
+  background: #f5f7fb !important;
+}
+
+.knowledge-page {
+  --page-bg: #f5f7fb;
+  --panel-bg: #fff;
+  --panel-soft: #f8faff;
+  --border: #e4eaf3;
+  --border-strong: #d5dfef;
+  --primary: #2563eb;
+  --primary-soft: #eaf1ff;
+  --primary-soft-2: #dbeafe;
+  --text-main: #1f2937;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --font-sans: 'Inter', -apple-system, blinkmacsystemfont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', menlo, monospace;
+
+  min-height: 100%;
+  padding: 24px;
+  font-family: var(--font-sans);
+  color: var(--text-main);
+  background: linear-gradient(180deg, #f8fbff 0%, var(--page-bg) 44%, #f5f7fb 100%);
+}
+
+.knowledge-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.eyebrow,
+.detail-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--primary);
+}
+
+.hero-copy h1,
+.create-title-block h1,
+.detail-copy h1 {
+  margin: 8px 0 6px;
+  font-size: 28px;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.hero-copy p,
+.create-title-block p,
+.detail-copy p {
+  max-width: 760px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.hero-search {
+  width: 300px;
+}
+
+.kb-gallery {
   display: grid;
-  grid-template-columns: 420px 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 16px;
 }
 
-.left-panel,
-.right-panel {
-  min-height: 760px;
+.kb-tile,
+.empty-gallery-card {
+  min-height: 214px;
+  padding: 18px;
+  text-align: left;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 4%);
 }
 
-.panel-header {
+.kb-tile {
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.kb-tile:hover {
+  border-color: #9dbcfb;
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgb(15 23 42 / 7%);
+}
+
+.create-tile {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-weight: 600;
+  color: var(--primary);
+  background: linear-gradient(180deg, #f9fbff 0%, #eef5ff 100%);
+  border-color: #b8ccf8;
+  border-style: dashed;
+  align-items: flex-start;
+  flex-direction: column;
+  justify-content: center;
 }
 
-.doc-toolbar,
-.segment-toolbar,
-.index-toolbar,
-.chunk-toolbar {
+.tile-plus {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
+  font-size: 26px;
+  font-weight: 500;
+  background: #fff;
+  border: 1px solid #c8d8fb;
+  border-radius: 14px;
+  place-items: center;
+}
+
+.tile-head {
   display: flex;
+  min-width: 0;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
 }
 
-.doc-toolbar > .el-input,
-.segment-toolbar > .el-input,
-.index-toolbar > .el-input {
-  max-width: 320px;
+.kb-avatar,
+.detail-avatar,
+.doc-icon,
+.confirm-avatar,
+.empty-illustration {
+  display: grid;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb 0%, #0f766e 100%);
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.kb-avatar {
+  width: 42px;
+  height: 42px;
+  font-weight: 750;
+  border-radius: 14px;
+}
+
+.tile-title-area,
+.doc-title-area {
+  min-width: 0;
+  flex: 1;
+}
+
+.tile-title,
+.doc-name {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-code,
+.doc-source {
+  margin-top: 4px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-desc {
+  display: -webkit-box;
+  min-height: 44px;
+  margin: 14px 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tile-meta,
+.detail-tags,
+.segment-keywords {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tile-meta span,
+.detail-tags span,
+.segment-keywords span {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: 999px;
+}
+
+.tile-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 14px;
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  border-top: 1px solid var(--border);
+}
+
+.tile-link {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.empty-gallery-card {
+  display: grid;
+  min-height: 250px;
+  color: var(--text-secondary);
+  text-align: center;
+  grid-column: 1 / -1;
+  place-items: center;
+}
+
+.empty-illustration {
+  width: 54px;
+  height: 54px;
+  font-family: var(--font-mono);
+  border-radius: 16px;
+}
+
+.create-shell {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  min-height: calc(100vh - 48px);
+}
+
+.create-aside,
+.create-main-card,
+.detail-page-shell {
+  background: rgb(255 255 255 / 78%);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 16px 36px rgb(15 23 42 / 5%);
+}
+
+.create-aside {
+  padding: 20px;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  margin-bottom: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.create-step-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.create-step-item {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  cursor: default;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  transition: all 0.18s ease;
+}
+
+.create-step-item.done {
+  cursor: pointer;
+}
+
+.create-step-item.active {
+  background: #fff;
+  border-color: #9dbcfb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 8%);
+}
+
+.step-index {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: 10px;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.create-step-item.active .step-index,
+.create-step-item.done .step-index {
+  color: #fff;
+  background: var(--primary);
+}
+
+.create-step-item strong,
+.create-step-item em {
+  display: block;
+}
+
+.create-step-item strong {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.create-step-item em {
+  margin-top: 2px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--text-secondary);
+}
+
+.create-main-card {
+  display: flex;
+  min-width: 0;
+  padding: 28px;
+  flex-direction: column;
+}
+
+.step-panel {
+  max-width: 860px;
+}
+
+.step-panel-head {
+  margin-bottom: 22px;
+}
+
+.step-panel-head span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.step-panel-head h2 {
+  margin: 8px 0 6px;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.step-panel-head p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.form-grid.two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.option-card {
+  display: block;
+  padding: 18px;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.option-card.active {
+  border-color: #9dbcfb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 10%);
+}
+
+.option-card input {
+  display: none;
+}
+
+.option-card strong,
+.option-card span {
+  display: block;
+}
+
+.option-card strong {
+  font-size: 15px;
+  color: var(--text-main);
+}
+
+.option-card span {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.confirm-card {
+  display: flex;
+  gap: 16px;
+  padding: 18px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+
+.confirm-avatar {
+  width: 56px;
+  height: 56px;
+  font-size: 22px;
+  font-weight: 800;
+  border-radius: 16px;
+}
+
+.confirm-card h3 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.confirm-card p {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+}
+
+.confirm-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.confirm-list div {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.confirm-list span {
+  color: var(--text-secondary);
+}
+
+.confirm-list strong {
+  font-family: var(--font-mono);
+}
+
+.create-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 20px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+}
+
+.detail-page-shell {
+  min-height: calc(100vh - 48px);
+  padding: 20px;
+}
+
+.detail-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+  margin-bottom: 18px;
+  background: linear-gradient(135deg, #fff 0%, #f3f8ff 100%);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
+
+.detail-avatar {
+  width: 68px;
+  height: 68px;
+  font-size: 26px;
+  font-weight: 800;
+  border-radius: 20px;
+}
+
+.detail-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 80px);
+  gap: 8px;
+}
+
+.detail-metrics div {
+  padding: 11px;
+  text-align: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.detail-metrics strong {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 18px;
+}
+
+.detail-metrics span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.knowledge-tabs :deep(.el-tabs__header) {
+  margin-bottom: 14px;
+}
+
+.knowledge-tabs :deep(.el-tabs__nav-wrap::after) {
+  background-color: var(--border);
+}
+
+.knowledge-tabs :deep(.el-tabs__item) {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.knowledge-tabs :deep(.el-tabs__item.is-active) {
+  color: var(--primary);
+}
+
+.knowledge-tabs :deep(.el-tabs__active-bar) {
+  background-color: var(--primary);
+}
+
+.toolbar-card,
+.index-card,
+.retrieve-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  margin-bottom: 14px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.index-card,
+.retrieve-card {
+  display: block;
+}
+
+.toolbar-left {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) 150px;
+  gap: 10px;
+  flex: 1;
+}
+
+.toolbar-left.wide {
+  grid-template-columns: minmax(180px, 280px) minmax(180px, 1fr) 140px;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .status-select {
-  width: 140px;
+  width: 150px;
+}
+
+.doc-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  min-height: 140px;
+}
+
+.doc-card,
+.segment-card,
+.retrieve-item,
+.empty-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.doc-card {
+  padding: 14px;
+  transition: all 0.18s ease;
+}
+
+.doc-card:hover,
+.segment-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgb(15 23 42 / 5%);
+}
+
+.doc-card.selected {
+  border-color: #9dbcfb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 10%);
+}
+
+.doc-card-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-icon {
+  width: 36px;
+  height: 36px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  border-radius: 10px;
+}
+
+.doc-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.doc-actions,
+.segment-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.empty-card {
+  display: grid;
+  min-height: 180px;
+  color: var(--text-secondary);
+  text-align: center;
+  grid-column: 1 / -1;
+  place-items: center;
+}
+
+.empty-card h3 {
+  margin: 8px 0 2px;
+}
+
+.empty-card p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .pager {
-  margin-top: 12px;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-}
-
-.index-box {
+  gap: 16px;
   margin-top: 14px;
 }
 
+.selected-count {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.index-card {
+  margin-top: 14px;
+}
+
+.index-card-head,
+.retrieve-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.section-subtitle {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.index-toolbar {
+  display: grid;
+  grid-template-columns: 240px auto;
+  gap: 8px;
+}
+
+.json-box {
+  min-height: 96px;
+  padding: 12px;
+  margin: 12px 0 0;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: #dbeafe;
+  word-break: break-all;
+  white-space: pre-wrap;
+  background: #0f172a;
+  border-radius: 12px;
+}
+
+.segment-list {
+  display: grid;
+  gap: 12px;
+}
+
+.segment-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 14px;
+  padding: 16px;
+  transition: all 0.18s ease;
+}
+
+.segment-content {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-main);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.segment-answer {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.segment-keywords {
+  margin-top: 10px;
+}
+
+.segment-side {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-direction: column;
+}
+
+.child-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .retrieve-form {
-  padding-top: 6px;
+  padding-top: 4px;
 }
 
 .retrieve-action-col {
@@ -1603,52 +2601,108 @@ onMounted(async () => {
 }
 
 .retrieve-result {
-  margin-top: 10px;
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  margin-top: 14px;
 }
 
 .retrieve-item {
-  border: 1px solid var(--el-border-color-lighter);
+  padding: 14px;
 }
 
-.retrieve-item-head {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-bottom: 8px;
+.retrieve-item-head strong {
+  font-family: var(--font-mono);
+  color: var(--primary);
 }
 
 .retrieve-item-content {
-  margin-bottom: 8px;
-  line-height: 1.6;
+  margin-top: 10px;
+  line-height: 1.7;
+  color: var(--text-main);
 }
 
-.json-box {
-  margin: 0;
-  background: #0f172a;
-  color: #dbeafe;
-  border-radius: 8px;
-  padding: 10px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-size: 12px;
-  line-height: 1.6;
+.chunk-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
-@media (max-width: 1280px) {
-  .layout-grid {
+:deep(.el-input__wrapper),
+:deep(.el-select__wrapper),
+:deep(.el-textarea__inner) {
+  border-radius: 10px !important;
+  box-shadow: 0 0 0 1px var(--border) inset !important;
+}
+
+:deep(.el-input__wrapper.is-focus),
+:deep(.el-select__wrapper.is-focused),
+:deep(.el-textarea__inner:focus) {
+  box-shadow: 0 0 0 1px var(--primary) inset !important;
+}
+
+:deep(.el-button--primary) {
+  --el-button-bg-color: var(--primary);
+  --el-button-border-color: var(--primary);
+  --el-button-hover-bg-color: #1d4ed8;
+  --el-button-hover-border-color: #1d4ed8;
+
+  border-radius: 10px;
+}
+
+@media (width <= 1180px) {
+  .create-shell {
     grid-template-columns: 1fr;
   }
 
-  .left-panel,
-  .right-panel {
-    min-height: 0;
+  .create-step-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .doc-toolbar,
-  .segment-toolbar {
-    flex-wrap: wrap;
+  .detail-hero,
+  .toolbar-card {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .detail-metrics {
+    width: 100%;
+  }
+}
+
+@media (width <= 860px) {
+  .knowledge-page {
+    padding: 16px;
+  }
+
+  .knowledge-hero,
+  .hero-actions,
+  .toolbar-card,
+  .index-card-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .hero-search,
+  .toolbar-left,
+  .toolbar-left.wide,
+  .index-toolbar,
+  .form-grid.two,
+  .option-grid {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .create-step-list {
+    grid-template-columns: 1fr;
+  }
+
+  .segment-card {
+    grid-template-columns: 1fr;
+  }
+
+  .segment-side {
+    align-items: flex-start;
+    gap: 10px;
   }
 }
 </style>
