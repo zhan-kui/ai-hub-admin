@@ -364,29 +364,69 @@ onMounted(() => {
 <style scoped lang="less">
 .toolbar {
   display: flex;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 14px;
   gap: 12px;
+}
+
+.toolbar :deep(.el-form) {
+  flex: 1;
+}
+
+.toolbar :deep(.el-form--inline) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.toolbar :deep(.el-form-item) {
+  margin-bottom: 0;
 }
 
 .toolbar-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+:deep(.el-table) {
+  overflow: hidden;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+
+:deep(.el-table__header-wrapper th.el-table__cell) {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color-extra-light);
+}
+
+:deep(.el-table__cell) {
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 .pager {
-  margin-top: 14px;
   display: flex;
+  margin-top: 14px;
   justify-content: flex-end;
 }
 
 .menu-tree {
   max-height: 460px;
+  padding: 12px;
   overflow: auto;
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
-  padding: 12px;
 }
 </style>

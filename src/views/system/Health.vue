@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ContentWrap } from '@/components/ContentWrap'
@@ -133,9 +133,14 @@ onBeforeUnmount(() => {
 <style scoped lang="less">
 .toolbar {
   display: flex;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  background: var(--el-fill-color-extra-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
   gap: 12px;
 }
 
@@ -146,19 +151,28 @@ onBeforeUnmount(() => {
 
 .status-card {
   min-height: 220px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+
+:deep(.status-card .el-card__body) {
+  padding: 18px;
 }
 
 .status-title {
+  margin-bottom: 12px;
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 12px;
+  color: var(--el-text-color-primary);
 }
 
 .status-meta {
-  margin-top: 12px;
   display: flex;
+  margin-top: 12px;
+  color: var(--el-text-color-regular);
   flex-direction: column;
   gap: 8px;
-  color: var(--el-text-color-regular);
 }
 </style>

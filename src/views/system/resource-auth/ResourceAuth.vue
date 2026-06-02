@@ -236,22 +236,25 @@ onMounted(async () => {
 .layout {
   display: grid;
   grid-template-columns: 300px 1fr;
+  align-items: stretch;
   gap: 16px;
   min-height: 620px;
 }
 
 .user-panel,
 .auth-panel {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px;
   padding: 14px;
   background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
 }
 
 .panel-title {
+  margin-bottom: 12px;
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 12px;
+  color: var(--el-text-color-primary);
 }
 
 .refresh-icon-btn {
@@ -260,26 +263,27 @@ onMounted(async () => {
 }
 
 .user-list {
+  height: calc(100% - 94px);
   margin-top: 10px;
-  height: calc(100% - 86px);
 }
 
 .user-item {
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 8px;
   cursor: pointer;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 10px;
   transition: all 0.2s;
 }
 
 .user-item:hover {
   border-color: var(--el-color-primary-light-5);
+  box-shadow: 0 8px 16px rgb(37 99 235 / 8%);
 }
 
 .user-item.active {
-  border-color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
 }
 
 .user-name {
@@ -295,14 +299,16 @@ onMounted(async () => {
 
 .panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
+  gap: 10px;
 }
 
 .panel-user {
-  color: var(--el-text-color-regular);
   font-size: 13px;
+  color: var(--el-text-color-regular);
 }
 
 .auth-tabs {
@@ -311,7 +317,7 @@ onMounted(async () => {
 
 .resource-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px 14px;
 }
 
