@@ -200,16 +200,16 @@ const createSteps = [
   { title: '确认创建', description: '检查配置并完成' }
 ]
 
-const totalDocuments = computed(() =>
-  kbList.value.reduce(
-    (sum, item) => sum + Number(item.documentCount ?? item.document_count ?? 0),
-    0
-  )
-)
+// const totalDocuments = computed(() =>
+//   kbList.value.reduce(
+//     (sum, item) => sum + Number(item.documentCount ?? item.document_count ?? 0),
+//     0
+//   )
+// )
 
-const totalWords = computed(() =>
-  kbList.value.reduce((sum, item) => sum + Number(item.wordCount ?? item.word_count ?? 0), 0)
-)
+// const totalWords = computed(() =>
+//   kbList.value.reduce((sum, item) => sum + Number(item.wordCount ?? item.word_count ?? 0), 0)
+// )
 
 const availableDocCount = computed(
   () => docs.value.filter((item) => resolveDocStatus(item).toLowerCase() === 'available').length
@@ -694,9 +694,9 @@ async function removeDocument(row: DocRow) {
   }
 }
 
-function handleDocSelectionChange(rows: DocRow[]) {
-  selectedDocumentIds.value = rows.map((item) => String(item.id)).filter(Boolean)
-}
+// function handleDocSelectionChange(rows: DocRow[]) {
+//   selectedDocumentIds.value = rows.map((item) => String(item.id)).filter(Boolean)
+// }
 
 async function downloadSelectedDocuments() {
   if (!selectedKbId.value) return
@@ -1989,7 +1989,6 @@ onMounted(async () => {
   line-height: 1.65;
   color: var(--text-secondary);
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .tile-meta,
@@ -2565,7 +2564,6 @@ onMounted(async () => {
   line-height: 1.65;
   color: var(--text-main);
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
 }
 
 .segment-answer {
