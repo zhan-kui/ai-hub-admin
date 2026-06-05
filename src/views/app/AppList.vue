@@ -2,22 +2,23 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock, MoreFilled, Plus, Search } from '@element-plus/icons-vue'
+import { ChatLineRound, Clock, MoreFilled, Plus, Search } from '@element-plus/icons-vue'
 import IconUploader from './components/IconUploader.vue'
 import {
   appApi,
   orchestrationApi,
   type AppConfigVO,
-  type AppListParams,
   type PageResult,
   type UpdateAppBasicRequest
 } from '@/api/frontend-api'
 
 type AppRow = AppConfigVO & Record<string, any>
-type PublishStatus = AppListParams['publishStatus']
+type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
+type PublishStatusFilter = '' | 'PUBLISHED' | 'NOT_PUBLISHED'
 type AppBasicForm = Omit<UpdateAppBasicRequest, 'appName' | 'iconImage'> & {
   id?: number
   appName: string
+  appCode: string
   iconImage: string
 }
 
@@ -30,7 +31,8 @@ const publishingId = ref<number | null>(null)
 const parameterLoading = ref(false)
 
 const keyword = ref('')
-const statusFilter = ref<PublishStatus>('')
+const appTypeFilter = ref<AppTypeFilter>('')
+const publishStatusFilter = ref<PublishStatusFilter>('')
 const pageNum = ref(1)
 const total = ref(0)
 const appList = ref<AppRow[]>([])
@@ -40,6 +42,7 @@ const createDialogVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formData = reactive<AppBasicForm>({
   appName: '',
+  appCode: '',
   description: '',
   icon: '',
   iconImage: '',
@@ -50,22 +53,63 @@ const formData = reactive<AppBasicForm>({
 
 const editingRow = ref<AppRow | null>(null)
 
-const publishedCount = computed(
-  () => appList.value.filter((item) => item.publishStatus === 'PUBLISHED').length
-)
-const unpublishedCount = computed(
-  () => appList.value.filter((item) => item.publishStatus !== 'PUBLISHED').length
-)
 const enabledCount = computed(
   () => appList.value.filter((item) => normalizeEnabled(item.enabled)).length
 )
+const disabledCount = computed(() => appList.value.length - enabledCount.value)
+
+interface AppTypeMeta {
+  value: AppTypeFilter
+  label: string
+  description: string
+  badge: string
+  icon: string
+  createMode: 'template' | 'blank' | 'placeholder'
+  aliases: string[]
+}
+
+const appTypeMetaList: AppTypeMeta[] = [
+  {
+    value: 'chat',
+    label: '聊天助手',
+    description: '快速构建基于 LLM 的智能对话助手',
+    badge: '模板创建',
+    icon: 'chat',
+    createMode: 'template',
+    aliases: ['chat', 'advanced-chat', 'advanced_chat', '聊天助手']
+  },
+  {
+    value: 'agent',
+    label: 'Agent 智能体',
+    description: '支持推理规划与自主工具调用的智能助手',
+    badge: '占位开发中',
+    icon: 'agent',
+    createMode: 'placeholder',
+    aliases: ['agent', 'agent 智能体']
+  },
+  {
+    value: 'workflow',
+    label: 'Chatflow 对话流',
+    description: '支持记忆与流程编排的复杂多轮对话能力',
+    badge: '空白创建',
+    icon: 'workflow',
+    createMode: 'blank',
+    aliases: ['workflow', 'chatflow', 'chatflow 对话流', 'workflow 工作流']
+  }
+]
+
+const appTypeCounts = computed<Record<Exclude<AppTypeFilter, ''>, number>>(() => ({
+  chat: appList.value.filter((item) => normalizeAppTypeKey(item.appType) === 'chat').length,
+  agent: appList.value.filter((item) => normalizeAppTypeKey(item.appType) === 'agent').length,
+  workflow: appList.value.filter((item) => normalizeAppTypeKey(item.appType) === 'workflow').length
+}))
 
 const formRules: FormRules = {
-  appName: [{ required: true, message: '请输入应用名称', trigger: 'blur' }]
+  appName: [{ required: true, message: '请输入智能体名称', trigger: 'blur' }]
 }
 
 const parameterDrawerVisible = ref(false)
-const parameterTitle = ref('应用参数')
+const parameterTitle = ref('智能体参数')
 const parameterText = ref('')
 
 const statusMap: Record<string, string> = {
@@ -73,6 +117,43 @@ const statusMap: Record<string, string> = {
   SAVED: '未发布',
   PUBLISHED: '已发布',
   PUBLISH_FAILED: '发布失败'
+}
+
+function normalizeAppTypeKey(value?: string): AppTypeFilter | string {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+
+  for (const item of appTypeMetaList) {
+    const aliasMatches = item.aliases.some(
+      (alias) =>
+        String(alias)
+          .trim()
+          .toLowerCase()
+          .replace(/[_\s]+/g, '-') === normalized
+    )
+    if (item.value === normalized || aliasMatches) {
+      return item.value
+    }
+  }
+
+  return normalized || ''
+}
+
+function getAppTypeMeta(value?: string): AppTypeMeta | undefined {
+  const key = normalizeAppTypeKey(value)
+  if (!key) return undefined
+  return appTypeMetaList.find((item) => item.value === key)
+}
+
+function getAppTypeLabel(value?: string): string {
+  return getAppTypeMeta(value)?.label || (value ? String(value) : 'UNKNOWN')
+}
+
+function getAppTypeChipClass(value?: string): string {
+  const key = normalizeAppTypeKey(value)
+  return key ? `type-${key}` : 'type-unknown'
 }
 
 function pickArray(payload: any): any[] {
@@ -145,7 +226,7 @@ function formatTimeAgo(value?: string): string {
   return date.toISOString().slice(0, 10)
 }
 
-// 收敛后的单色方块配色（对齐 design token）
+// 收敛后的单色方块配色
 function hashColor(text: string): string {
   const colors = [
     '#0a0a0a',
@@ -173,24 +254,31 @@ function avatarText(row: AppRow): string {
 }
 
 function avatarColor(row: AppRow): string {
-  return hashColor(String(row.appType || row.appCode || row.appName || 'app'))
+  return hashColor(String(getAppTypeLabel(row.appType) || row.appCode || row.appName || 'app'))
 }
 
 function openCreateDialog() {
   createDialogVisible.value = true
 }
 
-function onCreateCommand(command: 'template' | 'blank') {
+function onCreateCommand(command: AppTypeMeta['createMode']) {
   createDialogVisible.value = false
   if (command === 'template') {
     router.push({
-      path: '/apps/orchestrator/create',
+      path: '/agents/orchestrator/create',
       query: { mode: 'template', from: route.fullPath }
     })
     return
   }
+  if (command === 'placeholder') {
+    router.push({
+      path: '/agents/placeholder',
+      query: { from: route.fullPath }
+    })
+    return
+  }
   router.push({
-    path: '/apps/orchestrator/create',
+    path: '/agents/orchestrator/create',
     query: { mode: 'blank', from: route.fullPath }
   })
 }
@@ -202,7 +290,8 @@ async function loadApps() {
       pageNum: pageNum.value,
       pageSize: 20,
       keyword: keyword.value.trim() || undefined,
-      publishStatus: statusFilter.value || undefined
+      appType: appTypeFilter.value || undefined,
+      publishStatus: publishStatusFilter.value || undefined
     })
 
     const list = pickArray(response) as AppRow[]
@@ -219,7 +308,7 @@ async function loadApps() {
       pageNum.value = Number(pageData.pageNum)
     }
   } catch (error: any) {
-    ElMessage.error(error?.message || '应用列表加载失败')
+    ElMessage.error(error?.message || '智能体列表加载失败')
   } finally {
     loading.value = false
   }
@@ -228,6 +317,7 @@ async function loadApps() {
 function resetForm() {
   formData.id = undefined
   formData.appName = ''
+  formData.appCode = ''
   formData.description = ''
   formData.icon = ''
   formData.iconImage = ''
@@ -242,6 +332,7 @@ async function openBasicEdit(row: AppRow) {
   editingRow.value = row
   formData.id = Number(row.id)
   formData.appName = row.appName || ''
+  formData.appCode = row.appCode || ''
   formData.description = row.description || ''
   formData.icon = row.icon || ''
   formData.iconImage = row.iconImage || ''
@@ -251,6 +342,7 @@ async function openBasicEdit(row: AppRow) {
   try {
     const detail = (await appApi.detail(Number(row.id))) as Record<string, any>
     formData.appName = detail.appName || row.appName || ''
+    formData.appCode = detail.appCode || row.appCode || ''
     formData.description = detail.description || row.description || ''
     formData.icon = detail.icon || row.icon || ''
     formData.iconImage = detail.iconImage || row.iconImage || ''
@@ -279,11 +371,11 @@ async function submitBasicEdit() {
   submitting.value = true
   try {
     await appApi.updateBasic(Number(formData.id), toBasicPayload())
-    ElMessage.success('基本信息更新成功')
+    ElMessage.success('智能体基本信息更新成功')
     dialogVisible.value = false
     await loadApps()
   } catch (error: any) {
-    ElMessage.error(error?.message || '保存失败')
+    ElMessage.error(error?.message || '智能体保存失败')
   } finally {
     submitting.value = false
   }
@@ -293,26 +385,28 @@ function handleEditFlow(row: AppRow) {
   const sourceType = resolveSourceType(row)
   if (sourceType === 'canvas') {
     router.push({
-      path: '/apps/orchestrator/create',
+      path: '/agents/orchestrator/create',
       query: { mode: 'blank', edit: String(row.id), from: route.fullPath }
     })
     return
   }
   if (sourceType === 'template') {
     router.push({
-      path: '/apps/orchestrator/create',
+      path: '/agents/orchestrator/create',
       query: { mode: 'template', edit: String(row.id), from: route.fullPath }
     })
     return
   }
-  ElMessage.warning('该应用缺少编排来源，无法进入流程编辑')
+  ElMessage.warning('该智能体缺少编排来源，无法进入流程编辑')
 }
 
 async function removeApp(row: AppRow) {
   try {
-    await ElMessageBox.confirm(`确认删除应用“${row.appName}”吗？`, '删除确认', { type: 'warning' })
+    await ElMessageBox.confirm(`确认删除智能体“${row.appName}”吗？`, '删除确认', {
+      type: 'warning'
+    })
     await appApi.delete(Number(row.id))
-    ElMessage.success('应用删除成功')
+    ElMessage.success('智能体删除成功')
     if (appList.value.length === 1 && pageNum.value > 1) {
       pageNum.value -= 1
     }
@@ -327,13 +421,13 @@ async function removeApp(row: AppRow) {
 async function showParameters(row: AppRow) {
   parameterLoading.value = true
   parameterDrawerVisible.value = true
-  parameterTitle.value = `${row.appName} 参数`
+  parameterTitle.value = `${row.appName} 智能体参数`
   parameterText.value = ''
   try {
     const response = await appApi.getParameters(Number(row.id))
     parameterText.value = JSON.stringify(response ?? {}, null, 2)
   } catch (error: any) {
-    parameterText.value = error?.message || '参数加载失败'
+    parameterText.value = error?.message || '智能体参数加载失败'
   } finally {
     parameterLoading.value = false
   }
@@ -342,7 +436,7 @@ async function showParameters(row: AppRow) {
 async function publishApp(row: AppRow) {
   try {
     await ElMessageBox.confirm(
-      `确认发布应用【${row.appName}】吗？\n发布后会将当前保存流程转换为 Dify 应用并生效。`,
+      `确认发布智能体【${row.appName}】吗？\n发布后会将当前保存流程转换为 Dify 智能体并生效。`,
       row.publishStatus === 'PUBLISHED' ? '重新发布确认' : '发布确认',
       {
         type: 'warning',
@@ -361,7 +455,7 @@ async function publishApp(row: AppRow) {
     const status = error?.response?.status
     const backendMessage = error?.response?.data?.message || error?.message || '发布失败'
     if (status === 409) {
-      ElMessage.error('应用已被他人修改，请刷新后重试')
+      ElMessage.error('智能体已被他人修改，请刷新后重试')
     } else if (status === 400) {
       ElMessage.error(String(backendMessage))
     } else if (status === 500) {
@@ -375,6 +469,10 @@ async function publishApp(row: AppRow) {
 }
 
 function handleMoreCommand(command: string, row: AppRow) {
+  if (command === 'chat') {
+    handleCardClick(row)
+    return
+  }
   if (command === 'flow') {
     handleEditFlow(row)
     return
@@ -398,7 +496,7 @@ function handleMoreCommand(command: string, row: AppRow) {
 
 function handleCardClick(row: AppRow) {
   if (!isPublished(row)) return
-  router.push(`/apps/${row.id}/chat`)
+  router.push(`/agents/${row.id}/chat`)
 }
 
 function handleSearch() {
@@ -406,15 +504,20 @@ function handleSearch() {
   void loadApps()
 }
 
-function handleStatusChange() {
+function handleAppTypeChange() {
   pageNum.value = 1
   void loadApps()
 }
 
-function setStatusFilter(status: PublishStatus) {
-  if (statusFilter.value === status) return
-  statusFilter.value = status
-  handleStatusChange()
+function handlePublishStatusChange() {
+  pageNum.value = 1
+  void loadApps()
+}
+
+function setAppTypeFilter(type: AppTypeFilter) {
+  if (appTypeFilter.value === type) return
+  appTypeFilter.value = type
+  handleAppTypeChange()
 }
 
 function handlePageChange(nextPage: number) {
@@ -432,35 +535,35 @@ onMounted(() => {
     <section class="workspace-shell">
       <div class="hero-panel">
         <div class="hero-copy">
-          <div class="eyebrow">APPLICATIONS · {{ total }}</div>
-          <h1>应用管理</h1>
-          <p>创建、配置、发布和维护企业 AI 应用，让应用资产保持清晰可控。</p>
+          <div class="eyebrow">AGENTS · {{ total }}</div>
+          <h1>智能体管理</h1>
+          <p>创建、配置、发布和维护企业智能体，让智能体资产保持清晰可控。</p>
         </div>
 
         <div class="hero-metrics">
           <div class="metric-card">
-            <span class="metric-label">当前页应用</span>
+            <span class="metric-label">当前页智能体</span>
             <strong>{{ appList.length }}</strong>
-          </div>
-          <div class="metric-card">
-            <span class="metric-label">已发布</span>
-            <strong>{{ publishedCount }}</strong>
           </div>
           <div class="metric-card">
             <span class="metric-label">已启用</span>
             <strong>{{ enabledCount }}</strong>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">未启用</span>
+            <strong>{{ disabledCount }}</strong>
           </div>
         </div>
       </div>
 
       <div class="content-panel">
         <div class="toolbar-row">
-          <div class="filter-tabs" aria-label="应用发布状态筛选">
+          <div class="filter-tabs" aria-label="智能体类型筛选">
             <button
               type="button"
               class="filter-tab"
-              :class="{ active: statusFilter === '' }"
-              @click="setStatusFilter('')"
+              :class="{ active: appTypeFilter === '' }"
+              @click="setAppTypeFilter('')"
             >
               <span>全部</span>
               <em>{{ total }}</em>
@@ -468,34 +571,57 @@ onMounted(() => {
             <button
               type="button"
               class="filter-tab"
-              :class="{ active: statusFilter === 'PUBLISHED' }"
-              @click="setStatusFilter('PUBLISHED')"
+              :class="{ active: appTypeFilter === 'chat' }"
+              @click="setAppTypeFilter('chat')"
             >
-              <span>已发布</span>
-              <em>{{ publishedCount }}</em>
+              <span>聊天助手</span>
+              <em>{{ appTypeCounts.chat }}</em>
             </button>
             <button
               type="button"
               class="filter-tab"
-              :class="{ active: statusFilter === 'UNPUBLISHED' }"
-              @click="setStatusFilter('UNPUBLISHED')"
+              :class="{ active: appTypeFilter === 'agent' }"
+              @click="setAppTypeFilter('agent')"
             >
-              <span>未发布</span>
-              <em>{{ unpublishedCount }}</em>
+              <span>Agent 智能体</span>
+              <em>{{ appTypeCounts.agent }}</em>
+            </button>
+            <button
+              type="button"
+              class="filter-tab"
+              :class="{ active: appTypeFilter === 'workflow' }"
+              @click="setAppTypeFilter('workflow')"
+            >
+              <span>Chatflow 对话流</span>
+              <em>{{ appTypeCounts.workflow }}</em>
             </button>
           </div>
 
-          <el-input
-            v-model="keyword"
-            class="search-input"
-            placeholder="搜索应用名称 / 编码"
-            clearable
-            @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon class="search-prefix-icon"><Search /></el-icon>
-            </template>
-          </el-input>
+          <div class="toolbar-actions">
+            <el-select
+              v-model="publishStatusFilter"
+              class="status-select"
+              placeholder="发布状态"
+              clearable
+              @change="handlePublishStatusChange"
+            >
+              <el-option label="全部状态" value="" />
+              <el-option label="已发布" value="PUBLISHED" />
+              <el-option label="未发布" value="NOT_PUBLISHED" />
+            </el-select>
+
+            <el-input
+              v-model="keyword"
+              class="search-input"
+              placeholder="搜索智能体名称 / 编码"
+              clearable
+              @keyup.enter="handleSearch"
+            >
+              <template #prefix>
+                <el-icon class="search-prefix-icon"><Search /></el-icon>
+              </template>
+            </el-input>
+          </div>
         </div>
 
         <div v-loading="loading" class="app-grid">
@@ -503,40 +629,19 @@ onMounted(() => {
             <span class="create-plus">
               <el-icon><Plus /></el-icon>
             </span>
-            <span class="create-title">创建新应用</span>
-            <span class="create-subtitle">选择创建方式，快速搭建企业 AI 应用</span>
+            <span class="create-title">创建新智能体</span>
+            <span class="create-subtitle">选择创建方式，快速搭建企业智能体</span>
           </button>
 
           <div
             v-for="row in appList"
             :key="row.id"
             class="app-card"
-            :class="{ 'is-unpublished': !isPublished(row) }"
-            @click="handleCardClick(row)"
+            :class="{
+              'is-unpublished': !isPublished(row),
+              'is-disabled': !normalizeEnabled(row.enabled)
+            }"
           >
-            <el-dropdown
-              class="more-menu"
-              trigger="click"
-              @command="(command) => handleMoreCommand(command, row)"
-            >
-              <button type="button" class="menu-trigger" @click.stop>
-                <el-icon><MoreFilled /></el-icon>
-              </button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="flow">编辑流程</el-dropdown-item>
-                  <el-dropdown-item :disabled="publishingId === Number(row.id)" command="publish">
-                    {{ row.publishStatus === 'PUBLISHED' ? '重新发布' : '发布' }}
-                  </el-dropdown-item>
-                  <el-dropdown-item command="basic">改基本信息</el-dropdown-item>
-                  <el-dropdown-item command="params">参数</el-dropdown-item>
-                  <el-dropdown-item command="delete">
-                    <span class="danger-text">删除</span>
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-
             <div class="card-top">
               <div
                 v-if="!row.iconImage && !row.icon"
@@ -549,19 +654,23 @@ onMounted(() => {
 
               <div class="title-area">
                 <div class="app-name">{{ row.appName || '-' }}</div>
-                <div class="app-code">{{ row.appCode || 'APP' }}</div>
               </div>
             </div>
 
             <div class="card-desc">{{
-              row.description || '暂无描述，可在基本信息中补充应用用途。'
+              row.description || '暂无描述，可在基本信息中补充智能体用途。'
             }}</div>
 
             <div class="tag-row">
               <span class="status-tag" :class="`st-${getPublishStatusTagType(row.publishStatus)}`">
                 {{ getPublishStatusText(row.publishStatus) }}
               </span>
-              <span class="type-tag">{{ row.appType || 'UNKNOWN' }}</span>
+              <span class="enabled-tag" :class="normalizeEnabled(row.enabled) ? 'en-on' : 'en-off'">
+                {{ normalizeEnabled(row.enabled) ? '已启用' : '未启用' }}
+              </span>
+              <span class="type-tag" :class="getAppTypeChipClass(row.appType)">
+                {{ getAppTypeLabel(row.appType) }}
+              </span>
               <span class="version-tag">v{{ row.version || 0 }}</span>
             </div>
 
@@ -570,13 +679,41 @@ onMounted(() => {
                 <el-icon><Clock /></el-icon>
                 <span>{{ formatTimeAgo(row.lastEditedAt) }}</span>
               </div>
-              <span class="entry-hint">{{ isPublished(row) ? '进入对话' : '待发布' }}</span>
+              <!-- 右下角悬浮多功能操作菜单气泡 -->
+              <el-dropdown
+                class="card-action-bubble"
+                trigger="click"
+                @command="(command) => handleMoreCommand(command, row)"
+              >
+                <!-- 替换原来的 button 结构 -->
+                <button type="button" class="action-bubble-btn" @click.stop>
+                  <el-icon><MoreFilled /></el-icon>
+                  <span>更多</span>
+                </button>
+
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :disabled="!isPublished(row)" command="chat">
+                      进入对话
+                    </el-dropdown-item>
+                    <el-dropdown-item command="flow">编辑流程</el-dropdown-item>
+                    <el-dropdown-item :disabled="publishingId === Number(row.id)" command="publish">
+                      {{ row.publishStatus === 'PUBLISHED' ? '重新发布' : '发布' }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="basic">改基本信息</el-dropdown-item>
+                    <el-dropdown-item command="params">参数</el-dropdown-item>
+                    <el-dropdown-item command="delete">
+                      <span class="danger-text">删除</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
         </div>
 
         <div class="footer-bar">
-          <span class="footer-count">共 {{ total }} 条 · 当前页 {{ appList.length }} 条</span>
+          <span class="footer-count">共 {{ total }} 个智能体 · 当前页 {{ appList.length }} 个</span>
           <el-pagination
             layout="prev, pager, next, jumper"
             :current-page="pageNum"
@@ -600,28 +737,12 @@ onMounted(() => {
     <template #header>
       <div class="create-dialog-header">
         <span class="dialog-eyebrow">CREATE APPLICATION</span>
-        <h3>选择创建方式</h3>
-        <p>根据当前需求选择合适的起点，后续都可以继续编辑应用配置和编排流程。</p>
+        <h3>选择智能体创建方式</h3>
+        <p>根据当前需求选择合适的起点，后续都可以继续编辑智能体配置和编排流程。</p>
       </div>
     </template>
 
     <div class="create-mode-grid">
-      <button type="button" class="create-mode-card blank-mode" @click="onCreateCommand('blank')">
-        <span class="mode-icon">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M5 5.5C5 4.67 5.67 4 6.5 4h11c.83 0 1.5.67 1.5 1.5v13c0 .83-.67 1.5-1.5 1.5h-11C5.67 20 5 19.33 5 18.5v-13Z"
-            />
-            <path d="M8 8h8M8 12h5M8 16h3" />
-          </svg>
-        </span>
-        <span class="mode-content">
-          <strong>从空白创建</strong>
-          <small>适合自定义流程，从零配置节点、参数和发布信息。</small>
-        </span>
-        <span class="mode-badge">推荐自定义</span>
-      </button>
-
       <button
         type="button"
         class="create-mode-card template-mode"
@@ -636,36 +757,72 @@ onMounted(() => {
           </svg>
         </span>
         <span class="mode-content">
-          <strong>从模板创建</strong>
-          <small>适合快速复用成熟场景，基于模板微调后直接发布。</small>
+          <strong>聊天助手</strong>
+          <small>快速构建基于 LLM 的智能对话助手。</small>
         </span>
-        <span class="mode-badge">快速启动</span>
+        <span class="mode-badge">模板创建</span>
+      </button>
+
+      <button
+        type="button"
+        class="create-mode-card agent-mode"
+        @click="onCreateCommand('placeholder')"
+      >
+        <span class="mode-icon">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 4.5l2.12 4.3 4.76.69-3.44 3.35.81 4.74L12 15.2l-4.25 2.38.81-4.74L5.12 9.49l4.76-.69L12 4.5Z"
+            />
+            <path d="M12 8.5v7" />
+          </svg>
+        </span>
+        <span class="mode-content">
+          <strong>Agent 智能体</strong>
+          <small>支持推理规划与自主工具调用的智能助手。</small>
+        </span>
+        <span class="mode-badge">开发中</span>
+      </button>
+
+      <button type="button" class="create-mode-card blank-mode" @click="onCreateCommand('blank')">
+        <span class="mode-icon">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M5 5.5C5 4.67 5.67 4 6.5 4h11c.83 0 1.5.67 1.5 1.5v13c0 .83-.67 1.5-1.5 1.5h-11C5.67 20 5 19.33 5 18.5v-13Z"
+            />
+            <path d="M8 8h8M8 12h5M8 16h3" />
+          </svg>
+        </span>
+        <span class="mode-content">
+          <strong>Chatflow 对话流</strong>
+          <small>支持记忆与流程编排的复杂多轮对话能力。</small>
+        </span>
+        <span class="mode-badge">空白创建</span>
       </button>
     </div>
   </el-dialog>
 
-  <el-dialog v-model="dialogVisible" title="改基本信息" width="640px" destroy-on-close>
+  <el-dialog v-model="dialogVisible" title="修改智能体基本信息" width="640px" destroy-on-close>
     <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
-      <el-form-item label="应用头像">
+      <el-form-item label="智能体头像">
         <IconUploader v-model="formData.iconImage" />
       </el-form-item>
 
+      <el-form-item label="智能体名称" prop="appName">
+        <el-input v-model="formData.appName" />
+      </el-form-item>
+
+      <el-form-item label="智能体编码">
+        <el-input v-model="formData.appCode" disabled placeholder="保存后生成" />
+      </el-form-item>
+
       <el-row :gutter="16">
-        <el-col :span="16">
-          <el-form-item label="应用名称" prop="appName">
-            <el-input v-model="formData.appName" />
-          </el-form-item>
-        </el-col>
         <el-col :span="8">
           <el-form-item label="排序">
             <el-input-number v-model="formData.sort" class="w-full" :min="1" />
           </el-form-item>
         </el-col>
-      </el-row>
-
-      <el-row :gutter="16">
-        <el-col :span="12">
-          <el-form-item label="启用">
+        <el-col :span="16">
+          <el-form-item label="启用状态">
             <el-switch v-model="formData.enabled" />
           </el-form-item>
         </el-col>
@@ -675,11 +832,6 @@ onMounted(() => {
         <el-input v-model="formData.description" type="textarea" :rows="3" />
       </el-form-item>
     </el-form>
-
-    <template #footer>
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="submitBasicEdit">保存</el-button>
-    </template>
   </el-dialog>
 
   <el-drawer v-model="parameterDrawerVisible" :title="parameterTitle" size="540px">
@@ -707,11 +859,23 @@ onMounted(() => {
   .toolbar-row {
     align-items: stretch;
     flex-direction: column;
+    gap: 12px;
+  }
+
+  .toolbar-actions {
+    width: 100%;
+    margin-left: 0 !important;
+    flex-direction: row;
+  }
+
+  .status-select {
+    flex: 1;
+    width: auto !important;
   }
 
   .search-input {
-    width: 100%;
-    margin-left: 0;
+    flex: 2;
+    width: auto !important;
   }
 }
 
@@ -788,7 +952,7 @@ onMounted(() => {
   gap: 18px;
 }
 
-/* 顶部不再做白色隔离条，而是做与背景融合的工作台头部 */
+/* 顶部与背景融合的工作台头部 */
 .hero-panel {
   position: relative;
   display: grid;
@@ -879,7 +1043,7 @@ onMounted(() => {
   color: #172033;
 }
 
-/* 内容区是一个融合式浅色面板，不做独立白条 */
+/* 内容融合式浅色面板 */
 .content-panel {
   display: flex;
   min-height: 0;
@@ -953,9 +1117,38 @@ onMounted(() => {
   background: var(--primary-soft);
 }
 
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.status-select {
+  width: 130px;
+}
+
+.status-select :deep(.el-input__wrapper) {
+  height: 40px;
+  padding: 0 12px;
+  background: #fff !important;
+  border-radius: 12px !important;
+  box-shadow: 0 0 0 1px var(--border) inset !important;
+  transition: box-shadow 0.16s ease;
+}
+
+.status-select :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #cbd8ea inset !important;
+}
+
+.status-select :deep(.el-input__wrapper.is-focus) {
+  box-shadow:
+    0 0 0 1px var(--primary) inset,
+    0 0 0 4px rgb(37 99 235 / 10%) !important;
+}
+
 .search-input {
   width: min(320px, 100%);
-  margin-left: auto;
 }
 
 .search-input :deep(.el-input__wrapper) {
@@ -993,10 +1186,10 @@ onMounted(() => {
   position: relative;
   display: flex;
   min-height: 184px;
-  padding: 18px;
+  padding: 18px 18px 16px; /* 1. 底部内边距由 58px 缩减至 16px，使布局更紧凑 */
   overflow: hidden;
   font-family: inherit;
-  cursor: pointer;
+  cursor: default;
   background: var(--surface);
   border: 1px solid var(--border-soft);
   border-radius: 16px;
@@ -1008,12 +1201,27 @@ onMounted(() => {
   flex-direction: column;
 }
 
+.card-footer {
+  position: relative; /* 4. 设为相对定位，作为子级按钮的绝对定位参考 */
+  display: flex;
+  min-width: 0;
+  padding-top: 12px;
+  padding-right: 80px; /* 3. 右侧留出空间，防止时间与悬浮按钮重叠 */
+  margin-top: auto; /* 2. 自动将 footer 撑到卡片最底部 */
+  font-size: 12px;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--border-soft);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .app-card::before {
   position: absolute;
   top: 0;
   right: 0;
   left: 0;
-  height: 3px;
+  height: 1px;
   background: transparent;
   content: '';
 }
@@ -1038,6 +1246,10 @@ onMounted(() => {
 
 .app-card.is-unpublished:hover {
   box-shadow: var(--shadow-card);
+}
+
+.app-card.is-disabled {
+  opacity: 0.95;
 }
 
 .create-card {
@@ -1088,41 +1300,10 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 
-.more-menu {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  z-index: 1;
-}
-
-.menu-trigger {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  background: #f8fafc;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  opacity: 0;
-  transition: all 0.16s ease;
-  place-items: center;
-}
-
-.app-card:hover .menu-trigger {
-  opacity: 1;
-}
-
-.menu-trigger:hover {
-  color: var(--primary);
-  background: var(--primary-soft);
-  border-color: #d8e3f5;
-}
-
 .card-top {
   display: flex;
   min-width: 0;
-  padding-right: 34px;
+  padding-right: 12px;
   margin-bottom: 14px;
   align-items: flex-start;
   gap: 12px;
@@ -1194,6 +1375,7 @@ onMounted(() => {
 }
 
 .status-tag,
+.enabled-tag,
 .type-tag,
 .version-tag {
   display: inline-flex;
@@ -1225,12 +1407,41 @@ onMounted(() => {
   background: var(--primary-soft);
 }
 
+.enabled-tag {
+  color: #166534;
+  background: #ecfdf3;
+}
+
+.enabled-tag.en-off {
+  color: #b45309;
+  background: #fff7ed;
+}
+
 .type-tag {
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.04em;
   color: #475569;
-  text-transform: uppercase;
+  background: #f1f5f9;
+}
+
+.type-chat {
+  color: #0f766e;
+  background: #ecfdf5;
+}
+
+.type-agent {
+  color: #b45309;
+  background: #fff7ed;
+}
+
+.type-workflow {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.type-unknown {
+  color: #475569;
   background: #f1f5f9;
 }
 
@@ -1239,18 +1450,6 @@ onMounted(() => {
   color: var(--text-secondary);
   background: #f8fafc;
   border: 1px solid var(--border-soft);
-}
-
-.card-footer {
-  display: flex;
-  min-width: 0;
-  padding-top: 12px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  border-top: 1px solid var(--border-soft);
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
 }
 
 .meta-time {
@@ -1263,15 +1462,69 @@ onMounted(() => {
   gap: 5px;
 }
 
-.entry-hint {
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--primary);
+.card-action-bubble {
+  position: absolute;
+  top: 50%; /* 1. 绝对定位到父级 footer 高度的 50% 位置 */
+  right: 0;
+  z-index: 3;
+  opacity: 0;
+
+  /* 2. 结合 translateY(-50%) 实现完美垂直居中，加 6px 用于 hover 时的向上浮动动画 */
+  transform: translateY(-50%) translateY(0);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
 }
 
-.app-card.is-unpublished .entry-hint {
-  color: var(--text-tertiary);
+.app-card:hover .card-action-bubble {
+  opacity: 1;
+
+  /* 3. hover 时保持 -50% 垂直居中，位移归零 */
+  transform: translateY(-30%) translateY(0);
+}
+
+.action-bubble-btn {
+  display: inline-flex;
+  height: 28px; /* 稍微收窄高度，使其更精致 */
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+
+  /* 平时采用跟卡片文字一致的次级灰色，不抢眼 */
+  color: var(--text-secondary);
+  cursor: pointer;
+
+  /* 基础背景色为纯白或微带灰，与卡片底色融合 */
+  background: #fff;
+
+  /* 边框采用和卡片相同的浅边框色 */
+  border: 1px solid var(--border-soft);
+  border-radius: 8px; /* 采用与卡片倒角相呼应的微圆角 */
+  box-shadow: 0 1px 2px rgb(15 23 42 / 2%); /* 极轻微的平面投影，不脱离纸面 */
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+/* 鼠标放到按钮上时的加深反馈 */
+.action-bubble-btn:hover {
+  color: var(--text-primary); /* 文字颜色加深，体现可点击感 */
+  background: #f1f5f9; /* 移上去呈现质感灰 */
+  border-color: #cbd5e1; /* 边框变深 */
+  transform: none; /* 彻底移除上浮动作，让其牢牢贴紧平面 */
+}
+
+.action-bubble-btn:active {
+  transform: translateY(0);
+}
+
+.action-bubble-btn :deep(.el-icon) {
+  font-size: 13px;
 }
 
 .danger-text {
@@ -1366,14 +1619,14 @@ onMounted(() => {
 
 .create-mode-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 
 .create-mode-card {
   position: relative;
   display: flex;
-  min-height: 190px;
+  min-height: 200px;
   padding: 20px;
   overflow: hidden;
   text-align: left;
@@ -1407,6 +1660,23 @@ onMounted(() => {
   border-color: var(--primary);
   transform: translateY(-2px);
   box-shadow: 0 18px 42px rgb(37 99 235 / 13%);
+}
+
+.agent-mode .mode-icon {
+  color: #b45309;
+  background: #fff7ed;
+  border-color: #fde3bf;
+}
+
+.agent-mode .mode-badge {
+  color: #b45309;
+  background: #fff7ed;
+}
+
+.blank-mode .mode-icon {
+  color: #2563eb;
+  background: var(--primary-soft);
+  border-color: #d8e3f5;
 }
 
 .mode-icon {
@@ -1473,6 +1743,11 @@ onMounted(() => {
 .template-mode .mode-badge {
   color: #0f766e;
   background: #ecfdf5;
+}
+
+.blank-mode .mode-badge {
+  color: #2563eb;
+  background: var(--primary-soft);
 }
 
 .json-view {

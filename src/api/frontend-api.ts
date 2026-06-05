@@ -233,6 +233,7 @@ export interface AppListParams {
   pageNum?: number
   pageSize?: number
   keyword?: string
+  appType?: string
   publishStatus?: 'PUBLISHED' | 'UNPUBLISHED' | ''
 }
 

@@ -32,7 +32,7 @@ const selectedTemplate = computed<TemplateMeta | undefined>(() =>
   templates.value.find((item) => item.code === selectedTemplateCode.value)
 )
 const isEditMode = computed(() => Number.isFinite(props.editId))
-const pageTitle = computed(() => (isEditMode.value ? '编辑模板编排' : '从模板创建应用'))
+const pageTitle = computed(() => (isEditMode.value ? '编辑模板编排' : '从模板创建智能体'))
 const pageMessage = computed(() =>
   isEditMode.value
     ? '编辑已保存的模板流程，点击保存后仅更新前端快照'
@@ -137,7 +137,7 @@ function buildPayload(): TemplatePayloadWithVersion | null {
   }
 
   if (isEmptyRequiredValue(appMeta.value.name)) {
-    ElMessage.warning('请填写应用名')
+    ElMessage.warning('请填写智能体名')
     return null
   }
 
@@ -215,7 +215,7 @@ async function handleSave() {
     updateVersionFromResponse(result)
     const savedId = Number(result?.id)
     if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
-      await router.replace(`/apps/orchestrator/create?mode=template&edit=${savedId}`)
+      await router.replace(`/agents/orchestrator/create?mode=template&edit=${savedId}`)
     }
     ElMessage.success('保存成功')
   } catch (error: unknown) {
@@ -285,7 +285,7 @@ onMounted(async () => {
 <template>
   <ContentWrap :title="pageTitle" :message="pageMessage">
     <div class="page-top">
-      <el-button link type="primary" @click="handleBack">返回应用管理</el-button>
+      <el-button link type="primary" @click="handleBack">返回智能体管理</el-button>
       <span v-if="isEditMode && readonlyTemplateText" class="readonly-tip">{{
         readonlyTemplateText
       }}</span>
@@ -298,7 +298,7 @@ onMounted(async () => {
 
     <template v-if="selectedTemplate">
       <div class="step-block">
-        <div class="step-title">{{ isEditMode ? '1. 应用信息' : '2. 应用信息' }}</div>
+        <div class="step-title">{{ isEditMode ? '1. 智能体信息' : '2. 智能体信息' }}</div>
         <AppMetaForm v-model="appMeta" />
       </div>
 

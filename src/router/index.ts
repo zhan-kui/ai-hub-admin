@@ -54,6 +54,12 @@ const staticRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/app/orchestrator/index.vue'),
     meta: { hidden: true, requiresAuth: true, title: '从模板创建智能体' }
   },
+  {
+    path: '/agents/placeholder',
+    name: 'AgentPlaceholder',
+    component: () => import('@/views/app/AgentPlaceholder.vue'),
+    meta: { hidden: true, requiresAuth: true, title: 'Agent 智能体开发中' }
+  },
 
   // ─────────────────────────────────────
   // 向后兼容：旧 /apps/* 路径自动重定向到 /agents/*

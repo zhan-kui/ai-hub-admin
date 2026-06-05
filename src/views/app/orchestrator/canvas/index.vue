@@ -60,7 +60,7 @@ const version = ref<number | undefined>(undefined)
 const inspectorVisible = ref(false)
 const editingNodeId = ref('')
 const pageTitle = computed(() =>
-  isEditMode.value ? `编辑应用：${appMeta.value.name || ''}` : '从空白编排创建应用'
+  isEditMode.value ? `编辑智能体：${appMeta.value.name || ''}` : '从空白编排创建智能体'
 )
 const pageMessage = computed(() =>
   isEditMode.value
@@ -529,7 +529,7 @@ async function loadEditCanvas(editId: number) {
 
 async function handleConflict(editId: number) {
   try {
-    await ElMessageBox.confirm('应用已被他人修改，是否重新加载远端版本？', '版本冲突', {
+    await ElMessageBox.confirm('智能体已被他人修改，是否重新加载远端版本？', '版本冲突', {
       type: 'warning',
       confirmButtonText: '重新加载远端版本',
       cancelButtonText: '保留当前草稿'
@@ -588,7 +588,7 @@ async function handleSave() {
     updateVersionFromResponse(response)
     const savedId = Number(response?.id)
     if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
-      await router.replace(`/apps/orchestrator/create?mode=blank&edit=${savedId}`)
+      await router.replace(`/agents/orchestrator/create?mode=blank&edit=${savedId}`)
     }
     ElMessage.success('保存成功')
   } catch (error: unknown) {

@@ -1209,7 +1209,7 @@ function removeUploadedFile(fileId: string) {
 
 function triggerFileSelect() {
   if (!appId.value) {
-    ElMessage.warning('请先选择应用')
+    ElMessage.warning('请先选择智能体')
     return
   }
   fileInputRef.value?.click()
@@ -1300,7 +1300,7 @@ const recordStartTimeRef = ref<number>(0)
 
 async function startVoiceInput() {
   if (!appId.value) {
-    ElMessage.warning('请先选择应用')
+    ElMessage.warning('请先选择智能体')
     return
   }
   if (!canUseVoice.value) {
@@ -1888,7 +1888,7 @@ onMounted(async () => {
   resetChatState()
 
   if (!appId.value || Number.isNaN(appId.value)) {
-    ElMessage.error('应用 ID 无效')
+    ElMessage.error('智能体 ID 无效')
     router.push('/apps')
     return
   }
@@ -1896,13 +1896,13 @@ onMounted(async () => {
   try {
     currentApp.value = await appApi.detail(appId.value)
   } catch (error) {
-    ElMessage.error('应用不存在或无权访问')
+    ElMessage.error('智能体不存在或无权访问')
     router.push('/apps')
     return
   }
 
   if (currentApp.value?.publishStatus !== 'PUBLISHED') {
-    ElMessage.warning('该应用未发布，无法对话')
+    ElMessage.warning('该智能体未发布，无法对话')
     router.push('/apps')
     return
   }
@@ -1935,7 +1935,7 @@ onBeforeUnmount(() => {
       <div class="header-left">
         <el-button text class="header-back-btn" @click="backToApps">
           <el-icon><ArrowLeft /></el-icon>
-          返回应用列表
+          返回智能体列表
         </el-button>
       </div>
       <div class="header-center app-header-center">
@@ -1949,8 +1949,8 @@ onBeforeUnmount(() => {
           {{ resolveAppAvatarText(currentApp) }}
         </div>
         <div class="header-app-meta">
-          <div class="header-app-name">{{ currentApp?.appName || '应用聊天' }}</div>
-          <div class="header-app-desc">{{ currentApp?.description || '当前应用的专属会话' }}</div>
+          <div class="header-app-name">{{ currentApp?.appName || '智能体聊天' }}</div>
+          <div class="header-app-desc">{{ currentApp?.description || '当前智能体的专属会话' }}</div>
         </div>
       </div>
       <div class="header-right">
