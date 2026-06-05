@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { ChatLineRound, Clock, MoreFilled, Plus, Search } from '@element-plus/icons-vue'
+import { Clock, MoreFilled, Plus, Search } from '@element-plus/icons-vue'
 import IconUploader from './components/IconUploader.vue'
 import {
   appApi,
@@ -14,7 +14,7 @@ import {
 
 type AppRow = AppConfigVO & Record<string, any>
 type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
-type PublishStatusFilter = '' | 'PUBLISHED' | 'NOT_PUBLISHED'
+type PublishStatusFilter = '' | 'PUBLISHED' | 'UNPUBLISHED'
 type AppBasicForm = Omit<UpdateAppBasicRequest, 'appName' | 'iconImage'> & {
   id?: number
   appName: string
@@ -607,7 +607,7 @@ onMounted(() => {
             >
               <el-option label="全部状态" value="" />
               <el-option label="已发布" value="PUBLISHED" />
-              <el-option label="未发布" value="NOT_PUBLISHED" />
+              <el-option label="未发布" value="UNPUBLISHED" />
             </el-select>
 
             <el-input
@@ -796,7 +796,7 @@ onMounted(() => {
           <strong>Chatflow 对话流</strong>
           <small>支持记忆与流程编排的复杂多轮对话能力。</small>
         </span>
-        <span class="mode-badge">空白创建</span>
+        <span class="mode-badge">流程编排</span>
       </button>
     </div>
   </el-dialog>
@@ -832,6 +832,15 @@ onMounted(() => {
         <el-input v-model="formData.description" type="textarea" :rows="3" />
       </el-form-item>
     </el-form>
+
+    <template #footer>
+      <div class="dialog-footer">
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitBasicEdit">
+          确认修改
+        </el-button>
+      </div>
+    </template>
   </el-dialog>
 
   <el-drawer v-model="parameterDrawerVisible" :title="parameterTitle" size="540px">
@@ -1363,6 +1372,7 @@ onMounted(() => {
   color: var(--text-secondary);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   flex: 1;
 }
 
