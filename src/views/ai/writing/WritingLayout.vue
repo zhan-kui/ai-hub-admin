@@ -957,8 +957,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="less" scoped>
-
-
 @keyframes pulse {
   0%,
   100% {
@@ -1682,12 +1680,11 @@ onBeforeUnmount(() => {
 .writing-page__editor :deep(span[style*='#f0f9ff']) {
   padding: 0.08em 0.24em;
   color: #475569 !important;
+  text-decoration: underline dashed rgb(37 99 235 / 45%) 1px;
   background: #f0f7ff !important;
   border-radius: 0.38em;
   box-shadow: inset 0 0 0 1px rgb(37 99 235 / 15%);
-  text-decoration: underline dashed rgb(37 99 235 / 45%) 1px;
   text-underline-offset: 0.18em;
-  box-decoration-break: clone;
   box-decoration-break: clone;
 }
 

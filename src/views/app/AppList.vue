@@ -689,8 +689,6 @@ onMounted(() => {
 </template>
 
 <style scoped lang="less">
-
-
 @media (width <= 1180px) {
   .hero-panel {
     grid-template-columns: 1fr;
