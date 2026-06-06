@@ -229,12 +229,15 @@ export interface UpdateAppBasicRequest {
   enabled?: boolean
 }
 
+export type AppPublishStatus = 'DRAFT' | 'SAVED' | 'PUBLISHED' | 'PUBLISH_FAILED'
+
 export interface AppListParams {
   pageNum?: number
   pageSize?: number
   keyword?: string
   appType?: string
-  publishStatus?: 'PUBLISHED' | 'UNPUBLISHED' | ''
+  publishStatus?: AppPublishStatus | ''
+  enabled?: boolean
 }
 
 export interface PageResult<T> {

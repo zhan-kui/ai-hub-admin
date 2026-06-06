@@ -14,7 +14,7 @@ import {
 
 type AppRow = AppConfigVO & Record<string, any>
 type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
-type PublishStatusFilter = '' | 'PUBLISHED' | 'UNPUBLISHED'
+type PublishStatusFilter = '' | 'PUBLISHED' | 'SAVED'
 type AppBasicForm = Omit<UpdateAppBasicRequest, 'appName' | 'iconImage'> & {
   id?: number
   appName: string
@@ -607,7 +607,7 @@ onMounted(() => {
             >
               <el-option label="全部状态" value="" />
               <el-option label="已发布" value="PUBLISHED" />
-              <el-option label="未发布" value="UNPUBLISHED" />
+              <el-option label="未发布" value="SAVED" />
             </el-select>
 
             <el-input
