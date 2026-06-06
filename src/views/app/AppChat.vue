@@ -66,7 +66,13 @@ const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
 
-const appId = computed(() => Number(route.params.appId))
+function resolveRouteAppId(): number {
+  const routeId = route.params.agentId ?? route.params.appId
+  const rawValue = Array.isArray(routeId) ? routeId[0] : routeId
+  return Number(rawValue)
+}
+
+const appId = computed(() => resolveRouteAppId())
 const currentApp = ref<AppConfigVO | null>(null)
 const conversations = ref<ConversationItem[]>([])
 const inputValue = ref('')
@@ -1434,8 +1440,18 @@ function resolveAppAvatarText(app?: AppConfigVO | null): string {
   return (first || 'A').toUpperCase()
 }
 
+function resolveAgentListFallbackPath(): string {
+  const from = Array.isArray(route.query.from) ? route.query.from[0] : route.query.from
+  return typeof from === 'string' && from.startsWith('/') ? from : '/dashboard/home'
+}
+
 function backToApps() {
-  router.push('/apps')
+  const historyState = window.history.state as { back?: string | null } | null
+  if (historyState?.back) {
+    router.back()
+    return
+  }
+  void router.push(resolveAgentListFallbackPath())
 }
 // ★ 修复抖动：新增 silent 参数
 // silent=true 时跳过 conversationLoading 置 true，直接用新数据原地替换列表，不清空再重建
@@ -1889,7 +1905,7 @@ onMounted(async () => {
 
   if (!appId.value || Number.isNaN(appId.value)) {
     ElMessage.error('智能体 ID 无效')
-    router.push('/apps')
+    backToApps()
     return
   }
 
@@ -1897,13 +1913,13 @@ onMounted(async () => {
     currentApp.value = await appApi.detail(appId.value)
   } catch (error) {
     ElMessage.error('智能体不存在或无权访问')
-    router.push('/apps')
+    backToApps()
     return
   }
 
   if (currentApp.value?.publishStatus !== 'PUBLISHED') {
     ElMessage.warning('该智能体未发布，无法对话')
-    router.push('/apps')
+    backToApps()
     return
   }
 
@@ -1952,12 +1968,6 @@ onBeforeUnmount(() => {
           <div class="header-app-name">{{ currentApp?.appName || '智能体聊天' }}</div>
           <div class="header-app-desc">{{ currentApp?.description || '当前智能体的专属会话' }}</div>
         </div>
-      </div>
-      <div class="header-right">
-        <el-button type="primary" plain @click="handleNewConversation">
-          <el-icon><Plus /></el-icon>
-          新建会话
-        </el-button>
       </div>
     </header>
 
@@ -2841,13 +2851,6 @@ onBeforeUnmount(() => {
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #0f172a;
-}
-
-.header-right {
-  display: inline-flex;
-  min-width: 150px;
-  justify-content: flex-end;
-  justify-self: end;
 }
 
 .header-user {
