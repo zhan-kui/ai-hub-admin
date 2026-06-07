@@ -988,7 +988,7 @@ onMounted(() => {
               placement="top"
               effect="dark"
             >
-              <el-icon style=" font-size: 14px; color: var(--text-tertiary);cursor: help">
+              <el-icon style="font-size: 14px; color: var(--text-tertiary); cursor: help">
                 <QuestionFilled />
               </el-icon>
             </el-tooltip>
@@ -1106,8 +1106,6 @@ onMounted(() => {
 </template>
 
 <style scoped lang="less">
-
-
 @keyframes fadeInPrompt {
   from {
     opacity: 0;

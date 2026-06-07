@@ -778,8 +778,6 @@ onMounted(async () => {
 </template>
 
 <style scoped lang="less">
-
-
 @keyframes pulseError {
   from {
     opacity: 0.8;
