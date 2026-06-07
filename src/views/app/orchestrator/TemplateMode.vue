@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ContentWrap } from '@/components/ContentWrap'
 import { orchestrationApi } from '@/api/frontend-api'
 import AppMetaForm from './components/AppMetaForm.vue'
@@ -12,6 +12,7 @@ import { DEFAULT_ICON, DEFAULT_ICON_BG, MODEL_OPTIONS } from './constants'
 import type { AppMeta, TemplateMeta, TemplateNodeConfig, TemplatePayloadWithVersion } from './types'
 
 const router = useRouter()
+const route = useRoute()
 const props = defineProps<{
   editId?: number
 }>()
@@ -27,16 +28,20 @@ const saving = ref(false)
 const version = ref<number | undefined>(undefined)
 const readonlyTemplateText = ref('')
 const syncingTemplateConfig = ref(false)
+const templateSelectionLocked = ref(false)
 
 const selectedTemplate = computed<TemplateMeta | undefined>(() =>
   templates.value.find((item) => item.code === selectedTemplateCode.value)
 )
 const isEditMode = computed(() => Number.isFinite(props.editId))
+const showTemplatePicker = computed(() => !isEditMode.value || !templateSelectionLocked.value)
+const metaStepTitle = computed(() => (showTemplatePicker.value ? '2. 智能体信息' : '1. 智能体信息'))
+const flowStepTitle = computed(() => (showTemplatePicker.value ? '3. 流程参数' : '2. 流程参数'))
 const pageTitle = computed(() => (isEditMode.value ? '编辑模板编排' : '从模板创建智能体'))
 const pageMessage = computed(() =>
   isEditMode.value
-    ? '编辑已保存的模板流程，点击保存后仅更新前端快照'
-    : '选择模板 → 填写参数 → 保存前端快照'
+    ? '编辑已保存的模板流程，首次无草稿时可先选择模板再保存。'
+    : '选择模板，填写参数后保存前端草稿。'
 )
 
 const drawerNode = computed(() =>
@@ -70,8 +75,41 @@ async function loadTemplates() {
   }
 }
 
+function applyAppMeta(nextMeta: any) {
+  appMeta.value = {
+    name: String(nextMeta?.name || ''),
+    description: String(nextMeta?.description || ''),
+    icon: String(nextMeta?.icon || DEFAULT_ICON),
+    iconBackground: String(nextMeta?.iconBackground || DEFAULT_ICON_BG),
+    iconImage: String(nextMeta?.iconImage || '')
+  }
+}
+
+function resolveReturnPath(): string | null {
+  const rawFrom = route.query.from
+  const from = Array.isArray(rawFrom) ? rawFrom[0] : rawFrom
+  if (typeof from !== 'string') return null
+  const trimmed = from.trim()
+  if (!trimmed.startsWith('/')) return null
+  if (trimmed.startsWith('/agents/orchestrator/create')) return null
+  return trimmed
+}
+
+function navigateBack() {
+  const returnPath = resolveReturnPath()
+  if (returnPath) {
+    void router.push(returnPath)
+    return
+  }
+  if (window.history.length > 1) {
+    router.back()
+    return
+  }
+  void router.push('/dashboard/home')
+}
+
 function handleBack() {
-  router.push('/apps')
+  navigateBack()
 }
 
 function handleNodeClick(nodeId: string) {
@@ -122,7 +160,7 @@ function buildNodeConfigs(
 
 watch(selectedTemplateCode, (code) => {
   if (syncingTemplateConfig.value) return
-  if (isEditMode.value) return
+  if (isEditMode.value && templateSelectionLocked.value) return
   const template = templates.value.find((item) => item.code === code)
   if (!template) return
   buildNodeConfigs(template)
@@ -137,7 +175,7 @@ function buildPayload(): TemplatePayloadWithVersion | null {
   }
 
   if (isEmptyRequiredValue(appMeta.value.name)) {
-    ElMessage.warning('请填写智能体名')
+    ElMessage.warning('请填写智能体名称')
     return null
   }
 
@@ -158,7 +196,7 @@ function buildPayload(): TemplatePayloadWithVersion | null {
     for (const field of node.fields) {
       if (!field.required) continue
       if (isEmptyRequiredValue(nodeConfig[field.key])) {
-        ElMessage.warning(`「${node.title}」节点的「${field.label}」未填写`)
+        ElMessage.warning(`“${node.title}” 节点的 “${field.label}” 未填写`)
         return null
       }
     }
@@ -213,9 +251,21 @@ async function handleSave() {
         ? await orchestrationApi.updateTemplateDraft(props.editId, payload)
         : await orchestrationApi.saveTemplateDraft(payload)
     updateVersionFromResponse(result)
+    if (selectedTemplate.value) {
+      templateSelectionLocked.value = true
+      readonlyTemplateText.value = `基于模板：${selectedTemplate.value.name || selectedTemplate.value.code}（编辑模式下不可更换模板）`
+    }
     const savedId = Number(result?.id)
     if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
-      await router.replace(`/agents/orchestrator/create?mode=template&edit=${savedId}`)
+      const returnPath = resolveReturnPath()
+      await router.replace({
+        path: '/agents/orchestrator/create',
+        query: {
+          mode: 'template',
+          edit: String(savedId),
+          ...(returnPath ? { from: returnPath } : {})
+        }
+      })
     }
     ElMessage.success('保存成功')
   } catch (error: unknown) {
@@ -241,16 +291,24 @@ async function loadEditConfig(id: number) {
   try {
     const config = (await orchestrationApi.getTemplateDraft(id)) as any
     const templateCode = String(config?.templateCode || '')
+
+    applyAppMeta(config?.appMeta)
+    version.value = Number.isFinite(Number(config?.version)) ? Number(config.version) : undefined
+
     if (!templateCode) {
-      ElMessage.error('模板配置缺少 templateCode，无法进入编辑')
-      router.push('/apps')
+      syncingTemplateConfig.value = true
+      selectedTemplateCode.value = ''
+      nodeConfigs.value = {}
+      syncingTemplateConfig.value = false
+      templateSelectionLocked.value = false
+      readonlyTemplateText.value = ''
       return
     }
 
     const template = await ensureTemplateExists(templateCode)
     if (!template) {
       ElMessage.error('模板不存在或已下线，无法进入编辑')
-      router.push('/apps')
+      navigateBack()
       return
     }
 
@@ -258,19 +316,11 @@ async function loadEditConfig(id: number) {
     selectedTemplateCode.value = templateCode
     buildNodeConfigs(template, Array.isArray(config?.nodes) ? config.nodes : [])
     syncingTemplateConfig.value = false
-
-    appMeta.value = {
-      name: String(config?.appMeta?.name || ''),
-      description: String(config?.appMeta?.description || ''),
-      icon: String(config?.appMeta?.icon || DEFAULT_ICON),
-      iconBackground: String(config?.appMeta?.iconBackground || DEFAULT_ICON_BG),
-      iconImage: String(config?.appMeta?.iconImage || '')
-    }
-    version.value = Number.isFinite(Number(config?.version)) ? Number(config.version) : undefined
+    templateSelectionLocked.value = true
     readonlyTemplateText.value = `基于模板：${template.name || template.code}（编辑模式下不可更换模板）`
   } catch (error: unknown) {
     ElMessage.error(getErrorMessage(error, '模板编排加载失败'))
-    router.push('/apps')
+    navigateBack()
   }
 }
 
@@ -286,25 +336,25 @@ onMounted(async () => {
   <ContentWrap :title="pageTitle" :message="pageMessage">
     <div class="page-top">
       <el-button link type="primary" @click="handleBack">返回智能体管理</el-button>
-      <span v-if="isEditMode && readonlyTemplateText" class="readonly-tip">{{
-        readonlyTemplateText
-      }}</span>
+      <span v-if="isEditMode && readonlyTemplateText" class="readonly-tip">
+        {{ readonlyTemplateText }}
+      </span>
     </div>
 
-    <div v-if="!isEditMode" class="step-block">
+    <div v-if="showTemplatePicker" class="step-block">
       <div class="step-title">1. 选择模板</div>
       <TemplatePicker v-model="selectedTemplateCode" :templates="templates" />
     </div>
 
     <template v-if="selectedTemplate">
       <div class="step-block">
-        <div class="step-title">{{ isEditMode ? '1. 智能体信息' : '2. 智能体信息' }}</div>
+        <div class="step-title">{{ metaStepTitle }}</div>
         <AppMetaForm v-model="appMeta" />
       </div>
 
       <div class="step-block">
         <div class="step-title">
-          {{ isEditMode ? '2. 流程参数' : '3. 流程参数' }}
+          {{ flowStepTitle }}
           <span class="step-hint">点击可编辑节点填写参数</span>
         </div>
         <FlowCanvas

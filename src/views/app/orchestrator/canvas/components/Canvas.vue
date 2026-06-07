@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { Lock, Unlock } from '@element-plus/icons-vue'
 import {
   VueFlow,
   ConnectionMode,
@@ -13,7 +14,7 @@ import {
   type VueFlowStore
 } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
-import { Controls } from '@vue-flow/controls'
+import { ControlButton, Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -56,6 +57,7 @@ const emit = defineEmits<{
 }>()
 
 const flowWrapRef = ref<HTMLDivElement>()
+const isZoomLocked = ref(false)
 
 const nodeTypes = {
   start: StartNode,
@@ -110,6 +112,14 @@ function handleEdgeClick(event: EdgeMouseEvent | any, maybeEdge?: Edge) {
   if (!edge?.id) return
   emit('edgeClick', edge.id)
 }
+
+function handlePaneReady(store: VueFlowStore) {
+  emit('paneReady', store)
+}
+
+function toggleZoomLock() {
+  isZoomLocked.value = !isZoomLocked.value
+}
 </script>
 
 <template>
@@ -124,13 +134,16 @@ function handleEdgeClick(event: EdgeMouseEvent | any, maybeEdge?: Edge) {
       :nodes-draggable="true"
       :nodes-connectable="true"
       :elements-selectable="true"
+      :zoom-on-scroll="!isZoomLocked"
+      :zoom-on-pinch="!isZoomLocked"
+      :zoom-on-double-click="!isZoomLocked"
       :edges-updatable="false"
       :delete-key-code="null"
       :connection-mode="ConnectionMode.Loose"
       :auto-connect="false"
       @connect="emit('connect', $event)"
       @viewport-change="emit('viewportChange', $event)"
-      @pane-ready="emit('paneReady', $event)"
+      @pane-ready="handlePaneReady"
       @node-click="handleNodeClick"
       @edge-click="handleEdgeClick"
       @pane-click="emit('paneClick')"
@@ -151,8 +164,19 @@ function handleEdgeClick(event: EdgeMouseEvent | any, maybeEdge?: Edge) {
         <AnswerNode v-bind="nodeProps" />
       </template>
 
-      <MiniMap pannable zoomable />
-      <Controls />
+      <MiniMap pannable :zoomable="!isZoomLocked" />
+      <Controls class="canvas-controls" :class="{ 'is-zoom-locked': isZoomLocked }">
+        <template #control-interactive>
+          <ControlButton
+            class="vue-flow__controls-interactive"
+            :title="isZoomLocked ? '解除缩放锁定' : '锁定缩放'"
+            @click="toggleZoomLock"
+          >
+            <Lock v-if="isZoomLocked" class="control-icon" />
+            <Unlock v-else class="control-icon" />
+          </ControlButton>
+        </template>
+      </Controls>
       <Background :gap="20" :size="1" />
     </VueFlow>
   </div>
@@ -161,14 +185,29 @@ function handleEdgeClick(event: EdgeMouseEvent | any, maybeEdge?: Edge) {
 <style scoped lang="less">
 .canvas-wrap {
   width: 100%;
-  height: 640px;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: var(--el-fill-color-blank);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 10px;
+}
+
+:deep(.vue-flow) {
+  width: 100%;
+  height: 100%;
 }
 
 :deep(.vue-flow__controls) {
   box-shadow: 0 2px 10px rgb(0 0 0 / 8%);
+}
+
+:deep(.canvas-controls .control-icon) {
+  width: 14px;
+  height: 14px;
+}
+
+:deep(.canvas-controls.is-zoom-locked .vue-flow__controls-zoomin),
+:deep(.canvas-controls.is-zoom-locked .vue-flow__controls-zoomout) {
+  pointer-events: none;
+  opacity: 0.45;
 }
 </style>

@@ -2,24 +2,34 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { Clock, MoreFilled, Plus, Search } from '@element-plus/icons-vue'
+import { Clock, MoreFilled, Plus, Search, QuestionFilled } from '@element-plus/icons-vue'
 import IconUploader from './components/IconUploader.vue'
 import {
   appApi,
   orchestrationApi,
+  type AppStarterPrompt,
   type AppConfigVO,
+  type CreateAppBasicRequest,
   type PageResult,
   type UpdateAppBasicRequest
 } from '@/api/frontend-api'
+import {
+  PROMPT_ICON_OPTIONS,
+  createDefaultStarterPrompts,
+  normalizeStarterPrompts
+} from './starter-prompts'
 
 type AppRow = AppConfigVO & Record<string, any>
 type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
-type PublishStatusFilter = '' | 'PUBLISHED' | 'SAVED'
+type PublishStatusFilter = '' | 'DRAFT' | 'PUBLISHED' | 'SAVED'
+type BasicDialogMode = 'create' | 'edit'
+type CreateFlowMode = 'template' | 'blank'
 type AppBasicForm = Omit<UpdateAppBasicRequest, 'appName' | 'iconImage'> & {
   id?: number
   appName: string
   appCode: string
   iconImage: string
+  starterPrompts: AppStarterPrompt[]
 }
 
 const router = useRouter()
@@ -40,6 +50,8 @@ const appList = ref<AppRow[]>([])
 const dialogVisible = ref(false)
 const createDialogVisible = ref(false)
 const formRef = ref<FormInstance>()
+const basicDialogMode = ref<BasicDialogMode>('edit')
+const pendingCreateMode = ref<CreateFlowMode | null>(null)
 const formData = reactive<AppBasicForm>({
   appName: '',
   appCode: '',
@@ -48,10 +60,15 @@ const formData = reactive<AppBasicForm>({
   iconImage: '',
   sort: 1,
   enabled: true,
-  id: undefined
+  id: undefined,
+  starterPrompts: []
 })
 
+// 控制当前正在编辑哪一张提示词卡片 (0 ~ 3)
+const activePromptIndex = ref(0)
+
 const editingRow = ref<AppRow | null>(null)
+const promptIconOptions = PROMPT_ICON_OPTIONS
 
 const enabledCount = computed(
   () => appList.value.filter((item) => normalizeEnabled(item.enabled)).length
@@ -107,6 +124,12 @@ const appTypeCounts = computed<Record<Exclude<AppTypeFilter, ''>, number>>(() =>
 const formRules: FormRules = {
   appName: [{ required: true, message: '请输入智能体名称', trigger: 'blur' }]
 }
+
+const isCreateDialogMode = computed(() => basicDialogMode.value === 'create')
+const basicDialogTitle = computed(() =>
+  isCreateDialogMode.value ? '创建智能体基础信息' : '修改智能体基本信息'
+)
+const basicDialogSubmitText = computed(() => (isCreateDialogMode.value ? '下一步' : '确认修改'))
 
 const parameterDrawerVisible = ref(false)
 const parameterTitle = ref('智能体参数')
@@ -226,7 +249,6 @@ function formatTimeAgo(value?: string): string {
   return date.toISOString().slice(0, 10)
 }
 
-// 收敛后的单色方块配色
 function hashColor(text: string): string {
   const colors = [
     '#0a0a0a',
@@ -263,13 +285,6 @@ function openCreateDialog() {
 
 function onCreateCommand(command: AppTypeMeta['createMode']) {
   createDialogVisible.value = false
-  if (command === 'template') {
-    router.push({
-      path: '/agents/orchestrator/create',
-      query: { mode: 'template', from: route.fullPath }
-    })
-    return
-  }
   if (command === 'placeholder') {
     router.push({
       path: '/agents/placeholder',
@@ -277,10 +292,7 @@ function onCreateCommand(command: AppTypeMeta['createMode']) {
     })
     return
   }
-  router.push({
-    path: '/agents/orchestrator/create',
-    query: { mode: 'blank', from: route.fullPath }
-  })
+  openCreateBasicDialog(command)
 }
 
 async function loadApps() {
@@ -323,12 +335,23 @@ function resetForm() {
   formData.iconImage = ''
   formData.sort = 1
   formData.enabled = true
+  formData.starterPrompts = createDefaultStarterPrompts()
   editingRow.value = null
+  activePromptIndex.value = 0
+}
+
+function openCreateBasicDialog(mode: CreateFlowMode) {
+  resetForm()
+  basicDialogMode.value = 'create'
+  pendingCreateMode.value = mode
+  dialogVisible.value = true
 }
 
 async function openBasicEdit(row: AppRow) {
-  dialogVisible.value = true
   resetForm()
+  basicDialogMode.value = 'edit'
+  pendingCreateMode.value = null
+  dialogVisible.value = true
   editingRow.value = row
   formData.id = Number(row.id)
   formData.appName = row.appName || ''
@@ -338,6 +361,8 @@ async function openBasicEdit(row: AppRow) {
   formData.iconImage = row.iconImage || ''
   formData.sort = Number(row.sort || 1)
   formData.enabled = normalizeEnabled(row.enabled)
+  formData.starterPrompts = normalizeStarterPrompts(row.starterPrompts)
+  activePromptIndex.value = 0
 
   try {
     const detail = (await appApi.detail(Number(row.id))) as Record<string, any>
@@ -348,9 +373,41 @@ async function openBasicEdit(row: AppRow) {
     formData.iconImage = detail.iconImage || row.iconImage || ''
     formData.sort = Number(detail.sort || row.sort || 1)
     formData.enabled = normalizeEnabled(detail.enabled ?? row.enabled)
+    formData.starterPrompts = normalizeStarterPrompts(detail.starterPrompts)
   } catch (error: any) {
     ElMessage.warning(error?.message || '详情加载失败，已使用列表数据回填')
   }
+}
+
+function sanitizeStarterPrompts(): AppStarterPrompt[] {
+  return formData.starterPrompts.slice(0, 4).map((item, index) => ({
+    title: String(item.title || '').trim(),
+    description: String(item.description || '').trim(),
+    prompt: String(item.prompt || '').trim(),
+    iconKey: item.iconKey || promptIconOptions[index % promptIconOptions.length].value
+  }))
+}
+
+function validateStarterPrompts(): boolean {
+  const prompts = sanitizeStarterPrompts()
+  if (prompts.length < 1) {
+    ElMessage.warning('至少配置 1 条提示词卡片')
+    return false
+  }
+  if (prompts.length > 4) {
+    ElMessage.warning('提示词卡片最多配置 4 条')
+    return false
+  }
+  const invalidIndex = prompts.findIndex(
+    (item) => !item.title || !item.description || !item.prompt || !item.iconKey
+  )
+  if (invalidIndex >= 0) {
+    ElMessage.warning(`请完善第 ${invalidIndex + 1} 条提示词配置`)
+    // 智能联动：直接将 tab 切换至不合法的那一项
+    activePromptIndex.value = invalidIndex
+    return false
+  }
+  return true
 }
 
 function toBasicPayload(): UpdateAppBasicRequest {
@@ -360,18 +417,67 @@ function toBasicPayload(): UpdateAppBasicRequest {
     icon: formData.icon?.trim() || editingRow.value?.icon || undefined,
     iconImage: formData.iconImage || '',
     sort: Number(formData.sort || 1),
-    enabled: normalizeEnabled(formData.enabled)
+    enabled: normalizeEnabled(formData.enabled),
+    starterPrompts: sanitizeStarterPrompts()
   }
 }
 
-async function submitBasicEdit() {
+function toCreateBasicPayload(): CreateAppBasicRequest {
+  return {
+    appName: String(formData.appName || '').trim(),
+    appType: pendingCreateMode.value === 'blank' ? 'workflow' : 'chat',
+    description: formData.description?.trim() || undefined,
+    icon: formData.icon?.trim() || undefined,
+    iconImage: formData.iconImage || '',
+    sort: Number(formData.sort || 1),
+    enabled: normalizeEnabled(formData.enabled),
+    starterPrompts: sanitizeStarterPrompts()
+  }
+}
+
+function addStarterPrompt() {
+  if (formData.starterPrompts.length >= 4) return
+  const defaults = createDefaultStarterPrompts()
+  const fallback = defaults[formData.starterPrompts.length] || defaults[0]
+  formData.starterPrompts.push({ ...fallback })
+  activePromptIndex.value = formData.starterPrompts.length - 1
+}
+
+function removeStarterPrompt(index: number) {
+  if (formData.starterPrompts.length <= 1) {
+    ElMessage.warning('至少保留 1 条提示词卡片')
+    return
+  }
+  formData.starterPrompts.splice(index, 1)
+  if (activePromptIndex.value >= formData.starterPrompts.length) {
+    activePromptIndex.value = formData.starterPrompts.length - 1
+  }
+}
+
+async function submitBasicForm() {
   if (!formRef.value) return
   await formRef.value.validate()
+  if (!validateStarterPrompts()) return
 
   submitting.value = true
   try {
+    if (isCreateDialogMode.value) {
+      const result = await appApi.createBasic(toCreateBasicPayload())
+      dialogVisible.value = false
+      ElMessage.success('基础信息保存成功')
+      await router.push({
+        path: '/agents/orchestrator/create',
+        query: {
+          mode: pendingCreateMode.value === 'blank' ? 'blank' : 'template',
+          edit: String(result.id),
+          from: route.fullPath
+        }
+      })
+      return
+    }
+
     await appApi.updateBasic(Number(formData.id), toBasicPayload())
-    ElMessage.success('智能体基本信息更新成功')
+    ElMessage.success('基础信息更新成功')
     dialogVisible.value = false
     await loadApps()
   } catch (error: any) {
@@ -606,6 +712,7 @@ onMounted(() => {
               @change="handlePublishStatusChange"
             >
               <el-option label="全部状态" value="" />
+              <el-option label="草稿" value="DRAFT" />
               <el-option label="已发布" value="PUBLISHED" />
               <el-option label="未发布" value="SAVED" />
             </el-select>
@@ -679,13 +786,11 @@ onMounted(() => {
                 <el-icon><Clock /></el-icon>
                 <span>{{ formatTimeAgo(row.lastEditedAt) }}</span>
               </div>
-              <!-- 右下角悬浮多功能操作菜单气泡 -->
               <el-dropdown
                 class="card-action-bubble"
                 trigger="click"
                 @command="(command) => handleMoreCommand(command, row)"
               >
-                <!-- 替换原来的 button 结构 -->
                 <button type="button" class="action-bubble-btn" @click.stop>
                   <el-icon><MoreFilled /></el-icon>
                   <span>更多</span>
@@ -801,43 +906,194 @@ onMounted(() => {
     </div>
   </el-dialog>
 
-  <el-dialog v-model="dialogVisible" title="修改智能体基本信息" width="640px" destroy-on-close>
-    <el-form ref="formRef" :model="formData" :rules="formRules" label-width="100px">
-      <el-form-item label="智能体头像">
-        <IconUploader v-model="formData.iconImage" />
-      </el-form-item>
-
-      <el-form-item label="智能体名称" prop="appName">
-        <el-input v-model="formData.appName" />
-      </el-form-item>
-
-      <el-form-item label="智能体编码">
-        <el-input v-model="formData.appCode" disabled placeholder="保存后生成" />
-      </el-form-item>
-
-      <el-row :gutter="16">
-        <el-col :span="8">
-          <el-form-item label="排序">
-            <el-input-number v-model="formData.sort" class="w-full" :min="1" />
+  <!-- 优化后的“创建/修改智能体基础信息”弹框 -->
+  <el-dialog
+    v-model="dialogVisible"
+    class="basic-info-dialog"
+    :title="basicDialogTitle"
+    width="780px"
+    destroy-on-close
+    align-center
+  >
+    <el-form ref="formRef" :model="formData" :rules="formRules" label-position="top">
+      <!-- 第一部分：基本信息左右网格排版 -->
+      <div class="basic-info-grid">
+        <div class="avatar-col">
+          <el-form-item label-width="0">
+            <IconUploader v-model="formData.iconImage" />
           </el-form-item>
-        </el-col>
-        <el-col :span="16">
-          <el-form-item label="启用状态">
-            <el-switch v-model="formData.enabled" />
-          </el-form-item>
-        </el-col>
-      </el-row>
+        </div>
+        <div class="fields-col">
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="智能体名称" prop="appName">
+                <el-input v-model="formData.appName" placeholder="请输入智能体名称" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="智能体编码">
+                <el-input
+                  v-model="formData.appCode"
+                  disabled
+                  :placeholder="isCreateDialogMode ? '系统生成' : '保存后自动生成'"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="启用状态">
+                <el-switch
+                  v-model="formData.enabled"
+                  active-text="启用"
+                  inactive-text="禁用"
+                  inline-prompt
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="排序权重">
+                <el-input-number
+                  v-model="formData.sort"
+                  class="w-full"
+                  :min="1"
+                  controls-position="right"
+                />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+      </div>
 
-      <el-form-item label="描述">
-        <el-input v-model="formData.description" type="textarea" :rows="3" />
+      <!-- 第二部分：描述说明 -->
+      <el-form-item label="描述说明">
+        <el-input
+          v-model="formData.description"
+          type="textarea"
+          :rows="2"
+          placeholder="请简要描述智能体的核心用途与工作场景"
+          maxlength="200"
+          show-word-limit
+        />
+      </el-form-item>
+
+      <!-- 第三部分：提示词卡片（全新标签页式交互设计） -->
+      <el-form-item label="提示词引导卡片" class="prompt-form-item">
+        <!-- 自定义 label，在文字右侧增加问号图标- 帮助手册 -->
+        <template #label>
+          <div style="display: inline-flex; align-items: center; gap: 4px">
+            <span>提示词引导卡片</span>
+            <el-tooltip
+              content="引导卡片会在用户初次进入对话欢迎页时展示，点击可直接发送配置好的提示词，帮助用户快速上手。"
+              placement="top"
+              effect="dark"
+            >
+              <el-icon style=" font-size: 14px; color: var(--text-tertiary);cursor: help">
+                <QuestionFilled />
+              </el-icon>
+            </el-tooltip>
+          </div>
+        </template>
+        <div class="starter-prompts-container">
+          <!-- 标签栏导航 -->
+          <div class="prompts-tab-nav">
+            <div class="tab-list">
+              <button
+                v-for="(_, index) in formData.starterPrompts"
+                :key="`tab-${index}`"
+                type="button"
+                class="tab-item-btn"
+                :class="{ active: activePromptIndex === index }"
+                @click="activePromptIndex = index"
+              >
+                <span>卡片 {{ index + 1 }}</span>
+                <span
+                  v-if="formData.starterPrompts.length > 1"
+                  class="tab-close-icon"
+                  @click.stop="removeStarterPrompt(index)"
+                  title="删除此卡片"
+                >
+                  &times;
+                </span>
+              </button>
+
+              <button
+                v-if="formData.starterPrompts.length < 4"
+                type="button"
+                class="tab-add-btn"
+                @click="addStarterPrompt"
+              >
+                <el-icon><Plus /></el-icon>
+                <span>添加</span>
+              </button>
+            </div>
+            <div class="prompts-count-tip">最多支持 4 条引导卡片</div>
+          </div>
+
+          <!-- 当前选中卡片的内容区域 -->
+          <div v-if="formData.starterPrompts[activePromptIndex]" class="prompts-tab-body">
+            <el-row :gutter="16">
+              <el-col :span="12">
+                <div class="sub-form-item">
+                  <span class="sub-label">卡片标题</span>
+                  <el-input
+                    v-model="formData.starterPrompts[activePromptIndex].title"
+                    placeholder="如：分析财务报表"
+                    maxlength="20"
+                    show-word-limit
+                  />
+                </div>
+              </el-col>
+              <el-col :span="12">
+                <div class="sub-form-item">
+                  <span class="sub-label">展示图标</span>
+                  <el-select
+                    v-model="formData.starterPrompts[activePromptIndex].iconKey"
+                    placeholder="选择代表性图标"
+                    class="w-full"
+                  >
+                    <el-option
+                      v-for="option in promptIconOptions"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                    />
+                  </el-select>
+                </div>
+              </el-col>
+            </el-row>
+
+            <div class="sub-form-item mt-12">
+              <span class="sub-label">功能简述</span>
+              <el-input
+                v-model="formData.starterPrompts[activePromptIndex].description"
+                placeholder="简短描述该功能（显示于卡片第二行）"
+                maxlength="40"
+                show-word-limit
+              />
+            </div>
+
+            <div class="sub-form-item mt-12">
+              <span class="sub-label">触发提示词（点击卡片后系统代发送的真实指令）</span>
+              <el-input
+                v-model="formData.starterPrompts[activePromptIndex].prompt"
+                type="textarea"
+                :rows="3"
+                placeholder="引导智能体进入该场景的 Prompt。例如：'请作为资深审计，帮我审查以下财务数据是否存在指标异常...'"
+                maxlength="300"
+                show-word-limit
+              />
+            </div>
+          </div>
+        </div>
       </el-form-item>
     </el-form>
 
     <template #footer>
       <div class="dialog-footer">
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitBasicEdit">
-          确认修改
+        <el-button type="primary" :loading="submitting" @click="submitBasicForm">
+          {{ basicDialogSubmitText }}
         </el-button>
       </div>
     </template>
@@ -850,6 +1106,20 @@ onMounted(() => {
 </template>
 
 <style scoped lang="less">
+
+
+@keyframes fadeInPrompt {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (width <= 1180px) {
   .hero-panel {
     grid-template-columns: 1fr;
@@ -1195,7 +1465,7 @@ onMounted(() => {
   position: relative;
   display: flex;
   min-height: 184px;
-  padding: 18px 18px 16px; /* 1. 底部内边距由 58px 缩减至 16px，使布局更紧凑 */
+  padding: 18px 18px 16px;
   overflow: hidden;
   font-family: inherit;
   cursor: default;
@@ -1211,12 +1481,12 @@ onMounted(() => {
 }
 
 .card-footer {
-  position: relative; /* 4. 设为相对定位，作为子级按钮的绝对定位参考 */
+  position: relative;
   display: flex;
   min-width: 0;
   padding-top: 12px;
-  padding-right: 80px; /* 3. 右侧留出空间，防止时间与悬浮按钮重叠 */
-  margin-top: auto; /* 2. 自动将 footer 撑到卡片最底部 */
+  padding-right: 80px;
+  margin-top: auto;
   font-size: 12px;
   color: var(--text-tertiary);
   border-top: 1px solid var(--border-soft);
@@ -1474,12 +1744,10 @@ onMounted(() => {
 
 .card-action-bubble {
   position: absolute;
-  top: 50%; /* 1. 绝对定位到父级 footer 高度的 50% 位置 */
+  top: 50%;
   right: 0;
   z-index: 3;
   opacity: 0;
-
-  /* 2. 结合 translateY(-50%) 实现完美垂直居中，加 6px 用于 hover 时的向上浮动动画 */
   transform: translateY(-50%) translateY(0);
   transition:
     opacity 0.18s ease,
@@ -1488,30 +1756,22 @@ onMounted(() => {
 
 .app-card:hover .card-action-bubble {
   opacity: 1;
-
-  /* 3. hover 时保持 -50% 垂直居中，位移归零 */
   transform: translateY(-30%) translateY(0);
 }
 
 .action-bubble-btn {
   display: inline-flex;
-  height: 28px; /* 稍微收窄高度，使其更精致 */
+  height: 28px;
   padding: 0 10px;
   font-family: inherit;
   font-size: 12px;
   font-weight: 500;
-
-  /* 平时采用跟卡片文字一致的次级灰色，不抢眼 */
   color: var(--text-secondary);
   cursor: pointer;
-
-  /* 基础背景色为纯白或微带灰，与卡片底色融合 */
   background: #fff;
-
-  /* 边框采用和卡片相同的浅边框色 */
   border: 1px solid var(--border-soft);
-  border-radius: 8px; /* 采用与卡片倒角相呼应的微圆角 */
-  box-shadow: 0 1px 2px rgb(15 23 42 / 2%); /* 极轻微的平面投影，不脱离纸面 */
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 2%);
   align-items: center;
   justify-content: center;
   gap: 4px;
@@ -1521,12 +1781,11 @@ onMounted(() => {
     color 0.15s ease;
 }
 
-/* 鼠标放到按钮上时的加深反馈 */
 .action-bubble-btn:hover {
-  color: var(--text-primary); /* 文字颜色加深，体现可点击感 */
-  background: #f1f5f9; /* 移上去呈现质感灰 */
-  border-color: #cbd5e1; /* 边框变深 */
-  transform: none; /* 彻底移除上浮动作，让其牢牢贴紧平面 */
+  color: var(--text-primary);
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  transform: none;
 }
 
 .action-bubble-btn:active {
@@ -1773,5 +2032,209 @@ onMounted(() => {
   background: #f8fafc;
   border: 1px solid var(--border);
   border-radius: 12px;
+}
+
+/* ==========================================
+   🎯 【新增 & 重构】创建智能体基础信息弹窗样式
+   ========================================== */
+
+/* 1. 精细化控制弹窗高度，确保不撑开最外层视口产生滚动条 */
+:deep(.basic-info-dialog) {
+  display: flex !important;
+  max-height: 85vh; /* 保证在所有高度的屏幕下都不超出视口 */
+  overflow: hidden;
+  background: linear-gradient(180deg, #fcfdff 0%, #fff 100%);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgb(15 23 42 / 12%);
+  flex-direction: column;
+
+  .el-dialog__header {
+    padding: 20px 24px;
+    margin-right: 0;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  /* 表单主体成为独立的局部滚动区 */
+  .el-dialog__body {
+    padding: 24px;
+    overflow-y: auto;
+    background: #fafbfe;
+    flex: 1;
+  }
+
+  .el-dialog__footer {
+    padding: 16px 24px;
+    background: #fff;
+    border-top: 1px solid var(--border-soft);
+  }
+}
+
+/* 2. 基本信息的两栏栅格排版 */
+.basic-info-grid {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+  align-items: flex-start;
+
+  .avatar-col {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    .el-form-item {
+      margin-bottom: 0;
+    }
+
+    .avatar-tip {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      text-align: center;
+    }
+  }
+
+  .fields-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+
+    .el-form-item {
+      margin-bottom: 0;
+    }
+  }
+}
+
+/* Element Plus 表单项的现代扁平化微调 */
+:deep(.el-form-item__label) {
+  padding-bottom: 6px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--text-primary) !important;
+}
+
+/* 3. 提示词卡片 (Tabs式优雅容器) */
+.starter-prompts-container {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #dbe3f1;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgb(37 99 235 / 2%);
+}
+
+/* 标签导航栏 */
+.prompts-tab-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f1f5fa;
+  border-bottom: 1px solid #dbe3f1;
+
+  .tab-list {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .prompts-count-tip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+}
+
+/* 标签页按钮样式 */
+.tab-item-btn {
+  display: inline-flex;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: rgb(255 255 255 / 60%);
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  align-items: center;
+  gap: 6px;
+
+  &:hover {
+    color: var(--primary);
+    background: #fff;
+    border-color: #cbd5e1;
+  }
+
+  &.active {
+    color: var(--primary);
+    background: #fff;
+    border-color: var(--primary);
+    box-shadow: 0 2px 6px rgb(37 99 235 / 8%);
+  }
+
+  .tab-close-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--text-tertiary);
+    border-radius: 999px;
+    transition: all 0.12s ease;
+
+    &:hover {
+      color: #fff;
+      background: var(--danger);
+    }
+  }
+}
+
+/* 添加卡片按钮 */
+.tab-add-btn {
+  display: inline-flex;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--primary);
+  cursor: pointer;
+  background: transparent;
+  border: 1px dashed var(--primary);
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  align-items: center;
+  gap: 4px;
+
+  &:hover {
+    background: var(--primary-soft);
+    border-style: solid;
+  }
+}
+
+/* 标签内容展示区 */
+.prompts-tab-body {
+  padding: 16px;
+  background: #fff;
+  animation: fadeInPrompt 0.22s ease-out;
+
+  .sub-form-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    .sub-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+  }
+}
+
+.mt-12 {
+  margin-top: 12px;
 }
 </style>

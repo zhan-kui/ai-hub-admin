@@ -13,6 +13,7 @@ import {
   conversationApi,
   fileApi,
   type AppConfigVO,
+  type AppStarterPrompt,
   type ChatFilePayload
 } from '@/api/frontend-api'
 import {
@@ -22,19 +23,13 @@ import {
   type UploadedFile
 } from '@/store/modules/chat'
 import { useUserStore } from '@/store/modules/user'
+import { createDefaultStarterPrompts, normalizeStarterPrompts } from './starter-prompts'
 
 interface ConversationItem {
   id: string
   name: string
   updatedAt?: string
   raw: Record<string, unknown>
-}
-
-interface PromptSuggestion {
-  icon: string
-  title: string
-  description: string
-  prompt: string
 }
 
 type FeedbackRating = 'like' | 'dislike'
@@ -129,34 +124,12 @@ const canUseVoice = computed(() =>
 )
 
 // ═══════════════════════════════════════════════
-// 空状态下展示的提示词引导（可自由修改文案）
-// ═══════════════════════════════════════════════
-const promptSuggestions: PromptSuggestion[] = [
-  {
-    icon: 'spark',
-    title: '介绍一下你自己',
-    description: '了解 AI 助手的能力范围',
-    prompt: '你好，请介绍一下你的能力以及我可以如何使用你。'
-  },
-  {
-    icon: 'code',
-    title: '帮我写一段代码',
-    description: '生成、调试或优化代码片段',
-    prompt: '帮我写一个 Python 函数，用于计算斐波那契数列的第 n 项。'
-  },
-  {
-    icon: 'doc',
-    title: '分析文档内容',
-    description: '上传文件后基于内容提问',
-    prompt: '请帮我总结这份文档的核心观点，并列出三个关键要点。'
-  },
-  {
-    icon: 'idea',
-    title: '创意头脑风暴',
-    description: '为业务场景提供多样化思路',
-    prompt: '我想为一款面向企业的 AI 产品策划一次线上发布会，请给我 5 个创意方向。'
+const promptSuggestions = computed<AppStarterPrompt[]>(() => {
+  if (!currentApp.value?.starterPrompts?.length) {
+    return createDefaultStarterPrompts()
   }
-]
+  return normalizeStarterPrompts(currentApp.value.starterPrompts)
+})
 
 const currentConversation = computed(() =>
   conversations.value.find((item) => item.id === currentConversationId.value)
@@ -2089,10 +2062,10 @@ onBeforeUnmount(() => {
                       :style="{ animationDelay: `${0.1 + idx * 0.06}s` }"
                       @click="handleUsePrompt(item.prompt)"
                     >
-                      <div class="prompt-icon-wrap" :class="`prompt-icon--${item.icon}`">
+                      <div class="prompt-icon-wrap" :class="`prompt-icon--${item.iconKey}`">
                         <!-- spark -->
                         <svg
-                          v-if="item.icon === 'spark'"
+                          v-if="item.iconKey === 'spark'"
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"
@@ -2106,7 +2079,7 @@ onBeforeUnmount(() => {
                         </svg>
                         <!-- code -->
                         <svg
-                          v-else-if="item.icon === 'code'"
+                          v-else-if="item.iconKey === 'code'"
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"
@@ -2119,7 +2092,7 @@ onBeforeUnmount(() => {
                         </svg>
                         <!-- doc -->
                         <svg
-                          v-else-if="item.icon === 'doc'"
+                          v-else-if="item.iconKey === 'doc'"
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"

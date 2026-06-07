@@ -11,7 +11,6 @@ import type {
 } from '@vue-flow/core'
 import { ContentWrap } from '@/components/ContentWrap'
 import { orchestrationApi } from '@/api/frontend-api'
-import AppMetaBar from './components/AppMetaBar.vue'
 import Canvas from './components/Canvas.vue'
 import NodePanel from './components/NodePanel.vue'
 import Toolbar from './components/Toolbar.vue'
@@ -42,6 +41,7 @@ const props = defineProps<{
 }>()
 const flowStore = ref<VueFlowStore>()
 
+// 数据结构中保留 appMeta 默认值，以保证保存 Snapshot 时数据格式的完备性
 const appMeta = ref<CanvasAppMeta>({
   name: '',
   description: '',
@@ -105,6 +105,35 @@ const selectedCount = computed(
 )
 
 let pendingRestoreViewport: ViewportTransform | null = null
+const initialViewport = ref<ViewportTransform>({ ...DEFAULT_VIEWPORT })
+
+function cloneViewport(nextViewport: ViewportTransform): ViewportTransform {
+  return {
+    x: nextViewport.x,
+    y: nextViewport.y,
+    zoom: nextViewport.zoom
+  }
+}
+
+async function applyFlowViewport(
+  nextViewport: ViewportTransform,
+  options?: { rememberAsInitial?: boolean }
+) {
+  const normalizedViewport = cloneViewport(nextViewport)
+  setViewport(normalizedViewport)
+
+  if (options?.rememberAsInitial) {
+    initialViewport.value = cloneViewport(normalizedViewport)
+  }
+
+  if (flowStore.value) {
+    pendingRestoreViewport = null
+    await flowStore.value.setViewport(normalizedViewport)
+    return
+  }
+
+  pendingRestoreViewport = normalizedViewport
+}
 
 function getNodeById(nodeId: string) {
   return nodes.value.find((node) => node.id === nodeId)
@@ -317,7 +346,6 @@ function handleConnect(connection: Connection) {
     animated: true
   }
 
-  // 重点：让 Vue Flow 的 Store 去添加，它会自动同步给你的 edges.value
   if (flowStore.value) {
     flowStore.value.addEdges([newEdge])
   } else {
@@ -378,7 +406,6 @@ function applyEditedNodeData(
     const caseIdSet = new Set(nextData.cases.map((item) => item.id))
     const elseEnabled = nextData.elseEnabled !== false
 
-    // 找到需要保留的线
     const edgesToKeep = edges.value.filter(
       (edge) =>
         edge.source !== editingNode.value?.id ||
@@ -387,7 +414,6 @@ function applyEditedNodeData(
         (elseEnabled && edge.sourceHandle === 'false')
     )
 
-    // 清空原数组并塞入新数据，保持 edges 数组代理绝对不变！
     edges.value.splice(0, edges.value.length, ...edgesToKeep)
   }
 
@@ -421,7 +447,7 @@ function handleDeleteSelected() {
 }
 
 function handleFitView() {
-  void flowStore.value?.fitView()
+  void applyFlowViewport(initialViewport.value)
 }
 
 function handleCancel() {
@@ -434,7 +460,7 @@ function resolveReturnPath(): string | null {
   if (typeof from !== 'string') return null
   const trimmed = from.trim()
   if (!trimmed.startsWith('/')) return null
-  if (trimmed.startsWith('/apps/orchestrator/create')) return null
+  if (trimmed.startsWith('/agents/orchestrator/create')) return null
   return trimmed
 }
 
@@ -454,9 +480,13 @@ function navigateBack() {
 function handlePaneReady(store: VueFlowStore) {
   flowStore.value = store
   if (pendingRestoreViewport) {
-    void flowStore.value.setViewport(pendingRestoreViewport)
+    const nextViewport = cloneViewport(pendingRestoreViewport)
     pendingRestoreViewport = null
+    initialViewport.value = cloneViewport(nextViewport)
+    void flowStore.value.setViewport(nextViewport)
+    return
   }
+  initialViewport.value = cloneViewport(viewport.value)
 }
 
 function handleViewportChange(nextViewport: ViewportTransform) {
@@ -523,7 +553,9 @@ async function loadEditCanvas(editId: number) {
     edges: restored.edges as any[],
     viewport: restored.viewport
   })
-  pendingRestoreViewport = restored.viewport || { ...DEFAULT_VIEWPORT }
+  await applyFlowViewport(restored.viewport || { ...DEFAULT_VIEWPORT }, {
+    rememberAsInitial: true
+  })
   version.value = Number.isFinite(Number(response?.version)) ? Number(response.version) : undefined
 }
 
@@ -537,7 +569,7 @@ async function handleConflict(editId: number) {
     await loadEditCanvas(editId)
     ElMessage.success('已加载远端最新版本')
   } catch {
-    // 用户选择保留当前草稿，不做覆盖
+    // 保留草稿，不做覆盖
   }
 }
 
@@ -588,7 +620,15 @@ async function handleSave() {
     updateVersionFromResponse(response)
     const savedId = Number(response?.id)
     if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
-      await router.replace(`/agents/orchestrator/create?mode=blank&edit=${savedId}`)
+      const returnPath = resolveReturnPath()
+      await router.replace({
+        path: '/agents/orchestrator/create',
+        query: {
+          mode: 'blank',
+          edit: String(savedId),
+          ...(returnPath ? { from: returnPath } : {})
+        }
+      })
     }
     ElMessage.success('保存成功')
   } catch (error: unknown) {
@@ -617,15 +657,17 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ContentWrap :title="pageTitle" :message="pageMessage">
+  <!-- 恢复使用 ContentWrap，确保与管理后台的 Page Layout 完美咬合，保障高度计算不坍塌 -->
+  <ContentWrap :title="pageTitle" :message="pageMessage" class="workflow-content-wrap">
     <div class="layout">
-      <div class="left-panel">
+      <!-- 左侧节点选择面板 -->
+      <aside class="left-panel">
         <NodePanel @add="handleAddNode" />
-      </div>
+      </aside>
 
-      <div class="main-panel">
-        <AppMetaBar v-model="appMeta" />
-
+      <!-- 右侧编排主面板 -->
+      <main class="main-panel">
+        <!-- 核心操作工具栏 -->
         <Toolbar
           :saving="saving"
           :selected-count="selectedCount"
@@ -637,51 +679,67 @@ onMounted(async () => {
           @save="handleSave"
         />
 
-        <Canvas
-          v-model:nodes="nodes"
-          v-model:edges="edges"
-          :is-valid-connection="isValidConnection"
-          @connect="handleConnect"
-          @viewport-change="handleViewportChange"
-          @pane-ready="handlePaneReady"
-          @node-click="handleNodeClick"
-          @pane-click="handlePaneClick"
-          @drop-node="handleDropNode"
-        />
+        <!-- 画布包围盒 (增加了防高度坍塌与独立悬浮框样式) -->
+        <div class="canvas-container">
+          <Canvas
+            v-model:nodes="nodes"
+            v-model:edges="edges"
+            :is-valid-connection="isValidConnection"
+            @connect="handleConnect"
+            @viewport-change="handleViewportChange"
+            @pane-ready="handlePaneReady"
+            @node-click="handleNodeClick"
+            @pane-click="handlePaneClick"
+            @drop-node="handleDropNode"
+          />
 
-        <el-alert
-          v-if="errors.length"
-          title="流程校验提示"
-          type="warning"
-          :closable="false"
-          show-icon
-          class="error-panel"
-        >
-          <ul class="error-list">
-            <li v-for="(item, idx) in errors" :key="`${idx}-${item}`">{{ item }}</li>
-          </ul>
-        </el-alert>
-
-        <el-alert
-          v-if="warnings.length"
-          title="流程警告"
-          type="info"
-          :closable="false"
-          show-icon
-          class="error-panel"
-        >
-          <ul class="error-list">
-            <li v-for="(item, idx) in warnings" :key="`${idx}-${item}`">{{ item }}</li>
-          </ul>
-        </el-alert>
-      </div>
+          <!-- 悬浮式流程体检提示 (完美悬浮于画布右下角，不再占用页面布局高度) -->
+          <div class="floating-alert" v-if="errors.length || warnings.length">
+            <el-collapse class="alert-collapse">
+              <el-collapse-item name="alerts">
+                <template #title>
+                  <div class="alert-title-bar">
+                    <span
+                      class="status-dot"
+                      :class="{ 'has-errors': errors.length, 'has-warnings': warnings.length }"
+                    ></span>
+                    <span class="status-text">
+                      流程体检 ({{ errors.length }} 错误 · {{ warnings.length }} 警告)
+                    </span>
+                  </div>
+                </template>
+                <div class="alert-details">
+                  <div v-if="errors.length" class="alert-group error-group">
+                    <div class="group-label">无法保存项 (需修复):</div>
+                    <ul>
+                      <li v-for="(item, idx) in errors" :key="`err-${idx}`">
+                        <span class="bullet">✕</span>{{ item }}
+                      </li>
+                    </ul>
+                  </div>
+                  <div v-if="warnings.length" class="alert-group warning-group">
+                    <div class="group-label">流程缺陷 (建议优化):</div>
+                    <ul>
+                      <li v-for="(item, idx) in warnings" :key="`warn-${idx}`">
+                        <span class="bullet">⚠</span>{{ item }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+        </div>
+      </main>
     </div>
 
+    <!-- 侧边节点配置抽屉 -->
     <el-drawer
       v-if="editingNode"
       v-model="inspectorVisible"
       :title="`节点配置 - ${editingNode.data?.title || ''}`"
       size="560px"
+      class="editor-drawer"
     >
       <StartInspector
         v-if="editingStartData"
@@ -720,37 +778,25 @@ onMounted(async () => {
 </template>
 
 <style scoped lang="less">
-.layout {
-  display: flex;
-  gap: 12px;
+
+
+@keyframes pulseError {
+  from {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1.15);
+  }
 }
 
-.left-panel {
-  width: 260px;
-  flex: 0 0 260px;
-}
-
-.main-panel {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.error-panel {
-  margin-top: 6px;
-}
-
-.error-list {
-  padding-left: 18px;
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.7;
-}
-
+/* 适配中大屏幕响应式布局 */
 @media (width <= 1280px) {
   .layout {
+    height: auto;
+    min-height: auto;
     flex-direction: column;
   }
 
@@ -758,5 +804,227 @@ onMounted(async () => {
     width: 100%;
     flex: none;
   }
+
+  .canvas-container {
+    height: 500px; /* 小屏幕状态画布降级为固定高度 */
+  }
+
+  .floating-alert {
+    left: 68px;
+    width: min(320px, calc(100% - 84px));
+    max-width: calc(100% - 84px);
+  }
 }
+
+:global(.workflow-content-wrap .el-card__body) {
+  padding: 16px !important;
+}
+
+/* 1. 主框架弹性排版 (防高度坍塌) */
+.layout {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  height: calc(100vh - 180px); /* 动态占满屏幕，减去头部面包屑及导航条高 */
+  min-height: 580px; /* 强制设置底线高度，绝不允许发生灰色塌陷 */
+}
+
+/* 左侧节点栏：精致白卡片 */
+.left-panel {
+  width: 250px;
+  padding: 12px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 2%);
+  flex: 0 0 250px;
+}
+
+/* 右侧核心面板 */
+.main-panel {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 2. 画布容器 (双重保险，弹性自适应，绝不丢失任何一像素高度) */
+.canvas-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 2%);
+  flex: 1;
+
+  /* 强力透传控制，强迫 VueFlow 内部 100% 撑开 */
+  :deep(.vue-flow) {
+    width: 100% !important;
+    height: 100% !important;
+  }
+}
+
+/* 3. 悬浮流程体检控制台 (放置于画布中，不占物理流高度) */
+.floating-alert {
+  position: absolute;
+  bottom: 16px;
+  left: 72px;
+  z-index: 100;
+  width: min(350px, calc(100% - 88px));
+  max-width: calc(100% - 88px);
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow:
+    0 10px 25px -5px rgb(15 23 42 / 10%),
+    0 8px 10px -6px rgb(15 23 42 / 5%);
+}
+
+.alert-collapse {
+  border: none !important;
+
+  :deep(.el-collapse-item__header) {
+    height: 42px !important;
+    padding: 0 14px;
+    line-height: 42px !important;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0 !important;
+  }
+
+  :deep(.el-collapse-item__wrap) {
+    background: #fff;
+    border: none !important;
+  }
+
+  :deep(.el-collapse-item__content) {
+    padding: 12px 14px !important;
+  }
+}
+
+.alert-title-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    background: #94a3b8;
+    border-radius: 99px;
+
+    &.has-errors {
+      background: #dc2626;
+      box-shadow: 0 0 0 3px rgb(220 38 38 / 15%);
+      animation: pulseError 1.5s infinite alternate;
+    }
+
+    &.has-warnings:not(.has-errors) {
+      background: #d97706;
+      box-shadow: 0 0 0 3px rgb(217 119 6 / 15%);
+    }
+  }
+
+  .status-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: #1e293b;
+  }
+}
+
+.alert-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.alert-group {
+  .group-label {
+    margin-bottom: 5px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  ul {
+    display: flex;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+    flex-direction: column;
+    gap: 4px;
+
+    li {
+      display: flex;
+      font-size: 11.5px;
+      line-height: 1.5;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .bullet {
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+  }
+
+  &.error-group {
+    .group-label {
+      color: #dc2626;
+    }
+
+    li {
+      color: #991b1b;
+    }
+
+    .bullet {
+      color: #dc2626;
+    }
+  }
+
+  &.warning-group {
+    .group-label {
+      color: #d97706;
+    }
+
+    li {
+      color: #92400e;
+    }
+
+    .bullet {
+      color: #d97706;
+    }
+  }
+}
+
+/* 4. 配置 Drawer 美化微调 */
+:deep(.editor-drawer) {
+  .el-drawer__header {
+    padding: 16px 20px;
+    margin-bottom: 0;
+    font-weight: 700;
+    border-bottom: 1px solid #e2e8f0;
+
+    span {
+      font-size: 14.5px;
+      color: #0f172a;
+    }
+  }
+
+  .el-drawer__body {
+    background: #f8fafc;
+  }
+}
+
+/* 全局覆盖配置，调整 ContentWrap 的内部空间比例，使页面更饱满 */
 </style>

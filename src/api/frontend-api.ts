@@ -193,6 +193,30 @@ export interface CreateAppRequest {
   sort?: number
 }
 
+export type PromptIconKey = 'spark' | 'code' | 'doc' | 'idea'
+
+export interface AppStarterPrompt {
+  title: string
+  description: string
+  prompt: string
+  iconKey: PromptIconKey
+}
+
+export interface CreateAppBasicRequest {
+  appName: string
+  appType: 'chat' | 'workflow' | 'agent'
+  description?: string
+  icon?: string
+  iconImage?: string
+  sort?: number
+  enabled?: boolean
+  starterPrompts?: AppStarterPrompt[]
+}
+
+export interface CreateAppBasicResponse {
+  id: number
+}
+
 export interface AppConfigVO {
   id: number
   appName: string
@@ -203,6 +227,7 @@ export interface AppConfigVO {
   iconImage?: string
   sort?: number
   enabled?: boolean
+  starterPrompts?: AppStarterPrompt[]
 
   sourceType?: 'canvas' | 'template'
   templateCode?: string
@@ -227,6 +252,7 @@ export interface UpdateAppBasicRequest {
   iconImage?: string
   sort?: number
   enabled?: boolean
+  starterPrompts?: AppStarterPrompt[]
 }
 
 export type AppPublishStatus = 'DRAFT' | 'SAVED' | 'PUBLISHED' | 'PUBLISH_FAILED'
@@ -771,6 +797,10 @@ export const menuApi = {
 
 export const appApi = {
   list: listApps,
+
+  createBasic(payload: CreateAppBasicRequest, config?: AxiosRequestConfig) {
+    return unwrap<CreateAppBasicResponse>(apiClient.post('/apps/create-basic', payload, config))
+  },
 
   detail(id: number, config?: AxiosRequestConfig) {
     return unwrap<AppConfigVO>(apiClient.get(`/apps/${id}`, config))
