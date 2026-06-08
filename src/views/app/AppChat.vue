@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -91,10 +91,47 @@ const audioChunksRef = ref<Blob[]>([])
 
 const messageScrollbarRef = ref<any>(null)
 const messageListRef = ref<HTMLElement | null>(null)
+const draftRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const shouldStickToBottom = ref(true)
 const thoughtSettlingByMessageId = ref<Record<string, boolean>>({})
 const thoughtSettlingTimers = new Map<string, number>()
+
+// ── 流式草稿：流式过程中只更新这个 ref，完全不碰 store ──
+interface StreamingDraft {
+  id: string
+  thought: string
+  content: string
+  isThinking: boolean
+  backendMessageId?: string
+  createdAt: string
+  // 用于渲染思维链面板的展开态
+  thoughtOpen: boolean
+}
+const streamingDraft = ref<StreamingDraft | null>(null)
+// 草稿内容的 rendered HTML，用 shallowRef 避免深度响应
+const draftThoughtHtml = shallowRef('')
+const draftContentHtml = shallowRef('')
+
+// 用 RAF 节流刷新草稿 HTML，避免每个 chunk 都调 renderMarkdown
+let draftRafId: number | null = null
+function scheduleDraftRender() {
+  if (draftRafId !== null) return
+  draftRafId = requestAnimationFrame(() => {
+    draftRafId = null
+    if (!streamingDraft.value) return
+    draftThoughtHtml.value = renderMarkdown(streamingDraft.value.thought || '')
+    draftContentHtml.value = renderMarkdown(streamingDraft.value.content || '')
+  })
+}
+
+// 自动跟底部：只监听草稿 div 的 resize，不用每帧 scrollToBottom
+const draftResizeObserver = new ResizeObserver(() => {
+  if (shouldStickToBottom.value) {
+    const wrap = getScrollWrapEl()
+    if (wrap) wrap.scrollTop = wrap.scrollHeight
+  }
+})
 
 const currentConversationId = computed(() => chatStore.getCurrentConversationId)
 const messages = computed(() => chatStore.getMessages)
@@ -123,7 +160,6 @@ const canUseVoice = computed(() =>
   )
 )
 
-// ═══════════════════════════════════════════════
 const promptSuggestions = computed<AppStarterPrompt[]>(() => {
   if (!currentApp.value?.starterPrompts?.length) {
     return createDefaultStarterPrompts()
@@ -134,9 +170,12 @@ const promptSuggestions = computed<AppStarterPrompt[]>(() => {
 const currentConversation = computed(() =>
   conversations.value.find((item) => item.id === currentConversationId.value)
 )
-// 是否展示空状态欢迎屏
 const showWelcome = computed(
-  () => !currentConversationId.value && messages.value.length === 0 && !messageLoading.value
+  () =>
+    !currentConversationId.value &&
+    messages.value.length === 0 &&
+    !messageLoading.value &&
+    !streamingDraft.value
 )
 
 const maxUploadSize = 20 * 1024 * 1024
@@ -171,9 +210,7 @@ function renderMarkdown(content: string): string {
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value === 'object' && value !== null) {
-    return value as Record<string, unknown>
-  }
+  if (typeof value === 'object' && value !== null) return value as Record<string, unknown>
   return null
 }
 
@@ -182,19 +219,13 @@ function toText(value: unknown): string | null {
     const trimmed = value.trim()
     return trimmed ? trimmed : null
   }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
-  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return null
 }
 
 function toRawText(value: unknown): string | null {
-  if (typeof value === 'string') {
-    return value
-  }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value)
-  }
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return null
 }
 
@@ -229,30 +260,21 @@ function normalizeEscapedText(value: string): string {
 
 function toDisplayText(value: unknown): string | null {
   const raw = toRawText(value)
-  if (raw === null) {
-    return null
-  }
+  if (raw === null) return null
   const normalized = normalizeEscapedText(raw)
   return normalized.trim() ? normalized : null
 }
 
 function normalizeTimeValue(value: unknown): string | undefined {
-  if (value === null || value === undefined) {
-    return undefined
-  }
-
+  if (value === null || value === undefined) return undefined
   if (typeof value === 'number' && Number.isFinite(value)) {
     const millis = value < 1_000_000_000_000 ? value * 1000 : value
     const parsed = new Date(millis)
     return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString()
   }
-
   if (typeof value === 'string') {
     const trimmed = value.trim()
-    if (!trimmed) {
-      return undefined
-    }
-
+    if (!trimmed) return undefined
     if (/^\d+$/.test(trimmed)) {
       const numeric = Number(trimmed)
       if (Number.isFinite(numeric)) {
@@ -261,23 +283,17 @@ function normalizeTimeValue(value: unknown): string | undefined {
         return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString()
       }
     }
-
     const parsed = new Date(trimmed)
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString()
-    }
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
     return trimmed
   }
-
   return undefined
 }
 
 function extractStringByKeys(record: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
     const value = toText(record[key])
-    if (value) {
-      return value
-    }
+    if (value) return value
   }
   return null
 }
@@ -285,9 +301,7 @@ function extractStringByKeys(record: Record<string, unknown>, keys: string[]): s
 function extractRawStringByKeys(record: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
     const value = toRawText(record[key])
-    if (value !== null) {
-      return value
-    }
+    if (value !== null) return value
   }
   return null
 }
@@ -298,24 +312,17 @@ function extractDisplayStringByKeys(
 ): string | null {
   for (const key of keys) {
     const value = toDisplayText(record[key])
-    if (value !== null) {
-      return value
-    }
+    if (value !== null) return value
   }
   return null
 }
 
 function extractThoughtFromAgentThoughts(value: unknown): string {
-  if (!Array.isArray(value)) {
-    return ''
-  }
-
+  if (!Array.isArray(value)) return ''
   const blocks = value
     .map((item) => {
       const record = toRecord(item)
-      if (!record) {
-        return toDisplayText(item) || ''
-      }
+      if (!record) return toDisplayText(item) || ''
       return (
         extractDisplayStringByKeys(record, [
           'thought',
@@ -327,7 +334,6 @@ function extractThoughtFromAgentThoughts(value: unknown): string {
       )
     })
     .filter(Boolean)
-
   return blocks.join('\n\n')
 }
 
@@ -338,9 +344,7 @@ function extractThought(record: Record<string, unknown>): string {
     'reasoning',
     'reasoning_content'
   ])
-  if (directThought) {
-    return directThought
-  }
+  if (directThought) return directThought
   return extractThoughtFromAgentThoughts(record.agent_thoughts) || ''
 }
 
@@ -350,53 +354,34 @@ function mergeThoughtText(...parts: Array<string | null | undefined>): string {
 }
 
 function splitThinkTaggedText(raw: string): ThoughtContentParts {
-  if (!raw) {
-    return { thought: '', content: '' }
-  }
-
+  if (!raw) return { thought: '', content: '' }
   const thoughtParts: string[] = []
   const contentParts: string[] = []
   const thinkRegex = /<think>([\s\S]*?)<\/think>/gi
   let cursor = 0
   let matched = false
   let match: RegExpExecArray | null = null
-
   while ((match = thinkRegex.exec(raw)) !== null) {
     matched = true
     contentParts.push(raw.slice(cursor, match.index))
     thoughtParts.push(match[1] || '')
     cursor = thinkRegex.lastIndex
   }
-
-  if (!matched) {
-    return {
-      thought: '',
-      content: raw
-    }
-  }
-
+  if (!matched) return { thought: '', content: raw }
   contentParts.push(raw.slice(cursor))
-  return {
-    thought: thoughtParts.join('\n\n'),
-    content: contentParts.join('')
-  }
+  return { thought: thoughtParts.join('\n\n'), content: contentParts.join('') }
 }
 
 function trailingPartialTagLength(text: string, tag: string): number {
   const max = Math.min(tag.length - 1, text.length)
   for (let length = max; length > 0; length -= 1) {
-    if (tag.startsWith(text.slice(-length))) {
-      return length
-    }
+    if (tag.startsWith(text.slice(-length))) return length
   }
   return 0
 }
 
 function splitThinkTaggedDelta(delta: string, state: ThinkStreamState): ThoughtContentParts {
-  if (!delta) {
-    return { thought: '', content: '' }
-  }
-
+  if (!delta) return { thought: '', content: '' }
   const openTag = '<think>'
   const closeTag = '</think>'
   const source = `${state.carry}${delta}`
@@ -405,7 +390,6 @@ function splitThinkTaggedDelta(delta: string, state: ThinkStreamState): ThoughtC
   let thought = ''
   let content = ''
   state.carry = ''
-
   while (cursor < source.length) {
     if (state.inThink) {
       const closeIndex = lowerSource.indexOf(closeTag, cursor)
@@ -421,7 +405,6 @@ function splitThinkTaggedDelta(delta: string, state: ThinkStreamState): ThoughtC
       cursor = closeIndex + closeTag.length
       continue
     }
-
     const openIndex = lowerSource.indexOf(openTag, cursor)
     if (openIndex < 0) {
       const tailLength = trailingPartialTagLength(source.slice(cursor), openTag)
@@ -430,19 +413,15 @@ function splitThinkTaggedDelta(delta: string, state: ThinkStreamState): ThoughtC
       state.carry = source.slice(end)
       break
     }
-
     content += source.slice(cursor, openIndex)
     state.inThink = true
     cursor = openIndex + openTag.length
   }
-
   return { thought, content }
 }
 
 function flushThinkStreamCarry(state: ThinkStreamState): ThoughtContentParts {
-  if (!state.carry) {
-    return { thought: '', content: '' }
-  }
+  if (!state.carry) return { thought: '', content: '' }
   const part = state.inThink
     ? { thought: state.carry, content: '' }
     : { thought: '', content: state.carry }
@@ -457,87 +436,56 @@ function getScrollWrapEl(): HTMLElement | null {
 async function scrollToBottom(behavior: ScrollBehavior = 'auto') {
   await nextTick()
   const wrap = getScrollWrapEl()
-  if (!wrap) {
-    return
-  }
+  if (!wrap) return
   wrap.scrollTo({ top: wrap.scrollHeight, behavior })
 }
 
 function requestStickBottom(behavior: ScrollBehavior = 'auto') {
-  if (!shouldStickToBottom.value) {
-    return
-  }
+  if (!shouldStickToBottom.value) return
   void scrollToBottom(behavior)
 }
 
 function handleMessageScroll() {
   const wrap = getScrollWrapEl()
-  if (!wrap) {
-    return
-  }
+  if (!wrap) return
   const distanceToBottom = wrap.scrollHeight - (wrap.scrollTop + wrap.clientHeight)
   shouldStickToBottom.value = distanceToBottom < 80
 }
 
 useResizeObserver(messageListRef, () => {
-  if (shouldStickToBottom.value) {
-    void scrollToBottom('auto')
-  }
+  if (shouldStickToBottom.value) void scrollToBottom('auto')
 })
 
 function pickList(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) {
-    return payload
-  }
-
+  if (Array.isArray(payload)) return payload
   const record = toRecord(payload)
-  if (!record) {
-    return []
-  }
-
+  if (!record) return []
   const keys = ['list', 'items', 'records', 'rows', 'data']
   for (const key of keys) {
     const value = record[key]
-    if (Array.isArray(value)) {
-      return value
-    }
+    if (Array.isArray(value)) return value
   }
-
   const nested = toRecord(record.data)
-  if (!nested) {
-    return []
-  }
-
+  if (!nested) return []
   for (const key of keys) {
     const value = nested[key]
-    if (Array.isArray(value)) {
-      return value
-    }
+    if (Array.isArray(value)) return value
   }
-
   return []
 }
 
 function parseConversation(rawItem: unknown, index: number): ConversationItem | null {
   const record = toRecord(rawItem)
-  if (!record) {
-    return null
-  }
-
+  if (!record) return null
   const id =
     extractStringByKeys(record, ['conversationId', 'conversation_id', 'id', 'uuid']) || null
-
-  if (!id) {
-    return null
-  }
-
+  if (!id) return null
   const messageSummaryRecord =
     toRecord(record.firstMessage) ||
     toRecord(record.first_message) ||
     toRecord(record.lastMessage) ||
     toRecord(record.last_message)
   const dataRecord = toRecord(record.data)
-
   const name =
     extractStringByKeys(record, [
       'name',
@@ -581,36 +529,22 @@ function parseConversation(rawItem: unknown, index: number): ConversationItem | 
     ]) ||
     extractStringByKeys(toRecord(record.inputs) || {}, ['name', 'title', 'query', 'question']) ||
     `会话 ${index + 1}`
-
   const updatedAt = normalizeTimeValue(
     record.updatedAt ?? record.updated_at ?? record.createdAt ?? record.created_at
   )
-
-  return {
-    id,
-    name,
-    updatedAt,
-    raw: record
-  }
+  return { id, name, updatedAt, raw: record }
 }
 
 function parseMessageRole(rawRole: string | null): ChatMessage['role'] {
   const value = (rawRole || 'assistant').toLowerCase()
-  if (value.includes('user') || value.includes('human') || value === 'question') {
-    return 'user'
-  }
-  if (value.includes('system')) {
-    return 'system'
-  }
+  if (value.includes('user') || value.includes('human') || value === 'question') return 'user'
+  if (value.includes('system')) return 'system'
   return 'assistant'
 }
 
 function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   const record = toRecord(rawItem)
-  if (!record) {
-    return []
-  }
-
+  if (!record) return []
   const query = toDisplayText(record.query)
   const recordThought = extractThought(record)
   const answerRaw = extractRawStringByKeys(record, ['answer']) || ''
@@ -626,7 +560,6 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   if (query || answer) {
     const pairMessages: ChatMessage[] = []
     const baseId = extractStringByKeys(record, ['id', 'messageId']) || `q-${index}`
-
     if (query) {
       pairMessages.push({
         id: `${baseId}-u`,
@@ -637,7 +570,6 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
         createdAt
       })
     }
-
     if (answer || thoughtText) {
       pairMessages.push({
         id: `${baseId}-a`,
@@ -655,9 +587,7 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   const nestedData = toRecord(record.data)
   if (nestedData) {
     const nested = parseMessageItem(nestedData, index)
-    if (nested.length > 0) {
-      return nested
-    }
+    if (nested.length > 0) return nested
   }
 
   const rawContent =
@@ -667,13 +597,8 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   const contentParts = splitThinkTaggedText(rawContent)
   const content = toDisplayText(contentParts.content) || ''
   const mergedThought = mergeThoughtText(thoughtText, toDisplayText(contentParts.thought))
-
-  if (!content) {
-    return []
-  }
-
+  if (!content) return []
   const role = parseMessageRole(extractStringByKeys(record, ['role', 'type']))
-
   return [
     {
       id: extractStringByKeys(record, ['id', 'messageId']) || `message-${index}`,
@@ -690,30 +615,21 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
 function normalizeMessages(payload: unknown): ChatMessage[] {
   const list = pickList(payload)
   const source = list.length > 0 ? list : [payload]
-
   return source
     .flatMap((item, index) => parseMessageItem(item, index))
     .filter((item) => Boolean(item.content || item.thought))
 }
 
 function formatTime(time?: string): string {
-  if (!time) {
-    return ''
-  }
+  if (!time) return ''
   const date = new Date(time)
-  if (Number.isNaN(date.getTime())) {
-    return time
-  }
+  if (Number.isNaN(date.getTime())) return time
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
 function roleLabel(role: ChatMessage['role']): string {
-  if (role === 'user') {
-    return '用户'
-  }
-  if (role === 'system') {
-    return '系统'
-  }
+  if (role === 'user') return '用户'
+  if (role === 'system') return '系统'
   return 'AI'
 }
 
@@ -732,28 +648,11 @@ function patchConversationNameIfNeeded(conversationId: string, fallbackSource: C
   if (!conversationId) return
   const nextName = summarizeConversationNameFromMessages(fallbackSource)
   if (!nextName) return
-
   conversations.value = conversations.value.map((item) => {
     if (item.id !== conversationId) return item
     if (!isFallbackConversationName(item.name)) return item
     return { ...item, name: nextName }
   })
-}
-
-function markThoughtSettling(messageId: string, duration = 360) {
-  if (!messageId) return
-  thoughtSettlingByMessageId.value = { ...thoughtSettlingByMessageId.value, [messageId]: true }
-  const oldTimer = thoughtSettlingTimers.get(messageId)
-  if (oldTimer) {
-    window.clearTimeout(oldTimer)
-  }
-  const timer = window.setTimeout(() => {
-    const next = { ...thoughtSettlingByMessageId.value }
-    delete next[messageId]
-    thoughtSettlingByMessageId.value = next
-    thoughtSettlingTimers.delete(messageId)
-  }, duration)
-  thoughtSettlingTimers.set(messageId, timer)
 }
 
 function isThoughtSettling(messageId: string): boolean {
@@ -764,43 +663,35 @@ function isThoughtPanelOpen(message: ChatMessage): boolean {
   return message.isThinking || isThoughtSettling(message.id)
 }
 
-function updateMessageById(messageId: string, updater: (message: ChatMessage) => ChatMessage) {
+// 流式结束后一次性将草稿写入 store
+function commitDraft(draft: StreamingDraft) {
+  // 把之前 appendMessage 占位的 assistant 消息（isThinking:true, content:''）
+  // 替换成最终完整内容，只触发一次 setMessages
   const next = chatStore.getMessages.map((item) => {
-    if (item.id !== messageId) {
-      return item
+    if (item.id !== draft.id) return item
+    return {
+      ...item,
+      thought: draft.thought,
+      content: draft.content,
+      isThinking: false,
+      backendMessageId: draft.backendMessageId
     }
-    return updater(item)
   })
   chatStore.setMessages(next)
-  requestStickBottom('auto')
-}
-
-function getMessageById(messageId: string): ChatMessage | undefined {
-  return chatStore.getMessages.find((item) => item.id === messageId)
 }
 
 function normalizeStreamPayload(raw: unknown): Record<string, unknown> {
   const record = toRecord(raw) || {}
   const nested = toRecord(record.data)
-  if (!nested) {
-    return record
-  }
-  return {
-    ...record,
-    ...nested
-  }
+  if (!nested) return record
+  return { ...record, ...nested }
 }
 
 function updateStreamMeta(payload: Record<string, unknown>) {
   const conversationId = extractStringByKeys(payload, ['conversationId', 'conversation_id'])
-  if (conversationId) {
-    chatStore.setCurrentConversationId(conversationId)
-  }
-
+  if (conversationId) chatStore.setCurrentConversationId(conversationId)
   const taskId = extractStringByKeys(payload, ['taskId', 'task_id'])
-  if (taskId) {
-    chatStore.setTaskId(taskId)
-  }
+  if (taskId) chatStore.setTaskId(taskId)
 }
 
 function extractChunkType(payload: Record<string, unknown>): string {
@@ -846,60 +737,40 @@ function getSuggestedQuestions(message: ChatMessage): string[] {
 }
 
 function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  if (typeof error === 'string') {
-    return error
-  }
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
   const record = toRecord(error)
-  if (record) {
-    return extractStringByKeys(record, ['message', 'msg', 'error']) || '请求失败'
-  }
+  if (record) return extractStringByKeys(record, ['message', 'msg', 'error']) || '请求失败'
   return '请求失败'
 }
 
 function extractErrorCode(error: unknown): number | undefined {
   const record = toRecord(error)
-  if (!record) {
-    return undefined
-  }
+  if (!record) return undefined
   return toFiniteNumber(record.code ?? toRecord(record.response)?.status)
 }
+
 function toFiniteNumber(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
-  }
+  if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string' && value.trim()) {
     const parsed = Number(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
+    if (Number.isFinite(parsed)) return parsed
   }
   return undefined
 }
 
 function getFileExtension(filename: string): string {
   const index = filename.lastIndexOf('.')
-  if (index < 0) {
-    return ''
-  }
+  if (index < 0) return ''
   return filename.slice(index + 1).toLowerCase()
 }
 
 function inferChatFileType(fileName: string, mimeType?: string): ChatFilePayload['type'] {
   const extension = getFileExtension(fileName)
   const normalizedMimeType = (mimeType || '').toLowerCase()
-
-  if (normalizedMimeType.startsWith('image/') || imageExtensions.has(extension)) {
-    return 'image'
-  }
-  if (normalizedMimeType.startsWith('audio/') || audioExtensions.has(extension)) {
-    return 'audio'
-  }
-  if (normalizedMimeType.startsWith('video/') || videoExtensions.has(extension)) {
-    return 'video'
-  }
+  if (normalizedMimeType.startsWith('image/') || imageExtensions.has(extension)) return 'image'
+  if (normalizedMimeType.startsWith('audio/') || audioExtensions.has(extension)) return 'audio'
+  if (normalizedMimeType.startsWith('video/') || videoExtensions.has(extension)) return 'video'
   if (
     normalizedMimeType.startsWith('text/') ||
     normalizedMimeType.startsWith('application/pdf') ||
@@ -907,22 +778,17 @@ function inferChatFileType(fileName: string, mimeType?: string): ChatFilePayload
     normalizedMimeType.includes('excel') ||
     normalizedMimeType.includes('sheet') ||
     documentExtensions.has(extension)
-  ) {
+  )
     return 'document'
-  }
   return 'custom'
 }
 
 function normalizeRemoteUrl(value: string): string | null {
   const trimmed = value.trim().replace(/[),.;!?]+$/, '')
-  if (!trimmed) {
-    return null
-  }
+  if (!trimmed) return null
   try {
     const parsed = new URL(trimmed)
-    if (!/^https?:$/.test(parsed.protocol)) {
-      return null
-    }
+    if (!/^https?:$/.test(parsed.protocol)) return null
     return parsed.toString()
   } catch {
     return null
@@ -932,29 +798,19 @@ function normalizeRemoteUrl(value: string): string | null {
 function extractRemoteUrls(question: string): string[] {
   const matches = question.match(remoteUrlRegex) || []
   const seen = new Set<string>()
-
   for (const item of matches) {
     const normalized = normalizeRemoteUrl(item)
-    if (!normalized) {
-      continue
-    }
+    if (!normalized) continue
     seen.add(normalized)
   }
-
   return Array.from(seen)
 }
 
 function splitFileName(rawName: string): { name: string; extension?: string } {
   const normalized = rawName.trim()
-  if (!normalized) {
-    return { name: '未命名文件' }
-  }
-
+  if (!normalized) return { name: '未命名文件' }
   const dotIndex = normalized.lastIndexOf('.')
-  if (dotIndex <= 0 || dotIndex === normalized.length - 1) {
-    return { name: normalized }
-  }
-
+  if (dotIndex <= 0 || dotIndex === normalized.length - 1) return { name: normalized }
   return {
     name: normalized.slice(0, dotIndex),
     extension: normalized.slice(dotIndex + 1).toLowerCase()
@@ -963,16 +819,12 @@ function splitFileName(rawName: string): { name: string; extension?: string } {
 
 function getRemoteReferenceName(url: string): string {
   const normalized = normalizeRemoteUrl(url)
-  if (!normalized) {
-    return ''
-  }
+  if (!normalized) return ''
   try {
     const parsed = new URL(normalized)
     const segments = parsed.pathname.split('/').filter(Boolean)
     const tail = segments.length > 0 ? segments[segments.length - 1] : ''
-    if (tail) {
-      return decodeURIComponent(tail)
-    }
+    if (tail) return decodeURIComponent(tail)
     return parsed.hostname
   } catch {
     return ''
@@ -982,10 +834,7 @@ function getRemoteReferenceName(url: string): string {
 function buildMessageFileReferences(
   files: UploadedFile[]
 ): NonNullable<ChatMessage['fileReferences']> | undefined {
-  if (files.length === 0) {
-    return undefined
-  }
-
+  if (files.length === 0) return undefined
   const references: ChatMessageFileReference[] = files.map((item, index) => {
     const transferMethod = item.transferMethod || 'local_file'
     const fallbackName = item.fileName || `文件${index + 1}`
@@ -993,7 +842,6 @@ function buildMessageFileReferences(
       transferMethod === 'remote_url'
         ? getRemoteReferenceName(item.url || '') || fallbackName
         : fallbackName
-
     const { name, extension } = splitFileName(referenceName)
     return {
       id: item.fileId || item.uploadFileId || `${transferMethod}-${index}-${referenceName}`,
@@ -1002,20 +850,13 @@ function buildMessageFileReferences(
       transferMethod
     }
   })
-
   return references.length > 0 ? references : undefined
 }
 
 function validateUploadFile(file: File): string | null {
-  if (file.size > maxUploadSize) {
-    return `文件 ${file.name} 超过 20MB 限制`
-  }
-
+  if (file.size > maxUploadSize) return `文件 ${file.name} 超过 20MB 限制`
   const extension = getFileExtension(file.name)
-  if (!extension || !allowedFileExtensions.has(extension)) {
-    return `文件 ${file.name} 类型暂不支持`
-  }
-
+  if (!extension || !allowedFileExtensions.has(extension)) return `文件 ${file.name} 类型暂不支持`
   return null
 }
 
@@ -1023,60 +864,39 @@ function findUploadRecord(payload: unknown): Record<string, unknown> | null {
   if (Array.isArray(payload)) {
     for (const item of payload) {
       const record = toRecord(item)
-      if (record) {
-        return record
-      }
+      if (record) return record
     }
     return null
   }
-
   const directRecord = toRecord(payload)
-  if (!directRecord) {
-    return null
-  }
-
+  if (!directRecord) return null
   const list = pickList(payload)
-  if (list.length > 0) {
-    return findUploadRecord(list[0])
-  }
-
+  if (list.length > 0) return findUploadRecord(list[0])
   const nested = toRecord(directRecord.data)
   if (nested) {
     const id = extractStringByKeys(nested, ['fileId', 'file_id', 'id', 'upload_file_id'])
-    if (id) {
-      return nested
-    }
+    if (id) return nested
   }
-
   return directRecord
 }
 
 function parseUploadedFile(response: unknown, sourceFile: File): UploadedFile | null {
   const record = findUploadRecord(response)
-  if (!record) {
-    return null
-  }
-
+  if (!record) return null
   const fileId = extractStringByKeys(record, ['fileId', 'file_id', 'id', 'upload_file_id'])
-  if (!fileId) {
-    return null
-  }
-
+  if (!fileId) return null
   const fileName =
     extractStringByKeys(record, ['fileName', 'filename', 'name', 'originalFilename']) ||
     sourceFile.name
-
   const fileSize =
     toFiniteNumber(record.fileSize) ??
     toFiniteNumber(record.size) ??
     toFiniteNumber(record.file_size) ??
     sourceFile.size
-
   const fileType =
     extractStringByKeys(record, ['fileType', 'type', 'mimeType', 'mime_type']) ||
     sourceFile.type ||
     undefined
-
   return {
     fileId,
     fileName,
@@ -1090,10 +910,7 @@ function parseUploadedFile(response: unknown, sourceFile: File): UploadedFile | 
 
 function parseAudioToTextResult(response: unknown): string {
   const record = toRecord(response)
-  if (!record) {
-    return ''
-  }
-
+  if (!record) return ''
   const text =
     extractDisplayStringByKeys(record, [
       'text',
@@ -1103,15 +920,9 @@ function parseAudioToTextResult(response: unknown): string {
       'result',
       'transcript'
     ]) || ''
-
-  if (text) {
-    return text
-  }
-
+  if (text) return text
   const nested = toRecord(record.data)
-  if (!nested) {
-    return ''
-  }
+  if (!nested) return ''
   return (
     extractDisplayStringByKeys(nested, [
       'text',
@@ -1130,56 +941,32 @@ function buildChatFiles(
 ): { files?: ChatFilePayload[]; validationError?: string } {
   const payloadFiles: ChatFilePayload[] = []
   const remoteUrls = new Set<string>()
-
   for (const item of files) {
     const transferMethod = item.transferMethod || 'local_file'
     const fileType = item.type || inferChatFileType(item.fileName, item.fileType)
-
     if (transferMethod === 'local_file') {
       const uploadFileId = (item.uploadFileId || item.fileId || '').trim()
-      if (!uploadFileId) {
+      if (!uploadFileId)
         return {
           validationError: `本地文件 ${item.fileName || '未命名文件'} 缺少 uploadFileId，请重新上传后再试`
         }
-      }
-      payloadFiles.push({
-        type: fileType,
-        transferMethod,
-        uploadFileId
-      })
+      payloadFiles.push({ type: fileType, transferMethod, uploadFileId })
       continue
     }
-
     const remoteUrl = normalizeRemoteUrl(item.url || '')
-    if (!remoteUrl) {
+    if (!remoteUrl)
       return {
         validationError: `远程文件 ${item.fileName || '未命名文件'} 缺少有效 url，请检查后再试`
       }
-    }
-
     remoteUrls.add(remoteUrl)
-    payloadFiles.push({
-      type: fileType,
-      transferMethod,
-      url: remoteUrl
-    })
+    payloadFiles.push({ type: fileType, transferMethod, url: remoteUrl })
   }
-
   const extractedUrls = extractRemoteUrls(question)
   for (const url of extractedUrls) {
-    if (remoteUrls.has(url)) {
-      continue
-    }
-    payloadFiles.push({
-      type: 'document',
-      transferMethod: 'remote_url',
-      url
-    })
+    if (remoteUrls.has(url)) continue
+    payloadFiles.push({ type: 'document', transferMethod: 'remote_url', url })
   }
-
-  return {
-    files: payloadFiles.length > 0 ? payloadFiles : undefined
-  }
+  return { files: payloadFiles.length > 0 ? payloadFiles : undefined }
 }
 
 function removeUploadedFile(fileId: string) {
@@ -1198,11 +985,7 @@ async function handleFileInputChange(event: Event) {
   const target = event.target as HTMLInputElement
   const files = Array.from(target.files || [])
   target.value = ''
-
-  if (!appId.value || files.length === 0) {
-    return
-  }
-
+  if (!appId.value || files.length === 0) return
   const invalidReason = files
     .map((file) => validateUploadFile(file))
     .find((reason) => Boolean(reason))
@@ -1210,11 +993,9 @@ async function handleFileInputChange(event: Event) {
     ElMessage.warning(invalidReason)
     return
   }
-
   uploadLoading.value = true
   const nextFiles = [...chatStore.getUploadedFiles]
   let successCount = 0
-
   try {
     for (const file of files) {
       try {
@@ -1224,7 +1005,6 @@ async function handleFileInputChange(event: Event) {
           ElMessage.warning(`文件 ${file.name} 上传成功，但未返回可用文件ID`)
           continue
         }
-
         if (!nextFiles.some((item) => item.fileId === parsed.fileId)) {
           nextFiles.push(parsed)
           successCount += 1
@@ -1236,19 +1016,13 @@ async function handleFileInputChange(event: Event) {
   } finally {
     uploadLoading.value = false
   }
-
   chatStore.setUploadedFiles(nextFiles)
-  if (successCount > 0) {
-    ElMessage.success(`已上传 ${successCount} 个文件`)
-  }
+  if (successCount > 0) ElMessage.success(`已上传 ${successCount} 个文件`)
 }
 
 function appendTextToInput(text: string) {
   const appended = text.trim()
-  if (!appended) {
-    return
-  }
-
+  if (!appended) return
   const current = inputValue.value.trimEnd()
   if (!current) {
     inputValue.value = appended
@@ -1265,16 +1039,13 @@ function releaseAudioResources() {
   }
   mediaRecorderRef.value = null
   audioChunksRef.value = []
-
   if (mediaStreamRef.value) {
     mediaStreamRef.value.getTracks().forEach((track) => track.stop())
     mediaStreamRef.value = null
   }
-
   isRecording.value = false
 }
 
-// 1. 增加一个记录开始时间的变量
 const recordStartTimeRef = ref<number>(0)
 
 async function startVoiceInput() {
@@ -1286,89 +1057,55 @@ async function startVoiceInput() {
     ElMessage.warning('当前浏览器不支持语音输入')
     return
   }
-  if (isRecording.value || audioRecognizing.value || isGenerating.value) {
-    return
-  }
-
+  if (isRecording.value || audioRecognizing.value || isGenerating.value) return
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    // 指定更稳妥的 mimeType
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm'
-
     const recorder = new MediaRecorder(stream, { mimeType })
-
     mediaStreamRef.value = stream
     mediaRecorderRef.value = recorder
     audioChunksRef.value = []
-    recordStartTimeRef.value = Date.now() // 记录开始时间
-
+    recordStartTimeRef.value = Date.now()
     recorder.ondataavailable = (recorderEvent: BlobEvent) => {
-      // 只有当数据大小大于 0 时才推入
-      if (recorderEvent.data && recorderEvent.data.size > 0) {
+      if (recorderEvent.data && recorderEvent.data.size > 0)
         audioChunksRef.value.push(recorderEvent.data)
-      }
     }
-
     recorder.onstop = async () => {
       isRecording.value = false
-
-      // 关键修复 1：计算录音时长
       const duration = Date.now() - recordStartTimeRef.value
       if (duration < 800) {
-        // 如果录音短于 0.8 秒，视为无效点击
         ElMessage.warning('录音时间太短')
         releaseAudioResources()
         return
       }
-
       const chunks = [...audioChunksRef.value]
       audioChunksRef.value = []
-
-      // 释放资源
       if (mediaStreamRef.value) {
         mediaStreamRef.value.getTracks().forEach((track) => track.stop())
         mediaStreamRef.value = null
       }
       mediaRecorderRef.value = null
-
       if (!appId.value || chunks.length === 0) return
-
       const audioBlob = new Blob(chunks, { type: mimeType })
-
-      // 关键修复 2：检查最终生成的 Blob 大小 (正常 1秒 WebM 至少 4-6KB 以上)
-      console.log('最终录音大小:', audioBlob.size)
       if (audioBlob.size < 3000) {
         ElMessage.warning('未检测到有效语音，请按住说话')
         return
       }
-
-      const extension = 'webm'
-      const audioFile = new File([audioBlob], `recording-${Date.now()}.${extension}`, {
-        type: mimeType
-      })
-
+      const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, { type: mimeType })
       audioRecognizing.value = true
       try {
-        // 注意：这里传的是 audioBlob 还是 audioFile 取决于你后端 chatApi.audioToText 的实现
-        // 建议传 audioFile，因为它带有文件名后缀，方便后端 FFmpeg 识别格式
         const response = await chatApi.audioToText(appId.value, audioFile)
         const recognizedText = parseAudioToTextResult(response)
-        if (recognizedText) {
-          appendTextToInput(recognizedText)
-        } else {
-          ElMessage.warning('未能识别出文字')
-        }
+        if (recognizedText) appendTextToInput(recognizedText)
+        else ElMessage.warning('未能识别出文字')
       } catch (error: unknown) {
         ElMessage.error(extractErrorMessage(error) || '语音识别失败')
       } finally {
         audioRecognizing.value = false
       }
     }
-
-    // 关键修复 3：设置 timeslice (每 200ms 触发一次 ondataavailable)
-    // 这样可以确保数据是持续写入 chunks 的，而不是在 stop 时才尝试一次性写入
     recorder.start(200)
     isRecording.value = true
   } catch (error: unknown) {
@@ -1376,11 +1113,10 @@ async function startVoiceInput() {
     ElMessage.error('无法启动录音，请检查麦克风权限')
   }
 }
+
 function stopVoiceInput() {
   const recorder = mediaRecorderRef.value
-  if (!recorder || recorder.state === 'inactive') {
-    return
-  }
+  if (!recorder || recorder.state === 'inactive') return
   recorder.stop()
 }
 
@@ -1426,103 +1162,65 @@ function backToApps() {
   }
   void router.push(resolveAgentListFallbackPath())
 }
-// ★ 修复抖动：新增 silent 参数
-// silent=true 时跳过 conversationLoading 置 true，直接用新数据原地替换列表，不清空再重建
+
 async function loadConversations(preferredId?: string, selectFirst = false, silent = false) {
   if (!appId.value) {
     conversations.value = []
     return
   }
-
-  // ★ 非静默模式才显示 loading，避免侧边栏内容高度突变导致页面抖动
-  if (!silent) {
-    conversationLoading.value = true
-  }
-
+  if (!silent) conversationLoading.value = true
   try {
-    const response = await conversationApi.list({
-      appId: appId.value,
-      page: 1,
-      limit: 100
-    })
-
+    const response = await conversationApi.list({ appId: appId.value, page: 1, limit: 100 })
     const list = pickList(response)
     const parsed = list
       .map((item, index) => parseConversation(item, index))
       .filter((item): item is ConversationItem => Boolean(item))
-
-    // ★ 静默模式：直接替换数据，不经过清空状态，Vue diff 会平滑更新 DOM
     conversations.value = parsed
-
     if (parsed.length === 0) {
       chatStore.setCurrentConversationId(null)
       chatStore.setMessages([])
       return
     }
-
-    // 只有明确传了 preferredId（例如刚刚发送完消息拿到新的会话 id）才选中
     if (preferredId && parsed.some((item) => item.id === preferredId)) {
       chatStore.setCurrentConversationId(preferredId)
-      // ★ 静默刷新列表时不重新加载消息，避免打断当前正在显示的流式输出
-      if (!silent) {
-        await loadMessages(preferredId)
-      }
+      if (!silent) await loadMessages(preferredId)
       return
     }
-
-    // 或者显式要求选中第一条
     if (selectFirst) {
       const first = parsed[0].id
       chatStore.setCurrentConversationId(first)
-      if (!silent) {
-        await loadMessages(first)
-      }
+      if (!silent) await loadMessages(first)
       return
     }
-
-    // 默认：保持新对话状态（不选中任何一条历史）
-    // 如果之前已经选中了一条且仍然存在，则保留；否则置空
     if (
       currentConversationId.value &&
       parsed.some((item) => item.id === currentConversationId.value)
-    ) {
-      // 保留当前选中
+    )
       return
-    }
-
     chatStore.setCurrentConversationId(null)
     chatStore.setMessages([])
   } catch (error: unknown) {
     ElMessage.error(extractErrorMessage(error) || '对话列表加载失败')
   } finally {
-    if (!silent) {
-      conversationLoading.value = false
-    }
+    if (!silent) conversationLoading.value = false
   }
 }
 
 async function handleSelectConversation(conversationId: string) {
-  if (!appId.value) {
-    return
-  }
-
+  if (!appId.value) return
   chatStore.setCurrentConversationId(conversationId)
   chatStore.setUploadedFiles([])
   await loadMessages(conversationId)
 }
 
 async function loadMessages(conversationId: string) {
-  if (!appId.value) {
-    return
-  }
-
+  if (!appId.value) return
   messageLoading.value = true
   try {
     const response = await conversationApi.messages(conversationId, {
       appId: appId.value,
       limit: 100
     })
-
     resetMessageActionsState()
     const nextMessages = normalizeMessages(response)
     chatStore.setMessages(nextMessages)
@@ -1537,24 +1235,17 @@ async function loadMessages(conversationId: string) {
 }
 
 async function handleDeleteConversation(conversationId: string) {
-  if (!appId.value || deletingConversationId.value) {
-    return
-  }
-
+  if (!appId.value || deletingConversationId.value) return
   deletingConversationId.value = conversationId
   try {
     await conversationApi.delete(conversationId, appId.value)
-
     const previous = [...conversations.value]
     conversations.value = previous.filter((item) => item.id !== conversationId)
-
     if (currentConversationId.value === conversationId) {
-      // ★ 删除当前会话后回到新对话状态
       chatStore.setCurrentConversationId(null)
       chatStore.setMessages([])
       chatStore.setTaskId(null)
     }
-
     ElMessage.success('会话删除成功')
   } catch (error: unknown) {
     if (extractErrorCode(error) === 404) {
@@ -1578,7 +1269,6 @@ function handleNewConversation() {
   requestStickBottom('auto')
 }
 
-// ★ 新增：点击提示词卡片时填入输入框并聚焦
 function handleUsePrompt(prompt: string) {
   inputValue.value = prompt
   nextTick(() => {
@@ -1624,8 +1314,16 @@ async function handleStopGeneration() {
     streamController.value = null
     chatStore.setGenerating(false)
     chatStore.setTaskId(null)
-    if (activeAssistantMessageId.value) {
-      updateMessageById(activeAssistantMessageId.value, (msg) => ({ ...msg, isThinking: false }))
+    // 将草稿当前内容 commit 进 store，然后清空草稿
+    if (streamingDraft.value) {
+      commitDraft({ ...streamingDraft.value, isThinking: false })
+      streamingDraft.value = null
+      draftThoughtHtml.value = ''
+      draftContentHtml.value = ''
+      if (draftRafId !== null) {
+        cancelAnimationFrame(draftRafId)
+        draftRafId = null
+      }
     }
     activeAssistantMessageId.value = null
     stopLoading.value = false
@@ -1633,14 +1331,9 @@ async function handleStopGeneration() {
 }
 
 async function handleSend() {
-  if (!canSend.value || !appId.value) {
-    return
-  }
-
+  if (!canSend.value || !appId.value) return
   const question = inputValue.value.trim()
-  if (!question) {
-    return
-  }
+  if (!question) return
   const attachedFiles = [...uploadedFiles.value]
   const messageFileReferences = buildMessageFileReferences(attachedFiles)
   const { files, validationError } = buildChatFiles(attachedFiles, question)
@@ -1653,6 +1346,7 @@ async function handleSend() {
   const userMessageId = `local-user-${now}`
   const assistantMessageId = `local-assistant-${now}`
 
+  // 只往 store 写用户消息 + 一条空占位（不会触发列表闪烁，因为 content 为空）
   chatStore.appendMessage({
     id: userMessageId,
     role: 'user',
@@ -1662,7 +1356,6 @@ async function handleSend() {
     createdAt: new Date().toISOString(),
     fileReferences: messageFileReferences
   })
-
   chatStore.appendMessage({
     id: assistantMessageId,
     role: 'assistant',
@@ -1672,87 +1365,89 @@ async function handleSend() {
     createdAt: new Date().toISOString(),
     backendMessageId: undefined
   })
-
   requestStickBottom('smooth')
+
+  // 初始化草稿，流式内容全部写这里
+  streamingDraft.value = {
+    id: assistantMessageId,
+    thought: '',
+    content: '',
+    isThinking: true,
+    backendMessageId: undefined,
+    createdAt: new Date().toISOString(),
+    thoughtOpen: false
+  }
+  draftThoughtHtml.value = ''
+  draftContentHtml.value = ''
 
   const previousConversationId = currentConversationId.value
   const controller = new AbortController()
-
   streamController.value = controller
   activeAssistantMessageId.value = assistantMessageId
   chatStore.setGenerating(true)
   chatStore.setTaskId(null)
-
   inputValue.value = ''
   let sendSucceeded = false
   const streamThinkState: ThinkStreamState = { inThink: false, carry: '' }
 
+  // 内联辅助：直接修改草稿对象（普通对象赋值，不触发 Vue 深度响应）
+  // 然后调 scheduleDraftRender 用 RAF 批量刷新 HTML
+  function patchDraft(patch: Partial<StreamingDraft>) {
+    if (!streamingDraft.value) return
+    Object.assign(streamingDraft.value, patch)
+    scheduleDraftRender()
+  }
+
   try {
     await chatApi.streamChat(
       appId.value,
-      {
-        query: question,
-        conversationId: previousConversationId || undefined,
-        inputs: {},
-        files
-      },
+      { query: question, conversationId: previousConversationId || undefined, inputs: {}, files },
       {
         signal: controller.signal,
         handlers: {
           onRawEvent: (event) => {
+            if (!streamingDraft.value) return
+
             if (event.event === 'message') {
               const payload = normalizeStreamPayload(event.data)
               updateStreamMeta(payload)
               const backendMessageId = extractBackendMessageId(payload)
-
               const chunkType = extractChunkType(payload)
 
-              if (chunkType === 'thought_start') {
-                const thoughtDelta = extractThoughtText(payload)
-                updateMessageById(assistantMessageId, (msg) => ({
-                  ...msg,
-                  thought: `${msg.thought}${thoughtDelta}`,
+              if (chunkType === 'thought_start' || chunkType === 'thought') {
+                const delta = extractThoughtText(payload)
+                patchDraft({
+                  thought: streamingDraft.value.thought + delta,
                   isThinking: true,
-                  backendMessageId: backendMessageId || msg.backendMessageId
-                }))
-              } else if (chunkType === 'thought') {
-                const thoughtDelta = extractThoughtText(payload)
-                updateMessageById(assistantMessageId, (msg) => ({
-                  ...msg,
-                  thought: `${msg.thought}${thoughtDelta}`,
-                  isThinking: true,
-                  backendMessageId: backendMessageId || msg.backendMessageId
-                }))
+                  thoughtOpen: true,
+                  backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+                })
               } else if (chunkType === 'thought_end') {
-                const thoughtDelta = extractThoughtText(payload)
-                updateMessageById(assistantMessageId, (msg) => ({
-                  ...msg,
-                  thought: `${msg.thought}${thoughtDelta}`,
+                const delta = extractThoughtText(payload)
+                patchDraft({
+                  thought: streamingDraft.value.thought + delta,
                   isThinking: false,
-                  backendMessageId: backendMessageId || msg.backendMessageId
-                }))
-                markThoughtSettling(assistantMessageId)
+                  backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+                })
               } else if (chunkType === 'text') {
                 const textDelta = extractContentText(payload)
                 const parts = splitThinkTaggedDelta(textDelta, streamThinkState)
-                updateMessageById(assistantMessageId, (msg) => ({
-                  ...msg,
-                  thought: `${msg.thought}${parts.thought}`,
-                  content: `${msg.content}${parts.content}`,
+                patchDraft({
+                  thought: streamingDraft.value.thought + parts.thought,
+                  content: streamingDraft.value.content + parts.content,
                   isThinking: streamThinkState.inThink,
-                  backendMessageId: backendMessageId || msg.backendMessageId
-                }))
+                  backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+                })
               } else {
                 const fallbackText = extractContentText(payload)
                 if (fallbackText) {
                   const parts = splitThinkTaggedDelta(fallbackText, streamThinkState)
-                  updateMessageById(assistantMessageId, (msg) => ({
-                    ...msg,
-                    thought: `${msg.thought}${parts.thought}`,
-                    content: `${msg.content}${parts.content}`,
+                  patchDraft({
+                    thought: streamingDraft.value.thought + parts.thought,
+                    content: streamingDraft.value.content + parts.content,
                     isThinking: streamThinkState.inThink,
-                    backendMessageId: backendMessageId || msg.backendMessageId
-                  }))
+                    backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+                  })
                 }
               }
             } else if (event.event === 'message_replace') {
@@ -1763,17 +1458,15 @@ async function handleSend() {
               streamThinkState.inThink = false
               streamThinkState.carry = ''
               const parts = splitThinkTaggedText(content)
-              const nextContent = toDisplayText(parts.content) || content
-              const nextThought = toDisplayText(parts.thought)
-              if (nextContent || nextThought) {
-                updateMessageById(assistantMessageId, (msg) => ({
-                  ...msg,
-                  thought: mergeThoughtText(msg.thought, nextThought),
-                  content: nextContent,
-                  isThinking: false,
-                  backendMessageId: backendMessageId || msg.backendMessageId
-                }))
-              }
+              patchDraft({
+                content: toDisplayText(parts.content) || content,
+                thought: mergeThoughtText(
+                  streamingDraft.value.thought,
+                  toDisplayText(parts.thought)
+                ),
+                isThinking: false,
+                backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+              })
             } else if (event.event === 'message_end') {
               const payload = normalizeStreamPayload(event.data)
               updateStreamMeta(payload)
@@ -1785,39 +1478,29 @@ async function handleSend() {
                 toDisplayText(finalParts.thought),
                 toDisplayText(carryParts.thought)
               )
-              const nextContent = `${toDisplayText(finalParts.content) || ''}${
-                toDisplayText(carryParts.content) || ''
-              }`
-              updateMessageById(assistantMessageId, (msg) => ({
-                ...msg,
-                thought: mergeThoughtText(msg.thought, nextThought),
-                content: msg.content || nextContent || finalText,
+              const nextContent =
+                (toDisplayText(finalParts.content) || '') +
+                (toDisplayText(carryParts.content) || '')
+              patchDraft({
+                thought: mergeThoughtText(streamingDraft.value.thought, nextThought),
+                content: streamingDraft.value.content || nextContent || finalText,
                 isThinking: false,
-                backendMessageId: backendMessageId || msg.backendMessageId
-              }))
-              markThoughtSettling(assistantMessageId)
-              // if (assistantMessage?.backendMessageId) {
-              //   void loadSuggestedQuestions(assistantMessage)
-              // }
+                backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+              })
             } else if (event.event === 'error') {
               const payload = normalizeStreamPayload(event.data)
-              const message = extractErrorMessage(payload)
-              updateMessageById(assistantMessageId, (msg) => ({
-                ...msg,
-                content: msg.content || `请求失败：${message}`,
+              const errMsg = extractErrorMessage(payload)
+              patchDraft({
+                content: streamingDraft.value.content || `请求失败：${errMsg}`,
                 isThinking: false
-              }))
+              })
             }
           },
           onError: (error) => {
-            const message = extractErrorMessage(error)
-            const current = getMessageById(assistantMessageId)
-            if (!current || (!current.content && !current.thought)) {
-              updateMessageById(assistantMessageId, (msg) => ({
-                ...msg,
-                content: `请求失败：${message}`,
-                isThinking: false
-              }))
+            if (!streamingDraft.value) return
+            const errMsg = extractErrorMessage(error)
+            if (!streamingDraft.value.content && !streamingDraft.value.thought) {
+              patchDraft({ content: `请求失败：${errMsg}`, isThinking: false })
             }
           }
         }
@@ -1827,7 +1510,6 @@ async function handleSend() {
 
     const latestConversationId = chatStore.getCurrentConversationId
     if (!previousConversationId && latestConversationId) {
-      // ★ 核心修复：传 silent=true，静默刷新侧边栏列表，不触发 loading 状态，彻底消除抖动
       await loadConversations(latestConversationId, false, true)
       const fallbackTitle = question.replace(/\s+/g, ' ').trim().slice(0, 28)
       if (fallbackTitle) {
@@ -1839,31 +1521,46 @@ async function handleSend() {
       }
     }
   } catch (error: unknown) {
-    if (!controller.signal.aborted) {
-      const message = extractErrorMessage(error)
-      const current = getMessageById(assistantMessageId)
-      if (!current || (!current.content && !current.thought)) {
-        updateMessageById(assistantMessageId, (msg) => ({
-          ...msg,
-          content: `请求失败：${message}`,
-          isThinking: false
-        }))
-        ElMessage.error(message)
+    if (!controller.signal.aborted && streamingDraft.value) {
+      const errMsg = extractErrorMessage(error)
+      if (!streamingDraft.value.content && !streamingDraft.value.thought) {
+        patchDraft({ content: `请求失败：${errMsg}`, isThinking: false })
+        ElMessage.error(errMsg)
       }
     }
   } finally {
-    if (streamController.value === controller) {
-      streamController.value = null
+    // 确保 RAF 执行完最后一帧
+    if (draftRafId !== null) {
+      cancelAnimationFrame(draftRafId)
+      draftRafId = null
     }
-    if (activeAssistantMessageId.value === assistantMessageId) {
-      activeAssistantMessageId.value = null
+    // 同步最后状态的 HTML
+    if (streamingDraft.value) {
+      draftThoughtHtml.value = renderMarkdown(streamingDraft.value.thought || '')
+      draftContentHtml.value = renderMarkdown(streamingDraft.value.content || '')
     }
+
+    // 等一帧，让草稿 DOM 渲染完毕再 commit，避免视觉跳变
+    await nextTick()
+    if (streamingDraft.value) {
+      commitDraft(streamingDraft.value)
+      streamingDraft.value = null
+      draftThoughtHtml.value = ''
+      draftContentHtml.value = ''
+    }
+
+    if (streamController.value === controller) streamController.value = null
+    if (activeAssistantMessageId.value === assistantMessageId) activeAssistantMessageId.value = null
     chatStore.setGenerating(false)
-    if (sendSucceeded && attachedFiles.length > 0) {
-      chatStore.setUploadedFiles([])
-    }
+    if (sendSucceeded && attachedFiles.length > 0) chatStore.setUploadedFiles([])
   }
 }
+
+// 监听草稿 DOM，挂载 ResizeObserver 实现自动跟底
+watch(draftRef, (el) => {
+  draftResizeObserver.disconnect()
+  if (el) draftResizeObserver.observe(el)
+})
 
 function handleInputKeydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -1875,13 +1572,11 @@ function handleInputKeydown(event: KeyboardEvent) {
 onMounted(async () => {
   chatStore.setChatMode('dify')
   resetChatState()
-
   if (!appId.value || Number.isNaN(appId.value)) {
     ElMessage.error('智能体 ID 无效')
     backToApps()
     return
   }
-
   try {
     currentApp.value = await appApi.detail(appId.value)
   } catch (error) {
@@ -1889,13 +1584,11 @@ onMounted(async () => {
     backToApps()
     return
   }
-
   if (currentApp.value?.publishStatus !== 'PUBLISHED') {
     ElMessage.warning('该智能体未发布，无法对话')
     backToApps()
     return
   }
-
   chatStore.setCurrentAppId(appId.value)
   await loadConversations()
   requestStickBottom('auto')
@@ -1913,116 +1606,119 @@ onBeforeUnmount(() => {
   thoughtSettlingByMessageId.value = {}
   releaseAudioResources()
   chatStore.setGenerating(false)
+  // 清理草稿相关资源
+  if (draftRafId !== null) {
+    cancelAnimationFrame(draftRafId)
+    draftRafId = null
+  }
+  draftResizeObserver.disconnect()
+  streamingDraft.value = null
 })
 </script>
 
 <template>
   <div class="chat-page">
-    <!-- ═══ Top Header ═══ -->
+    <!-- ═══ Header ═══ -->
     <header class="chat-header">
-      <div class="header-accent-line"></div>
       <div class="header-left">
-        <el-button text class="header-back-btn" @click="backToApps">
+        <el-button text class="back-btn" @click="backToApps">
           <el-icon><ArrowLeft /></el-icon>
-          返回智能体列表
+          <span>返回</span>
         </el-button>
       </div>
-      <div class="header-center app-header-center">
-        <img
-          v-if="resolveAppAvatar(currentApp)"
-          :src="resolveAppAvatar(currentApp)"
-          class="header-app-avatar"
-          alt="avatar"
-        />
-        <div v-else class="header-app-fallback">
-          {{ resolveAppAvatarText(currentApp) }}
+
+      <div class="header-center">
+        <div class="app-avatar-wrap">
+          <img
+            v-if="resolveAppAvatar(currentApp)"
+            :src="resolveAppAvatar(currentApp)"
+            class="app-avatar-img"
+            alt="avatar"
+          />
+          <div v-else class="app-avatar-fallback">
+            {{ resolveAppAvatarText(currentApp) }}
+          </div>
         </div>
-        <div class="header-app-meta">
-          <div class="header-app-name">{{ currentApp?.appName || '智能体聊天' }}</div>
-          <div class="header-app-desc">{{ currentApp?.description || '当前智能体的专属会话' }}</div>
+        <div class="app-info">
+          <div class="app-name">{{ currentApp?.appName || '智能体聊天' }}</div>
+          <div v-if="currentApp?.description" class="app-desc">{{ currentApp.description }}</div>
         </div>
+      </div>
+
+      <div class="header-right">
+        <!-- 保留右侧空间平衡布局 -->
       </div>
     </header>
 
     <div class="chat-body">
       <!-- ═══ Sidebar ═══ -->
       <aside class="chat-sidebar">
-        <section class="sidebar-section conversation-section">
-          <div class="section-header">
-            <span class="section-title">历史对话</span>
-            <el-button text class="section-action new-btn" @click="handleNewConversation">
-              <el-icon><Plus /></el-icon>
-              <span>新对话</span>
-            </el-button>
-          </div>
+        <div class="sidebar-header">
+          <span class="sidebar-title">对话记录</span>
+          <button class="new-chat-btn" @click="handleNewConversation">
+            <el-icon><Plus /></el-icon>
+            新对话
+          </button>
+        </div>
 
-          <el-scrollbar class="section-scroll">
-            <!-- ★ 修复：loading 状态只在非静默加载时才显示（初次加载、切换应用），
-                 发送消息后的后台刷新不会触发此分支，侧边栏内容不会闪烁消失 -->
-            <div v-if="conversationLoading" class="tip-text">正在加载对话...</div>
-            <template v-else>
-              <div
-                v-for="conversation in conversations"
-                :key="conversation.id"
-                class="conversation-item"
-                :class="{ active: conversation.id === currentConversationId }"
-                @click="handleSelectConversation(conversation.id)"
-              >
-                <div class="conv-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-                  </svg>
-                </div>
-                <div class="conv-body">
-                  <div class="item-title">{{ conversation.name }}</div>
-                  <div class="item-sub">{{ formatTime(conversation.updatedAt) }}</div>
-                </div>
-                <div class="conversation-action" @click.stop>
-                  <el-popconfirm
-                    title="确认删除该会话？"
-                    confirm-button-text="删除"
-                    cancel-button-text="取消"
-                    @confirm="handleDeleteConversation(conversation.id)"
-                  >
-                    <template #reference>
-                      <el-button
-                        text
-                        type="danger"
-                        :loading="deletingConversationId === conversation.id"
-                        class="conversation-delete-btn"
-                        @click.stop
-                      >
-                        <el-icon><Delete /></el-icon>
-                      </el-button>
-                    </template>
-                  </el-popconfirm>
-                </div>
+        <el-scrollbar class="sidebar-scroll">
+          <div v-if="conversationLoading" class="sidebar-loading">
+            <span>加载中...</span>
+          </div>
+          <template v-else>
+            <div
+              v-for="conversation in conversations"
+              :key="conversation.id"
+              class="conv-item"
+              :class="{ active: conversation.id === currentConversationId }"
+              @click="handleSelectConversation(conversation.id)"
+            >
+              <div class="conv-item-body">
+                <div class="conv-item-name">{{ conversation.name }}</div>
+                <div class="conv-item-time">{{ formatTime(conversation.updatedAt) }}</div>
               </div>
-              <el-empty
-                v-if="conversations.length === 0"
-                description="暂无历史对话"
-                :image-size="60"
-              />
-            </template>
-          </el-scrollbar>
-        </section>
+              <div class="conv-item-actions" @click.stop>
+                <el-popconfirm
+                  title="确认删除该会话？"
+                  confirm-button-text="删除"
+                  cancel-button-text="取消"
+                  @confirm="handleDeleteConversation(conversation.id)"
+                >
+                  <template #reference>
+                    <button
+                      class="conv-delete-btn"
+                      :class="{ loading: deletingConversationId === conversation.id }"
+                      @click.stop
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </button>
+                  </template>
+                </el-popconfirm>
+              </div>
+            </div>
+            <div v-if="conversations.length === 0" class="sidebar-empty">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                />
+              </svg>
+              <span>暂无历史对话</span>
+            </div>
+          </template>
+        </el-scrollbar>
       </aside>
 
-      <!-- ═══ Chat Main ═══ -->
+      <!-- ═══ Main ═══ -->
       <main class="chat-main">
-        <div class="chat-main-header">
-          <div class="main-header-left">
-            <span class="main-header-dot"></span>
-            <span class="main-header-title">
-              {{ currentConversation?.name || '新对话' }}
-            </span>
-            <span v-if="currentApp" class="main-header-app"> · {{ currentApp.appName }} </span>
-          </div>
-          <div v-if="!currentConversationId" class="main-header-status">
-            <span class="status-badge">NEW SESSION</span>
+        <!-- 顶部会话标题栏 -->
+        <div class="chat-topbar">
+          <div class="topbar-left">
+            <div class="topbar-title">{{ currentConversation?.name || '新对话' }}</div>
+            <div v-if="!currentConversationId" class="topbar-badge">NEW</div>
           </div>
         </div>
 
+        <!-- 消息区 -->
         <div class="message-panel">
           <el-scrollbar
             ref="messageScrollbarRef"
@@ -2030,40 +1726,39 @@ onBeforeUnmount(() => {
             @scroll="handleMessageScroll"
           >
             <div ref="messageListRef" class="message-scroll-inner">
-              <!-- ═══ 空状态：欢迎屏 + 提示词 ═══ -->
+              <!-- 欢迎屏 -->
               <div v-if="showWelcome" class="welcome-screen">
-                <!-- 背景装饰 -->
-                <div class="welcome-bg-grid"></div>
-                <div class="welcome-bg-glow"></div>
-
-                <div class="welcome-content">
-                  <!-- Logo + 标题 -->
-                  <div class="welcome-logo">
-                    <svg viewBox="0 0 48 48" fill="none" stroke="#0ea5e9" stroke-width="2">
-                      <path d="M24 4 L44 14 L44 34 L24 44 L4 34 L4 14 Z" />
-                      <path d="M24 4 L24 44 M4 14 L44 34 M44 14 L4 34" opacity="0.4" />
+                <div class="welcome-glow"></div>
+                <div class="welcome-body">
+                  <div class="welcome-icon">
+                    <svg viewBox="0 0 48 48" fill="none">
+                      <path
+                        d="M24 4 L44 14 L44 34 L24 44 L4 34 L4 14 Z"
+                        stroke="#0ea5e9"
+                        stroke-width="2"
+                      />
+                      <path
+                        d="M24 4 L24 44 M4 14 L44 34 M44 14 L4 34"
+                        stroke="#0ea5e9"
+                        stroke-width="1.5"
+                        opacity="0.35"
+                      />
                     </svg>
-                    <div class="welcome-logo-pulse"></div>
                   </div>
-
                   <h2 class="welcome-title">
-                    你好，<span class="welcome-title-accent">{{ displayName || '开发者' }}</span>
+                    你好，<span class="welcome-accent">{{ displayName || '开发者' }}</span>
                   </h2>
-                  <p class="welcome-subtitle">
-                    我是 AI Hub 智能助手，可以为你提供对话、分析、创作和代码生成等服务
-                  </p>
+                  <p class="welcome-sub">有什么我可以帮你的？</p>
 
-                  <!-- 提示词卡片 -->
                   <div class="prompt-grid">
                     <div
                       v-for="(item, idx) in promptSuggestions"
                       :key="idx"
                       class="prompt-card"
-                      :style="{ animationDelay: `${0.1 + idx * 0.06}s` }"
+                      :style="{ '--delay': `${idx * 0.07}s` }"
                       @click="handleUsePrompt(item.prompt)"
                     >
-                      <div class="prompt-icon-wrap" :class="`prompt-icon--${item.iconKey}`">
-                        <!-- spark -->
+                      <div class="prompt-icon" :class="`icon-${item.iconKey}`">
                         <svg
                           v-if="item.iconKey === 'spark'"
                           viewBox="0 0 24 24"
@@ -2071,13 +1766,11 @@ onBeforeUnmount(() => {
                           stroke="currentColor"
                           stroke-width="2"
                           stroke-linecap="round"
-                          stroke-linejoin="round"
                         >
                           <path
                             d="M12 2v6m0 8v6M4.93 4.93l4.24 4.24m5.66 5.66l4.24 4.24M2 12h6m8 0h6M4.93 19.07l4.24-4.24m5.66-5.66l4.24-4.24"
                           />
                         </svg>
-                        <!-- code -->
                         <svg
                           v-else-if="item.iconKey === 'code'"
                           viewBox="0 0 24 24"
@@ -2085,12 +1778,10 @@ onBeforeUnmount(() => {
                           stroke="currentColor"
                           stroke-width="2"
                           stroke-linecap="round"
-                          stroke-linejoin="round"
                         >
                           <polyline points="16 18 22 12 16 6" />
                           <polyline points="8 6 2 12 8 18" />
                         </svg>
-                        <!-- doc -->
                         <svg
                           v-else-if="item.iconKey === 'doc'"
                           viewBox="0 0 24 24"
@@ -2098,14 +1789,10 @@ onBeforeUnmount(() => {
                           stroke="currentColor"
                           stroke-width="2"
                           stroke-linecap="round"
-                          stroke-linejoin="round"
                         >
                           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                           <polyline points="14 2 14 8 20 8" />
-                          <line x1="16" y1="13" x2="8" y2="13" />
-                          <line x1="16" y1="17" x2="8" y2="17" />
                         </svg>
-                        <!-- idea -->
                         <svg
                           v-else
                           viewBox="0 0 24 24"
@@ -2113,201 +1800,265 @@ onBeforeUnmount(() => {
                           stroke="currentColor"
                           stroke-width="2"
                           stroke-linecap="round"
-                          stroke-linejoin="round"
                         >
                           <path
                             d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"
                           />
                         </svg>
                       </div>
-                      <div class="prompt-body">
+                      <div class="prompt-text">
                         <div class="prompt-title">{{ item.title }}</div>
                         <div class="prompt-desc">{{ item.description }}</div>
                       </div>
                       <svg
-                        class="prompt-arrow"
+                        class="prompt-chevron"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
                         stroke-width="2"
                       >
-                        <path d="M5 12h14M13 5l7 7-7 7" />
+                        <path d="M9 18l6-6-6-6" />
                       </svg>
                     </div>
-                  </div>
-
-                  <!-- 底部说明 -->
-                  <div class="welcome-hint">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="16" x2="12" y2="12" />
-                      <line x1="12" y1="8" x2="12.01" y2="8" />
-                    </svg>
-                    <span>在下方输入问题开始对话，支持文件上传与语音输入</span>
                   </div>
                 </div>
               </div>
 
-              <div v-else-if="messageLoading" class="tip-text">正在加载消息...</div>
+              <div v-else-if="messageLoading" class="state-tip">正在加载消息...</div>
 
               <template v-else>
                 <div class="message-list">
-                  <div
-                    v-for="message in messages"
-                    :key="message.id"
-                    class="message-row"
-                    :class="`role-${message.role}`"
-                  >
-                    <div v-if="message.role !== 'user'" class="message-avatar avatar-ai">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
-                        <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.5" />
-                      </svg>
-                    </div>
-                    <div v-else class="message-avatar avatar-user">
-                      {{ displayName ? displayName.charAt(0).toUpperCase() : 'U' }}
-                    </div>
-
-                    <div class="message-main">
-                      <div class="message-meta">
-                        <span class="message-meta-role">{{ roleLabel(message.role) }}</span>
-                        <span class="message-meta-time">{{ formatTime(message.createdAt) }}</span>
+                  <!-- 历史消息：过滤掉流式占位（isThinking:true 且 content/thought 均为空） -->
+                  <template v-for="message in messages" :key="message.id">
+                    <div
+                      v-if="
+                        !(
+                          message.role === 'assistant' &&
+                          message.isThinking &&
+                          !message.content &&
+                          !message.thought
+                        )
+                      "
+                      class="msg-row"
+                      :class="`role-${message.role}`"
+                    >
+                      <!-- Avatar -->
+                      <div
+                        class="msg-avatar"
+                        :class="message.role === 'user' ? 'avatar-user' : 'avatar-ai'"
+                      >
+                        <template v-if="message.role === 'user'">
+                          {{ displayName ? displayName.charAt(0).toUpperCase() : 'U' }}
+                        </template>
+                        <template v-else>
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+                            <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.4" />
+                          </svg>
+                        </template>
                       </div>
 
-                      <div class="message-bubble">
-                        <template v-if="message.role === 'assistant'">
-                          <details
-                            v-if="message.thought || message.isThinking"
-                            class="thought-panel"
-                            :open="isThoughtPanelOpen(message)"
-                          >
-                            <summary class="thought-summary">
-                              <span class="thinking-icon" :class="{ active: message.isThinking }">
-                                <svg viewBox="0 0 48 48" aria-hidden="true">
-                                  <circle class="ring ring-1" cx="24" cy="24" r="16" />
-                                  <circle class="ring ring-2" cx="24" cy="24" r="16" />
-                                  <circle class="ring ring-3" cx="24" cy="24" r="16" />
-                                  <circle class="ring ring-4" cx="24" cy="24" r="16" />
-                                  <path
-                                    class="star-core"
-                                    d="M24 13L27.4 20.6L35 24L27.4 27.4L24 35L20.6 27.4L13 24L20.6 20.6Z"
-                                  />
-                                </svg>
-                              </span>
-                              <span class="thought-summary-text">
-                                {{ message.isThinking ? '深度思考中...' : '查看思考过程' }}
-                              </span>
-                            </summary>
+                      <div class="msg-body">
+                        <div class="msg-meta">
+                          <span class="msg-role">{{ roleLabel(message.role) }}</span>
+                          <span class="msg-time">{{ formatTime(message.createdAt) }}</span>
+                        </div>
+
+                        <div class="msg-bubble" :class="{ 'bubble-user': message.role === 'user' }">
+                          <!-- AI 消息（历史） -->
+                          <template v-if="message.role === 'assistant'">
+                            <details
+                              v-if="message.thought || message.isThinking"
+                              class="thought-panel"
+                              :open="isThoughtPanelOpen(message)"
+                            >
+                              <summary class="thought-summary">
+                                <span
+                                  class="thinking-icon"
+                                  :class="{ spinning: message.isThinking }"
+                                >
+                                  <svg viewBox="0 0 48 48">
+                                    <circle class="ring ring-1" cx="24" cy="24" r="16" />
+                                    <circle class="ring ring-2" cx="24" cy="24" r="16" />
+                                    <circle class="ring ring-3" cx="24" cy="24" r="16" />
+                                    <circle class="ring ring-4" cx="24" cy="24" r="16" />
+                                    <path
+                                      class="star-core"
+                                      d="M24 13L27.4 20.6L35 24L27.4 27.4L24 35L20.6 27.4L13 24L20.6 20.6Z"
+                                    />
+                                  </svg>
+                                </span>
+                                <span>{{ message.isThinking ? '思考中...' : '查看思考过程' }}</span>
+                              </summary>
+                              <div
+                                class="thought-body"
+                                v-html="renderMarkdown(message.thought || '')"
+                              ></div>
+                            </details>
 
                             <div
-                              class="thought-content"
-                              v-html="renderMarkdown(message.thought || '正在组织思路...')"
+                              v-if="message.content"
+                              class="ai-content"
+                              v-html="renderMarkdown(message.content)"
                             ></div>
-                          </details>
 
-                          <div
-                            v-if="message.content"
-                            class="assistant-content"
-                            :class="{
-                              'assistant-content-transitioning': isThoughtSettling(message.id)
-                            }"
-                            v-html="renderMarkdown(message.content)"
-                          ></div>
-
-                          <div
-                            v-if="message.backendMessageId && !message.isThinking"
-                            class="assistant-action-row"
-                          >
-                            <div class="feedback-actions">
-                              <!-- Like 按钮 -->
-                              <el-button
-                                text
-                                size="small"
-                                class="feedback-btn like"
-                                :class="{ active: getFeedbackValue(message) === 'like' }"
-                                @click="handleFeedback(message, 'like')"
-                              >
-                                <el-icon :size="16">
-                                  <!-- 这里是大拇指向上 SVG -->
+                            <div
+                              v-if="message.backendMessageId && !message.isThinking"
+                              class="msg-actions"
+                            >
+                              <div class="feedback-row">
+                                <button
+                                  class="feedback-btn"
+                                  :class="{ active: getFeedbackValue(message) === 'like' }"
+                                  @click="handleFeedback(message, 'like')"
+                                >
                                   <svg
                                     viewBox="0 0 24 24"
                                     fill="none"
                                     stroke="currentColor"
                                     stroke-width="2"
                                     stroke-linecap="round"
-                                    stroke-linejoin="round"
                                   >
                                     <path
                                       d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"
                                     />
                                   </svg>
-                                </el-icon>
-                                <span class="btn-text">赞</span>
-                              </el-button>
-
-                              <!-- Dislike 按钮 -->
-                              <el-button
-                                text
-                                size="small"
-                                class="feedback-btn dislike"
-                                :class="{ active: getFeedbackValue(message) === 'dislike' }"
-                                @click="handleFeedback(message, 'dislike')"
-                              >
-                                <el-icon :size="16">
-                                  <!-- 这里是大拇指向下 SVG -->
+                                  <span>有帮助</span>
+                                </button>
+                                <button
+                                  class="feedback-btn"
+                                  :class="{
+                                    active: getFeedbackValue(message) === 'dislike',
+                                    dislike: true
+                                  }"
+                                  @click="handleFeedback(message, 'dislike')"
+                                >
                                   <svg
                                     viewBox="0 0 24 24"
                                     fill="none"
                                     stroke="currentColor"
                                     stroke-width="2"
                                     stroke-linecap="round"
-                                    stroke-linejoin="round"
                                   >
                                     <path
                                       d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"
                                     />
                                   </svg>
-                                </el-icon>
-                                <span class="btn-text">踩</span>
-                              </el-button>
-                            </div>
-
-                            <div
-                              v-if="getSuggestedQuestions(message).length > 0"
-                              class="suggested-question-list"
-                            >
-                              <button
-                                v-for="question in getSuggestedQuestions(message)"
-                                :key="`${message.id}-${question}`"
-                                type="button"
-                                class="suggested-question-chip"
-                                @click="handlePickSuggestedQuestion(question)"
+                                  <span>没帮助</span>
+                                </button>
+                              </div>
+                              <div
+                                v-if="getSuggestedQuestions(message).length > 0"
+                                class="suggested-list"
                               >
-                                {{ question }}
-                              </button>
+                                <button
+                                  v-for="q in getSuggestedQuestions(message)"
+                                  :key="`${message.id}-${q}`"
+                                  class="suggested-chip"
+                                  @click="handlePickSuggestedQuestion(q)"
+                                  >{{ q }}</button
+                                >
+                              </div>
                             </div>
-                          </div>
-                        </template>
+                          </template>
 
-                        <template v-else>
-                          <div
-                            v-if="message.role === 'user' && message.fileReferences?.length"
-                            class="user-file-reference-list"
-                          >
-                            <div
-                              v-for="fileRef in message.fileReferences"
-                              :key="fileRef.id"
-                              class="user-file-reference-chip"
-                              :title="`${fileRef.name}${fileRef.extension ? `.${fileRef.extension}` : ''}`"
-                            >
-                              <span class="user-file-reference-name">{{ fileRef.name }}</span>
-                              <span v-if="fileRef.extension" class="user-file-reference-ext">
-                                .{{ fileRef.extension }}
-                              </span>
+                          <!-- 用户消息 -->
+                          <template v-else>
+                            <div v-if="message.fileReferences?.length" class="file-ref-list">
+                              <div
+                                v-for="fileRef in message.fileReferences"
+                                :key="fileRef.id"
+                                class="file-ref-chip"
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="2"
+                                >
+                                  <path
+                                    d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                                  />
+                                  <polyline points="14 2 14 8 20 8" />
+                                </svg>
+                                <span
+                                  >{{ fileRef.name
+                                  }}{{ fileRef.extension ? `.${fileRef.extension}` : '' }}</span
+                                >
+                              </div>
                             </div>
-                          </div>
-                          <div class="plain-content">{{ message.content }}</div>
-                        </template>
+                            <div class="user-text">{{ message.content }}</div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- ══ 流式草稿气泡（完全独立，不在 v-for 内，不受 store 更新影响） ══ -->
+                  <div v-if="streamingDraft" ref="draftRef" class="msg-row role-assistant">
+                    <div class="msg-avatar avatar-ai">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2 L22 7 L22 17 L12 22 L2 17 L2 7 Z" />
+                        <path d="M12 2 L12 22 M2 7 L22 17 M22 7 L2 17" opacity="0.4" />
+                      </svg>
+                    </div>
+                    <div class="msg-body">
+                      <div class="msg-meta">
+                        <span class="msg-role">AI</span>
+                      </div>
+                      <div class="msg-bubble">
+                        <!-- 思维链 -->
+                        <details
+                          v-if="streamingDraft.thought || streamingDraft.isThinking"
+                          class="thought-panel"
+                          :open="streamingDraft.thoughtOpen || streamingDraft.isThinking"
+                        >
+                          <summary class="thought-summary">
+                            <span
+                              class="thinking-icon"
+                              :class="{ spinning: streamingDraft.isThinking }"
+                            >
+                              <svg viewBox="0 0 48 48">
+                                <circle class="ring ring-1" cx="24" cy="24" r="16" />
+                                <circle class="ring ring-2" cx="24" cy="24" r="16" />
+                                <circle class="ring ring-3" cx="24" cy="24" r="16" />
+                                <circle class="ring ring-4" cx="24" cy="24" r="16" />
+                                <path
+                                  class="star-core"
+                                  d="M24 13L27.4 20.6L35 24L27.4 27.4L24 35L20.6 27.4L13 24L20.6 20.6Z"
+                                />
+                              </svg>
+                            </span>
+                            <span>{{
+                              streamingDraft.isThinking ? '思考中...' : '查看思考过程'
+                            }}</span>
+                          </summary>
+                          <div class="thought-body" v-html="draftThoughtHtml"></div>
+                        </details>
+
+                        <!-- 正文（思维链结束前不显示，避免空块闪烁） -->
+                        <div
+                          v-if="streamingDraft.content"
+                          class="ai-content"
+                          v-html="draftContentHtml"
+                        ></div>
+
+                        <!-- 纯等待状态（还没有任何内容） -->
+                        <div
+                          v-if="
+                            !streamingDraft.thought &&
+                            !streamingDraft.content &&
+                            streamingDraft.isThinking
+                          "
+                          class="draft-waiting"
+                        >
+                          <span></span><span></span><span></span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2317,81 +2068,96 @@ onBeforeUnmount(() => {
           </el-scrollbar>
         </div>
 
-        <!-- ═══ Input Panel ═══ -->
+        <!-- ═══ 输入区 ═══ -->
         <div class="input-panel">
           <input
             ref="fileInputRef"
-            class="hidden-file-input"
+            class="hidden-input"
             type="file"
             multiple
             accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.bmp,.mp3,.wav,.m4a,.mp4"
             @change="handleFileInputChange"
           />
 
-          <div v-if="uploadedFiles.length > 0" class="uploaded-file-list">
-            <div v-for="file in uploadedFiles" :key="file.fileId" class="file-chip">
-              <svg
-                class="file-chip-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
-              <span class="file-chip-name">{{ file.fileName }}</span>
-              <el-button text class="file-chip-remove" @click="removeUploadedFile(file.fileId)">
-                <el-icon><Close /></el-icon>
-              </el-button>
+          <div class="input-box">
+            <!-- 已上传文件 -->
+            <div v-if="uploadedFiles.length > 0" class="file-chips">
+              <div v-for="file in uploadedFiles" :key="file.fileId" class="file-chip">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                <span>{{ file.fileName }}</span>
+                <button class="chip-remove" @click="removeUploadedFile(file.fileId)">
+                  <el-icon><Close /></el-icon>
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div class="input-wrapper">
+            <!-- 文本输入 -->
             <el-input
               v-model="inputValue"
               type="textarea"
               :rows="3"
               resize="none"
-              placeholder="输入问题，Enter 发送，Shift+Enter 换行"
+              placeholder="输入消息…"
               @keydown="handleInputKeydown"
             />
-          </div>
 
-          <div class="input-actions">
-            <div class="input-actions-left">
-              <el-button text :loading="uploadLoading" @click="triggerFileSelect">
-                <el-icon><Paperclip /></el-icon>
-                上传文件
-              </el-button>
-
-              <el-button
-                v-if="canUseVoice"
-                text
-                :type="isRecording ? 'danger' : undefined"
-                :loading="audioRecognizing"
-                @mousedown.prevent="startVoiceInput"
-                @mouseup.prevent="stopVoiceInput"
-                @mouseleave.prevent="stopVoiceInput"
-                @touchstart.prevent="startVoiceInput"
-                @touchend.prevent="stopVoiceInput"
-              >
-                <el-icon><Microphone /></el-icon>
-                {{ isRecording ? '松开结束录音' : audioRecognizing ? '语音识别中' : '按住说话' }}
-              </el-button>
-            </div>
-
-            <div class="input-actions-right">
-              <span class="input-hint-text">Enter 发送 · Shift+Enter 换行</span>
-              <el-button
-                :type="isGenerating ? 'danger' : 'primary'"
-                class="send-btn"
-                :loading="isGenerating ? stopLoading : false"
-                :disabled="isGenerating ? !canStop : !canSend"
-                @click="isGenerating ? handleStopGeneration() : handleSend()"
-              >
-                {{ isGenerating ? '生成中...' : '发送' }}
-              </el-button>
+            <!-- 操作栏 -->
+            <div class="input-toolbar">
+              <div class="toolbar-left">
+                <button
+                  class="tool-btn"
+                  :class="{ loading: uploadLoading }"
+                  title="上传文件"
+                  @click="triggerFileSelect"
+                >
+                  <el-icon><Paperclip /></el-icon>
+                </button>
+                <button
+                  v-if="canUseVoice"
+                  class="tool-btn"
+                  :class="{ recording: isRecording, loading: audioRecognizing }"
+                  :title="isRecording ? '松开结束' : '按住说话'"
+                  @mousedown.prevent="startVoiceInput"
+                  @mouseup.prevent="stopVoiceInput"
+                  @mouseleave.prevent="stopVoiceInput"
+                  @touchstart.prevent="startVoiceInput"
+                  @touchend.prevent="stopVoiceInput"
+                >
+                  <el-icon><Microphone /></el-icon>
+                </button>
+                <span v-if="isRecording" class="recording-hint">录音中，松开结束</span>
+                <span v-else-if="audioRecognizing" class="recording-hint">识别中...</span>
+              </div>
+              <div class="toolbar-right">
+                <span class="input-hint">Enter 发送 · Shift+Enter 换行</span>
+                <button
+                  v-if="isGenerating"
+                  class="send-btn stop"
+                  :disabled="!canStop"
+                  @click="handleStopGeneration"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                    <rect x="4" y="4" width="16" height="16" rx="2" />
+                  </svg>
+                  停止
+                </button>
+                <button v-else class="send-btn" :disabled="!canSend" @click="handleSend">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    width="14"
+                    height="14"
+                  >
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+                  </svg>
+                  发送
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -2401,21 +2167,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-@keyframes onlinePulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
 
-  50% {
-    opacity: 0.5;
-  }
-}
 
-@keyframes welcomeFadeIn {
+/* ═══════════════════════════════
+   Welcome Screen
+═══════════════════════════════ */
+@keyframes fadeUp {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(16px);
   }
 
   to {
@@ -2424,34 +2184,10 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes logoFloat {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-4px);
-  }
-}
-
-@keyframes logoPulse {
-  0%,
-  100% {
-    opacity: 0.6;
-    transform: scale(0.8);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.2);
-  }
-}
-
-@keyframes cardFadeIn {
+@keyframes cardIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
 
   to {
@@ -2460,23 +2196,20 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes thumbs-up-pop {
-  0% {
-    transform: scale(1);
+@keyframes iconFloat {
+  0%,
+  100% {
+    transform: translateY(0);
   }
 
   50% {
-    transform: scale(1.3) rotate(-10deg);
-  }
-
-  100% {
-    transform: scale(1);
+    transform: translateY(-5px);
   }
 }
 
-/* ═══════════════════════════════════════════════════
- * Keyframes
- * ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════
+   Thought Panel
+═══════════════════════════════ */
 @keyframes orbit {
   from {
     transform: rotate(0deg);
@@ -2490,902 +2223,395 @@ onBeforeUnmount(() => {
 @keyframes breathe {
   0%,
   100% {
-    opacity: 0.92;
-    transform: scale(0.85);
+    opacity: 0.85;
+    transform: scale(0.82);
   }
 
   50% {
     opacity: 1;
-    transform: scale(1.05);
+    transform: scale(1.08);
   }
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
+@keyframes pulse-red {
+  0%,
+  100% {
+    box-shadow: none;
   }
 
-  to {
-    opacity: 1;
+  50% {
+    box-shadow: 0 0 0 4px rgb(239 68 68 / 15%);
+  }
+}
+
+/* 草稿等待动画（三个点） */
+@keyframes dot-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.4;
     transform: translateY(0);
   }
-}
 
-/* 窄屏下隐藏副标题 */
-@media (width <= 720px) {
-  .back-button {
-    padding: 6px 14px 6px 10px;
-    gap: 8px;
-  }
-
-  .back-button-sub {
-    display: none;
-  }
-
-  .back-button-icon {
-    width: 22px;
-    height: 22px;
+  40% {
+    opacity: 1;
+    transform: translateY(-5px);
   }
 }
 
-/* 极窄屏下只保留图标 */
-@media (width <= 520px) {
-  .back-button-text {
-    display: none;
-  }
-
-  .back-button {
-    padding: 6px;
-  }
-}
-
-@media (width <= 720px) {
+@media (width <= 600px) {
   .prompt-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (width <= 960px) {
-  .input-hint-text {
+@media (width <= 680px) {
+  .input-hint {
     display: none;
-  }
-
-  .input-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .input-actions-left {
-    justify-content: flex-start;
-  }
-
-  .input-actions-right {
-    width: 100%;
-    justify-content: flex-end;
-  }
-
-  .send-btn {
-    width: 100%;
   }
 }
 
 .chat-page {
+  --sky: #0ea5e9;
+  --sky-dark: #0284c7;
+  --sky-light: #e0f2fe;
+  --sky-pale: #f0f9ff;
+  --slate-900: #0f172a;
+  --slate-700: #334155;
+  --slate-500: #64748b;
+  --slate-400: #94a3b8;
+  --slate-200: #e2e8f0;
+  --slate-100: #f1f5f9;
+  --slate-50: #f8fafc;
+  --white: #fff;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 3px rgb(15 23 42 / 6%);
+  --shadow-md: 0 4px 12px rgb(15 23 42 / 8%);
+
   display: flex;
   width: 100%;
-  height: calc(100dvh - 104px);
-  min-height: 0;
+  height: 100dvh;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', sans-serif;
-  background: #f1f5f9;
+  background: var(--slate-100);
   flex-direction: column;
 }
 
-/* ═══════════════════════════════════════════════════
- * Top Header - 科技感极简顶栏
- * ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════
+   Header
+═══════════════════════════════ */
 .chat-header {
-  position: relative;
   display: flex;
-  height: 56px;
-  padding: 0 20px;
-  background: #fff;
-  border-bottom: 1px solid #e2e8f0;
-  box-shadow: 0 1px 3px rgb(15 23 42 / 4%);
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  height: 64px;
+  padding: 0 20px;
+  background: var(--white);
+  border-bottom: 1px solid var(--slate-200);
   flex-shrink: 0;
+  gap: 16px;
 }
 
-/* 顶部青色装饰细线 */
-.header-accent-line {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgb(14 165 233 / 30%) 30%,
-    rgb(14 165 233 / 50%) 50%,
-    rgb(14 165 233 / 30%) 70%,
-    transparent 100%
-  );
+.header-left,
+.header-right {
+  min-width: 120px;
 }
 
-/* ═══════════════════════════════════════════════════
- * Back Button - 显眼的返回管理后台按钮
- * ═══════════════════════════════════════════════════ */
-.back-button {
-  position: relative;
+.header-right {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.back-btn {
   display: inline-flex;
-  padding: 6px 16px 6px 12px;
-  overflow: hidden;
-  font-family: inherit;
-  cursor: pointer;
-  background: linear-gradient(135deg, rgb(14 165 233 / 8%) 0%, rgb(56 189 248 / 4%) 100%);
-  border: 1px solid rgb(14 165 233 / 25%);
-  border-radius: 999px;
-  outline: none;
-  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   align-items: center;
-  gap: 10px;
-}
-
-/* 左侧青色指示条 */
-.back-button::before {
-  position: absolute;
-  top: 20%;
-  bottom: 20%;
-  left: 0;
-  width: 2px;
-  background: #0ea5e9;
-  border-radius: 0 2px 2px 0;
-  content: '';
-  box-shadow: 0 0 6px rgb(14 165 233 / 60%);
-  transition: all 0.22s ease;
-}
-
-/* 内部流光条（hover 时出现） */
-.back-button::after {
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 60%;
-  height: 100%;
-  pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgb(56 189 248 / 15%), transparent);
-  content: '';
-  transform: skewX(-20deg);
-  transition: left 0.6s ease;
-}
-
-.back-button:hover {
-  background: linear-gradient(135deg, rgb(14 165 233 / 14%) 0%, rgb(56 189 248 / 8%) 100%);
-  border-color: rgb(14 165 233 / 50%);
-  transform: translateX(-2px);
-  box-shadow:
-    0 4px 14px rgb(14 165 233 / 18%),
-    0 0 0 3px rgb(14 165 233 / 8%);
-}
-
-.back-button:hover::before {
-  top: 10%;
-  bottom: 10%;
-  background: #38bdf8;
-  box-shadow: 0 0 10px rgb(56 189 248 / 80%);
-}
-
-.back-button:hover::after {
-  left: 120%;
-}
-
-.back-button:active {
-  transform: translateX(-2px) scale(0.98);
-}
-
-.back-button:focus-visible {
-  box-shadow:
-    0 0 0 3px rgb(14 165 233 / 25%),
-    0 4px 14px rgb(14 165 233 / 20%);
-}
-
-/* 箭头图标 */
-.back-button-icon {
-  display: inline-flex;
-  width: 26px;
-  height: 26px;
-  color: #0ea5e9;
-  background: #fff;
-  border: 1px solid rgb(14 165 233 / 30%);
-  border-radius: 50%;
-  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.back-button-icon svg {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.back-button:hover .back-button-icon {
-  color: #fff;
-  background: linear-gradient(135deg, #0ea5e9, #38bdf8);
-  border-color: transparent;
-  box-shadow: 0 2px 8px rgb(14 165 233 / 40%);
-}
-
-.back-button:hover .back-button-icon svg {
-  transform: translateX(-3px);
-}
-
-/* 文字区 */
-.back-button-text {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  line-height: 1;
-}
-
-.back-button-label {
+  gap: 4px;
+  padding: 6px 12px !important;
   font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: #0369a1;
+  font-weight: 500;
+  color: var(--slate-500) !important;
+  border-radius: var(--radius-md) !important;
+  transition: all 0.18s;
 }
 
-.back-button-sub {
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  color: #0ea5e9;
-  opacity: 0.7;
+.back-btn:hover {
+  color: var(--sky) !important;
+  background: var(--sky-pale) !important;
 }
 
 .header-center {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  justify-content: flex-start;
-}
-
-.header-left {
-  display: inline-flex;
-  min-width: 150px;
-  align-items: center;
-}
-
-.header-back-btn {
-  padding: 0;
-}
-
-.app-header-center {
-  min-width: 0;
-  justify-content: center;
+  gap: 12px;
   flex: 1;
+  justify-content: center;
+  min-width: 0;
 }
 
-.header-app-avatar,
-.header-app-fallback {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+.app-avatar-wrap {
   flex-shrink: 0;
 }
 
-.header-app-avatar {
+.app-avatar-img,
+.app-avatar-fallback {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+}
+
+.app-avatar-img {
   object-fit: cover;
 }
 
-.header-app-fallback {
-  display: inline-flex;
-  font-size: 15px;
-  font-weight: 700;
-  color: #fff;
-  background: #0ea5e9;
+.app-avatar-fallback {
+  display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--white);
+  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
 }
 
-.header-app-meta {
+.app-info {
   min-width: 0;
+  text-align: center;
 }
 
-.header-app-name {
+.app-name {
   overflow: hidden;
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--slate-900);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header-app-desc {
+.app-desc {
+  max-width: 360px;
+  margin-top: 2px;
   overflow: hidden;
   font-size: 12px;
-  color: #64748b;
+  color: var(--slate-400);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header-icon {
-  filter: drop-shadow(0 0 6px rgb(14 165 233 / 40%));
-}
-
-.header-title-text {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #0f172a;
-}
-
-.header-user {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 12px;
-  background: rgb(14 165 233 / 6%);
-  border: 1px solid rgb(14 165 233 / 15%);
-  border-radius: 999px;
-}
-
-.user-online-dot {
-  width: 6px;
-  height: 6px;
-  background: #10b981;
-  border-radius: 50%;
-  box-shadow: 0 0 5px rgb(16 185 129 / 60%);
-  animation: onlinePulse 2.5s ease-in-out infinite;
-}
-
-.user-display-name {
-  font-size: 12px;
-  font-weight: 500;
-  color: #0369a1;
-}
-
-/* ═══════════════════════════════════════════════════
- * Body
- * ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════
+   Body
+═══════════════════════════════ */
 .chat-body {
   display: flex;
-  min-height: 0;
   flex: 1;
+  min-height: 0;
 }
 
-/* ═══════════════════════════════════════════════════
- * Sidebar - 浅色但带品牌感
- * ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════
+   Sidebar
+═══════════════════════════════ */
 .chat-sidebar {
   display: flex;
-  width: 280px;
-  background: #fff;
-  border-right: 1px solid #e2e8f0;
   flex-direction: column;
+  width: 260px;
+  background: var(--white);
+  border-right: 1px solid var(--slate-200);
   flex-shrink: 0;
 }
 
-.sidebar-section {
+.sidebar-header {
   display: flex;
-  min-height: 0;
-  flex-direction: column;
-}
-
-.app-section {
-  height: 42%;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.conversation-section {
-  flex: 1;
-}
-
-.section-header {
-  display: flex;
-  height: 44px;
-  padding: 0 14px;
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
   align-items: center;
   justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--slate-200);
   flex-shrink: 0;
 }
 
-.section-title {
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 10px;
+.sidebar-title {
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  color: #64748b;
+  letter-spacing: 0.08em;
+  color: var(--slate-400);
   text-transform: uppercase;
 }
 
-.section-action {
-  font-size: 12px;
-  color: #64748b !important;
-}
-
-.section-action :deep(.el-icon) {
-  margin-right: 2px;
-}
-
-.section-action.new-btn :deep(span + span) {
-  margin-left: 2px;
-}
-
-:deep(.section-action.is-text:not(.is-disabled):hover) {
-  color: #0ea5e9 !important;
-  background: rgb(14 165 233 / 8%) !important;
-}
-
-.section-scroll {
-  flex: 1;
-  min-height: 0;
-  padding: 6px 8px;
-}
-
-/* ── App Item ── */
-.app-item {
-  position: relative;
-  display: flex;
-  padding: 10px 12px;
-  margin-bottom: 3px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  align-items: center;
-  gap: 10px;
-}
-
-.app-item-indicator {
-  width: 3px;
-  height: 26px;
-  background: #cbd5e1;
-  border-radius: 2px;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.app-item:hover {
-  background: #f1f5f9;
-}
-
-.app-item:hover .app-item-indicator {
-  background: #0ea5e9;
-}
-
-.app-item.active {
-  background: linear-gradient(90deg, rgb(14 165 233 / 10%), rgb(14 165 233 / 2%));
-  border-color: rgb(14 165 233 / 25%);
-}
-
-.app-item.active .app-item-indicator {
-  background: #0ea5e9;
-  box-shadow: 0 0 6px rgb(14 165 233 / 50%);
-}
-
-.app-item-body {
-  flex: 1;
-  min-width: 0;
-}
-
-/* ── Conversation Item ── */
-.conversation-item {
-  position: relative;
-  display: flex;
-  padding: 10px 12px;
-  padding-right: 36px;
-  margin-bottom: 3px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.conv-icon {
-  display: flex;
-  width: 28px;
-  height: 28px;
-  color: #64748b;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 7px;
-  transition: all 0.2s ease;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.conv-icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.conversation-item:hover {
-  background: #f1f5f9;
-}
-
-.conversation-item:hover .conv-icon {
-  color: #0ea5e9;
-  background: rgb(14 165 233 / 8%);
-  border-color: rgb(14 165 233 / 20%);
-}
-
-.conversation-item.active {
-  background: linear-gradient(90deg, rgb(14 165 233 / 10%), rgb(14 165 233 / 2%));
-  border-color: rgb(14 165 233 / 25%);
-}
-
-.conversation-item.active .conv-icon {
-  color: #0ea5e9;
-  background: rgb(14 165 233 / 12%);
-  border-color: rgb(14 165 233 / 30%);
-}
-
-.conv-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.conversation-action {
-  position: absolute;
-  top: 8px;
-  right: 6px;
-  opacity: 0;
-  transition: opacity 0.18s ease;
-}
-
-.conversation-item:hover .conversation-action,
-.conversation-item.active .conversation-action {
-  opacity: 1;
-}
-
-.conversation-delete-btn {
-  padding: 4px;
-}
-
-.item-title {
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.3;
-  color: #334155;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.app-item.active .item-title,
-.conversation-item.active .item-title {
-  color: #0369a1;
-}
-
-.item-sub {
-  margin-top: 3px;
-  overflow: hidden;
-  font-size: 11px;
-  color: #94a3b8;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ═══════════════════════════════════════════════════
- * Chat Main
- * ═══════════════════════════════════════════════════ */
-.chat-main {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  background: #f8fafc;
-  flex: 1;
-  flex-direction: column;
-}
-
-.chat-main-header {
-  display: flex;
-  height: 46px;
-  padding: 0 24px;
-  background: #fff;
-  border-bottom: 1px solid #e2e8f0;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-}
-
-.main-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.main-header-dot {
-  width: 6px;
-  height: 6px;
-  background: #0ea5e9;
-  border-radius: 50%;
-  box-shadow: 0 0 6px rgb(14 165 233 / 50%);
-  flex-shrink: 0;
-}
-
-.main-header-title {
-  overflow: hidden;
-  font-size: 14px;
-  font-weight: 600;
-  color: #0f172a;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.main-header-app {
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.status-badge {
-  padding: 3px 10px;
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 10px;
-  letter-spacing: 0.15em;
-  color: #0ea5e9;
-  background: rgb(14 165 233 / 8%);
-  border: 1px solid rgb(14 165 233 / 20%);
-  border-radius: 4px;
-}
-
-/* ═══════════════════════════════════════════════════
- * Welcome Screen - 新对话空状态欢迎屏
- * ═══════════════════════════════════════════════════ */
-.welcome-screen {
-  position: relative;
-  display: flex;
-  min-height: 100%;
-  padding: 40px 24px;
-  overflow: hidden;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 超大浅色网格背景 */
-.welcome-bg-grid {
-  position: absolute;
-  pointer-events: none;
-  background-image: linear-gradient(rgb(14 165 233 / 5%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(14 165 233 / 5%) 1px, transparent 1px);
-  background-size: 40px 40px;
-  inset: 0;
-  mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
-}
-
-.welcome-bg-glow {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 500px;
-  height: 500px;
-  pointer-events: none;
-  background: radial-gradient(circle, rgb(14 165 233 / 10%) 0%, transparent 70%);
-  filter: blur(40px);
-  transform: translate(-50%, -50%);
-}
-
-.welcome-content {
-  position: relative;
-  z-index: 2;
-  width: 100%;
-  max-width: 720px;
-  text-align: center;
-  animation: welcomeFadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.welcome-logo {
-  position: relative;
-  display: flex;
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 24px;
-  align-items: center;
-  justify-content: center;
-}
-
-.welcome-logo svg {
-  position: relative;
-  z-index: 1;
-  width: 48px;
-  height: 48px;
-  filter: drop-shadow(0 0 12px rgb(14 165 233 / 50%));
-  animation: logoFloat 4s ease-in-out infinite;
-}
-
-.welcome-logo-pulse {
-  position: absolute;
-  width: 64px;
-  height: 64px;
-  background: radial-gradient(circle, rgb(14 165 233 / 30%) 0%, transparent 70%);
-  border-radius: 50%;
-  animation: logoPulse 3s ease-in-out infinite;
-}
-
-.welcome-title {
-  margin-bottom: 8px;
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #0f172a;
-}
-
-.welcome-title-accent {
-  background: linear-gradient(135deg, #0ea5e9 0%, #22d3ee 50%, #38bdf8 100%);
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.welcome-subtitle {
-  max-width: 480px;
-  margin-right: auto;
-  margin-bottom: 32px;
-  margin-left: auto;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #64748b;
-}
-
-/* ── 提示词网格 ── */
-.prompt-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-  margin-bottom: 28px;
-  text-align: left;
-}
-
-.prompt-card {
-  position: relative;
-  display: flex;
-  padding: 14px 16px;
-  cursor: pointer;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  opacity: 0;
-  animation: cardFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  transition: all 0.25s ease;
-  align-items: center;
-  gap: 12px;
-}
-
-.prompt-card::before {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #0ea5e9, transparent);
-  border-radius: 12px 12px 0 0;
-  content: '';
-  opacity: 0;
-  transition: opacity 0.25s;
-}
-
-.prompt-card:hover {
-  border-color: #0ea5e9;
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgb(14 165 233 / 12%);
-}
-
-.prompt-card:hover::before {
-  opacity: 1;
-}
-
-.prompt-icon-wrap {
-  display: flex;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  transition: all 0.25s ease;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.prompt-icon-wrap svg {
-  width: 18px;
-  height: 18px;
-}
-
-.prompt-icon--spark {
-  color: #0ea5e9;
-  background: linear-gradient(135deg, rgb(14 165 233 / 10%), rgb(56 189 248 / 5%));
-  border: 1px solid rgb(14 165 233 / 20%);
-}
-
-.prompt-icon--code {
-  color: #0891b2;
-  background: linear-gradient(135deg, rgb(34 211 238 / 10%), rgb(103 232 249 / 5%));
-  border: 1px solid rgb(34 211 238 / 20%);
-}
-
-.prompt-icon--doc {
-  color: #059669;
-  background: linear-gradient(135deg, rgb(16 185 129 / 10%), rgb(52 211 153 / 5%));
-  border: 1px solid rgb(16 185 129 / 20%);
-}
-
-.prompt-icon--idea {
-  color: #d97706;
-  background: linear-gradient(135deg, rgb(245 158 11 / 10%), rgb(251 191 36 / 5%));
-  border: 1px solid rgb(245 158 11 / 20%);
-}
-
-.prompt-card:hover .prompt-icon-wrap {
-  transform: scale(1.05);
-}
-
-.prompt-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.prompt-title {
-  margin-bottom: 2px;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: #0f172a;
-}
-
-.prompt-desc {
-  font-size: 12px;
-  line-height: 1.5;
-  color: #64748b;
-}
-
-.prompt-arrow {
-  width: 16px;
-  height: 16px;
-  color: #cbd5e1;
-  flex-shrink: 0;
-  transition: all 0.25s ease;
-}
-
-.prompt-card:hover .prompt-arrow {
-  color: #0ea5e9;
-  transform: translateX(3px);
-}
-
-/* 底部说明 */
-.welcome-hint {
+.new-chat-btn {
   display: inline-flex;
-  padding: 8px 14px;
+  padding: 5px 10px;
   font-size: 12px;
-  color: #64748b;
-  background: rgb(14 165 233 / 4%);
-  border: 1px solid rgb(14 165 233 / 12%);
-  border-radius: 999px;
+  font-weight: 500;
+  color: var(--sky);
+  cursor: pointer;
+  background: var(--sky-pale);
+  border: 1px solid rgb(14 165 233 / 20%);
+  border-radius: var(--radius-md);
+  transition: all 0.18s;
+  align-items: center;
+  gap: 4px;
+}
+
+.new-chat-btn:hover {
+  background: var(--sky-light);
+  border-color: rgb(14 165 233 / 40%);
+}
+
+.sidebar-scroll {
+  flex: 1;
+  padding: 8px;
+}
+
+.sidebar-loading,
+.sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  font-size: 13px;
+  color: var(--slate-400);
+}
+
+.sidebar-empty svg {
+  width: 32px;
+  height: 32px;
+  opacity: 0.4;
+}
+
+/* 会话条目 */
+.conv-item {
+  display: flex;
+  padding: 10px 10px 10px 12px;
+  margin-bottom: 2px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: background 0.15s;
   align-items: center;
   gap: 8px;
 }
 
-.welcome-hint svg {
-  width: 14px;
-  height: 14px;
-  color: #0ea5e9;
+.conv-item:hover {
+  background: var(--slate-100);
 }
 
-/* ═══════════════════════════════════════════════════
- * Message Panel
- * ═══════════════════════════════════════════════════ */
+.conv-item.active {
+  background: var(--sky-pale);
+  border-color: rgb(14 165 233 / 20%);
+}
+
+.conv-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.conv-item-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--slate-700);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conv-item.active .conv-item-name {
+  color: var(--sky-dark);
+}
+
+.conv-item-time {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--slate-400);
+}
+
+.conv-item-actions {
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.conv-item:hover .conv-item-actions,
+.conv-item.active .conv-item-actions {
+  opacity: 1;
+}
+
+.conv-delete-btn {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  color: var(--slate-400);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  transition: all 0.15s;
+  align-items: center;
+  justify-content: center;
+}
+
+.conv-delete-btn:hover {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+/* ═══════════════════════════════
+   Chat Main
+═══════════════════════════════ */
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--slate-50);
+}
+
+.chat-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 24px;
+  background: var(--white);
+  border-bottom: 1px solid var(--slate-200);
+  flex-shrink: 0;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar-title {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--slate-700);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-badge {
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--sky);
+  white-space: nowrap;
+  background: var(--sky-pale);
+  border: 1px solid rgb(14 165 233 / 25%);
+  border-radius: 4px;
+}
+
+/* ═══════════════════════════════
+   Message Panel
+═══════════════════════════════ */
 .message-panel {
   flex: 1;
   min-height: 0;
@@ -3397,52 +2623,221 @@ onBeforeUnmount(() => {
 }
 
 .message-scroll-inner {
+  display: flex;
+  flex-direction: column;
   min-height: 100%;
 }
 
-.message-list {
+.welcome-screen {
+  position: relative;
   display: flex;
-  max-width: 960px;
-  padding: 24px 24px 8px;
-  margin: 0 auto;
-  flex-direction: column;
-  gap: 20px;
+  padding: 48px 24px;
+  overflow: hidden;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
 }
 
-/* ═══════════════════════════════════════════════════
- * Message Row
- * ═══════════════════════════════════════════════════ */
-.message-row {
+.welcome-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 400px;
+  pointer-events: none;
+  background: radial-gradient(ellipse, rgb(14 165 233 / 7%) 0%, transparent 70%);
+  transform: translate(-50%, -50%);
+}
+
+.welcome-body {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 680px;
+  text-align: center;
+  animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.welcome-icon {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 20px;
+  animation: iconFloat 4s ease-in-out infinite;
+}
+
+.welcome-icon svg {
+  width: 52px;
+  height: 52px;
+  filter: drop-shadow(0 0 10px rgb(14 165 233 / 40%));
+}
+
+.welcome-title {
+  margin-bottom: 8px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--slate-900);
+}
+
+.welcome-accent {
+  background: linear-gradient(135deg, var(--sky-dark), #22d3ee);
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.welcome-sub {
+  margin-bottom: 32px;
+  font-size: 14px;
+  color: var(--slate-400);
+}
+
+/* Prompt 卡片 */
+.prompt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  text-align: left;
+}
+
+.prompt-card {
   display: flex;
+  padding: 14px;
+  cursor: pointer;
+  background: var(--white);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+  opacity: 0;
+  animation: cardIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) calc(var(--delay)) forwards;
+  transition: all 0.2s ease;
+  align-items: center;
   gap: 12px;
-  align-items: flex-start;
-  max-width: 82%;
 }
 
-.message-row.role-user {
-  flex-direction: row-reverse;
-  margin-left: auto;
+.prompt-card:hover {
+  border-color: var(--sky);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgb(14 165 233 / 10%);
 }
 
-.message-row.role-assistant,
-.message-row.role-system {
-  margin-right: auto;
+.prompt-icon {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.message-main {
+.prompt-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.icon-spark {
+  color: var(--sky);
+  background: var(--sky-pale);
+}
+
+.icon-code {
+  color: #0891b2;
+  background: #ecfeff;
+}
+
+.icon-doc {
+  color: #059669;
+  background: #ecfdf5;
+}
+
+.icon-idea {
+  color: #d97706;
+  background: #fffbeb;
+}
+
+.prompt-text {
   flex: 1;
   min-width: 0;
 }
 
-/* ── Avatars ── */
-.message-avatar {
+.prompt-title {
+  margin-bottom: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--slate-700);
+}
+
+.prompt-desc {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--slate-400);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--slate-200);
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.prompt-card:hover .prompt-chevron {
+  color: var(--sky);
+  transform: translateX(2px);
+}
+
+/* ═══════════════════════════════
+   Message List
+═══════════════════════════════ */
+.state-tip {
+  padding: 32px;
+  font-size: 13px;
+  color: var(--slate-400);
+  text-align: center;
+}
+
+.message-list {
   display: flex;
-  width: 34px;
-  height: 34px;
-  margin-top: 22px;
+  width: 100%;
+  max-width: 880px;
+  padding: 24px 24px 16px;
+  margin: 0 auto;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ── 消息行 ── */
+.msg-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.msg-row.role-user {
+  flex-direction: row-reverse;
+}
+
+.msg-body {
+  max-width: 78%;
+  min-width: 0;
+  flex: 1;
+}
+
+.role-user .msg-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* ── Avatar ── */
+.msg-avatar {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  margin-top: 24px;
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.02em;
   border-radius: 9px;
   align-items: center;
   justify-content: center;
@@ -3451,141 +2846,114 @@ onBeforeUnmount(() => {
 
 .avatar-ai {
   color: #38bdf8;
-  background: linear-gradient(135deg, #0c1628 0%, #0f172a 50%, #1e293b 100%);
-  border: 1px solid rgb(56 189 248 / 30%);
-  box-shadow: 0 2px 8px rgb(15 23 42 / 20%);
+  background: #0f172a;
+  border: 1px solid rgb(56 189 248 / 20%);
 }
 
 .avatar-ai svg {
-  width: 18px;
-  height: 18px;
-  filter: drop-shadow(0 0 4px rgb(56 189 248 / 40%));
+  width: 16px;
+  height: 16px;
+  filter: drop-shadow(0 0 3px rgb(56 189 248 / 40%));
 }
 
 .avatar-user {
-  color: #fff;
-  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%);
-  box-shadow: 0 2px 8px rgb(14 165 233 / 35%);
+  color: var(--white);
+  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
+  box-shadow: 0 2px 8px rgb(14 165 233 / 30%);
 }
 
-/* ── Message Meta ── */
-.message-meta {
+/* ── Meta ── */
+.msg-meta {
   display: flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 6px;
   font-size: 11px;
-  line-height: 1;
-  color: #94a3b8;
-  white-space: nowrap;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 8px;
+  color: var(--slate-400);
 }
 
-.message-meta-role,
-.message-meta-time {
-  display: inline-flex;
-  align-items: center;
-  line-height: 1;
-}
-
-.message-meta-role {
-  font-weight: 600;
-  color: #64748b;
-}
-
-.message-row.role-user .message-meta {
+.role-user .msg-meta {
   justify-content: flex-end;
-  text-align: right;
 }
 
-/* ── Message Bubble ── */
-.message-bubble {
-  padding: 14px 16px;
+.msg-role {
+  font-weight: 600;
+  color: var(--slate-500);
+}
+
+/* ── Bubble ── */
+.msg-bubble {
+  padding: 13px 16px;
   font-size: 14px;
   line-height: 1.7;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
+  background: var(--white);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+  border-top-left-radius: 4px;
+  box-shadow: var(--shadow-sm);
 }
 
-.role-user .message-bubble {
-  color: #fff;
-  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+.bubble-user {
+  color: var(--white);
+  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
   border-color: transparent;
-  box-shadow: 0 2px 10px rgb(14 165 233 / 30%);
+  border-top-right-radius: 4px;
+  border-top-left-radius: var(--radius-lg);
+  box-shadow: 0 3px 12px rgb(14 165 233 / 25%);
 }
 
-.plain-content {
+.user-text {
+  word-break: break-word;
   white-space: pre-wrap;
 }
 
-/* ── File references ── */
-.user-file-reference-list {
+/* 文件引用 */
+.file-ref-list {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
 }
 
-.role-user .user-file-reference-list {
-  justify-content: flex-end;
-}
-
-.user-file-reference-chip {
+.file-ref-chip {
   display: inline-flex;
-  max-width: 240px;
-  min-height: 24px;
-  padding: 2px 8px 2px 6px;
+  max-width: 200px;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: rgb(255 255 255 / 90%);
   background: rgb(255 255 255 / 15%);
-  border: 1px solid rgb(255 255 255 / 30%);
+  border: 1px solid rgb(255 255 255 / 25%);
   border-radius: 999px;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
-.user-file-reference-chip::before {
-  width: 5px;
-  height: 5px;
-  background: rgb(255 255 255 / 80%);
-  border-radius: 50%;
-  content: '';
+.file-ref-chip svg {
+  width: 12px;
+  height: 12px;
   flex-shrink: 0;
 }
 
-.user-file-reference-name {
-  max-width: 164px;
+.file-ref-chip span {
   overflow: hidden;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgb(255 255 255 / 95%);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.user-file-reference-ext {
-  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  color: rgb(255 255 255 / 75%);
-  white-space: nowrap;
-}
-
-/* ═══════════════════════════════════════════════════
- * Thought Panel - 思考过程面板（科技蓝）
- * ═══════════════════════════════════════════════════ */
 .thought-panel {
   margin-bottom: 10px;
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-  border: 1px solid rgb(14 165 233 / 20%);
-  border-radius: 8px;
+  overflow: hidden;
+  background: var(--sky-pale);
+  border: 1px solid rgb(14 165 233 / 15%);
+  border-radius: var(--radius-md);
 }
 
 .thought-summary {
-  display: inline-flex;
+  display: flex;
   padding: 8px 12px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
-  color: #0284c7;
+  color: var(--sky-dark);
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -3597,43 +2965,26 @@ onBeforeUnmount(() => {
   display: none;
 }
 
-.thought-content {
-  padding: 10px 12px 10px 16px;
-  margin: 0 12px 10px;
-  font-size: 13px;
-  color: #475569;
-  word-break: break-all;
-  background: #fff;
-  border-left: 3px solid #0ea5e9;
-  border-radius: 6px;
-  animation: fadeIn 0.26s ease;
-  overflow-wrap: anywhere;
-}
-
-/* ── Thinking Icon - 青色系思考中动画 ── */
 .thinking-icon {
-  display: inline-flex;
+  display: flex;
   width: 18px;
   height: 18px;
-  background: radial-gradient(circle at 30% 30%, #fff 0%, #f0f9ff 72%, #e0f2fe 100%);
-  border-radius: 50%;
-  align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
 }
 
 .thinking-icon svg {
   width: 18px;
   height: 18px;
-  animation: orbit 5s linear infinite;
+  animation: orbit 6s linear infinite;
 }
 
-.thinking-icon.active svg {
+.thinking-icon.spinning svg {
   animation-duration: 1.8s;
 }
 
 .ring {
   fill: none;
-  stroke-width: 2.7;
+  stroke-width: 2.8;
   stroke-linecap: round;
   stroke-dasharray: 18 84;
   transform-origin: 24px 24px;
@@ -3660,384 +3011,405 @@ onBeforeUnmount(() => {
 }
 
 .star-core {
-  fill: #fff;
-  filter: drop-shadow(0 0 4px rgb(14 165 233 / 60%));
-  animation: breathe 1.3s ease-in-out infinite;
+  fill: var(--white);
+  filter: drop-shadow(0 0 3px rgb(14 165 233 / 50%));
+  animation: breathe 1.4s ease-in-out infinite;
   transform-origin: 24px 24px;
 }
 
-.thinking-icon.active .star-core {
-  animation-duration: 0.9s;
-}
-
-.thought-summary-text {
-  white-space: nowrap;
-}
-
-/* ═══════════════════════════════════════════════════
- * Assistant content
- * ═══════════════════════════════════════════════════ */
-.assistant-content {
-  color: #1e293b;
+.thought-body {
+  padding: 10px 14px 12px;
+  margin: 0 10px 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--slate-500);
   word-break: break-word;
-  white-space: normal;
+  background: var(--white);
+  border-left: 2px solid var(--sky);
+  border-radius: 6px;
   overflow-wrap: anywhere;
-  opacity: 1;
-  transform: translateY(0);
+}
+
+/* ── AI 内容 ── */
+.ai-content {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--slate-700);
+  word-break: break-word;
   transition:
-    opacity 0.28s ease,
-    transform 0.28s ease;
+    opacity 0.25s,
+    transform 0.25s;
+  overflow-wrap: anywhere;
 }
 
-.assistant-content-transitioning {
-  opacity: 0.65;
-  transform: translateY(3px);
+.ai-content.fading {
+  opacity: 0.6;
+  transform: translateY(2px);
 }
 
-.assistant-content :deep(p) {
+.ai-content :deep(p) {
   margin: 0;
 }
 
-.assistant-content :deep(p + p) {
+.ai-content :deep(p + p) {
   margin-top: 10px;
 }
 
-.assistant-content :deep(pre) {
+.ai-content :deep(pre) {
   margin: 10px 0;
   overflow: auto;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
-.assistant-content :deep(.hljs) {
+.ai-content :deep(.hljs) {
   padding: 14px 16px;
+  font-size: 13px;
   color: #e2e8f0;
   background: #0f172a;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
-.assistant-content :deep(code) {
-  font-family: 'SF Mono', Menlo, Monaco, Consolas, 'Courier New', monospace;
+.ai-content :deep(code) {
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
   font-size: 13px;
 }
 
-.assistant-content :deep(:not(pre) > code) {
-  padding: 1px 6px;
+.ai-content :deep(:not(pre) > code) {
+  padding: 1px 5px;
   font-size: 13px;
-  color: #0369a1;
-  background: rgb(14 165 233 / 8%);
+  color: var(--sky-dark);
+  background: var(--sky-pale);
   border: 1px solid rgb(14 165 233 / 15%);
   border-radius: 4px;
 }
 
-.assistant-content :deep(a) {
-  color: #0ea5e9;
+.ai-content :deep(a) {
+  color: var(--sky);
   text-decoration: none;
 }
 
-.assistant-content :deep(a:hover) {
+.ai-content :deep(a:hover) {
   text-decoration: underline;
 }
 
-.assistant-content :deep(ul),
-.assistant-content :deep(ol) {
+.ai-content :deep(ul),
+.ai-content :deep(ol) {
   padding-left: 20px;
   margin: 6px 0;
 }
 
-.assistant-content :deep(li) {
+.ai-content :deep(li) {
   margin: 3px 0;
 }
 
-.assistant-content :deep(blockquote) {
+.ai-content :deep(blockquote) {
   padding: 8px 14px;
   margin: 8px 0;
-  color: #64748b;
-  background: rgb(14 165 233 / 4%);
-  border-left: 3px solid #0ea5e9;
+  color: var(--slate-500);
+  background: var(--sky-pale);
+  border-left: 3px solid var(--sky);
   border-radius: 0 6px 6px 0;
 }
 
-.assistant-action-row {
+/* ── 消息操作 ── */
+.msg-actions {
+  padding-top: 10px;
   margin-top: 10px;
+  border-top: 1px solid var(--slate-100);
 }
 
-/* --- 1. 点赞，点踩 --- */
-
-/* 容器布局 */
-.feedback-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px; /* 间距拉开一点更舒服 */
-  margin-top: 10px;
-}
-
-/* 按钮基础样式 */
-.feedback-btn {
+.feedback-row {
   display: flex;
-  padding: 6px 10px !important;
-  color: #64748b !important; /* 默认深灰色 */
-  border: 1px solid transparent !important;
-  border-radius: 6px !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  align-items: center;
-}
-
-/* 按钮内文字样式 */
-.btn-text {
-  margin-left: 6px;
-  font-size: 13px;
-}
-
-/* 鼠标悬停时的微交互 */
-.feedback-btn:hover {
-  background-color: #f1f5f9 !important;
-  transform: translateY(-1px);
-}
-
-/* --- 激活态样式 --- */
-
-/* 点赞激活：使用经典的蓝绿色调 */
-.feedback-btn.like.active {
-  color: #10b981 !important; /* 翠绿色，比纯蓝更显积极 */
-  background-color: #ecfdf5 !important;
-  border-color: #a7f3d0 !important;
-}
-
-/* 踩激活：使用温和的红色调 */
-.feedback-btn.dislike.active {
-  color: #f43f5e !important;
-  background-color: #fff1f2 !important;
-  border-color: #fecdd3 !important;
-}
-
-/* 点击时的波纹/缩小反馈 */
-.feedback-btn:active {
-  transform: scale(0.92);
-}
-
-/* 激活时图标的动画 */
-.feedback-btn.active .el-icon {
-  animation: thumbs-up-pop 0.3s ease;
-}
-
-.suggested-question-list {
-  display: flex;
-  margin-top: 8px;
-  flex-wrap: wrap;
   gap: 6px;
 }
 
-.suggested-question-chip {
-  padding: 4px 10px;
+.feedback-btn {
+  display: inline-flex;
+  padding: 5px 10px;
   font-size: 12px;
-  color: #334155;
+  color: var(--slate-400);
   cursor: pointer;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: transparent;
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-sm);
+  transition: all 0.18s;
+  align-items: center;
+  gap: 5px;
+}
+
+.feedback-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.feedback-btn:hover {
+  color: var(--slate-600);
+  background: var(--slate-100);
+}
+
+.feedback-btn.active {
+  color: #059669;
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.feedback-btn.dislike.active {
+  color: #dc2626;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.suggested-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.suggested-chip {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--slate-500);
+  cursor: pointer;
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
   border-radius: 999px;
-  transition: all 0.2s;
+  transition: all 0.18s;
 }
 
-.suggested-question-chip:hover {
-  color: #0369a1;
-  background: rgb(14 165 233 / 8%);
-  border-color: #0ea5e9;
+.suggested-chip:hover {
+  color: var(--sky-dark);
+  background: var(--sky-pale);
+  border-color: rgb(14 165 233 / 30%);
 }
 
-/* ═══════════════════════════════════════════════════
- * Input Panel
- * ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════
+   Input Panel
+═══════════════════════════════ */
 .input-panel {
-  position: relative;
-  padding: 14px 24px 16px;
-  background: #fff;
-  border-top: 1px solid #e2e8f0;
+  padding: 12px 24px 16px;
+  background: var(--white);
+  border-top: 1px solid var(--slate-200);
   flex-shrink: 0;
 }
 
-.hidden-file-input {
+.hidden-input {
   display: none;
 }
 
-.uploaded-file-list {
+.input-box {
+  max-width: 880px;
+  margin: 0 auto;
+  overflow: hidden;
+  background: var(--white);
+  border: 1.5px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.input-box:focus-within {
+  border-color: var(--sky);
+  box-shadow: 0 0 0 3px rgb(14 165 233 / 10%);
+}
+
+/* 已上传文件 */
+.file-chips {
   display: flex;
-  max-width: 960px;
-  margin-right: auto;
-  margin-bottom: 10px;
-  margin-left: auto;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  padding: 10px 14px 0;
 }
 
 .file-chip {
   display: inline-flex;
-  height: 28px;
-  max-width: 320px;
-  padding: 0 4px 0 10px;
-  background: rgb(14 165 233 / 6%);
+  height: 26px;
+  max-width: 220px;
+  padding: 0 6px 0 8px;
+  font-size: 12px;
+  color: var(--sky-dark);
+  background: var(--sky-pale);
   border: 1px solid rgb(14 165 233 / 20%);
-  border-radius: 14px;
+  border-radius: 999px;
+  align-items: center;
+  gap: 5px;
+}
+
+.file-chip svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.file-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.chip-remove {
+  display: flex;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  color: var(--sky-dark);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  align-items: center;
+  justify-content: center;
+}
+
+.chip-remove:hover {
+  opacity: 1;
+}
+
+/* 输入框 */
+.input-box :deep(.el-textarea__inner) {
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--slate-900);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  resize: none;
+}
+
+.input-box :deep(.el-textarea__inner::placeholder) {
+  color: var(--slate-400);
+}
+
+.input-box :deep(.el-textarea__inner:focus) {
+  box-shadow: none;
+}
+
+/* 工具栏 */
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 12px;
+  border-top: 1px solid var(--slate-100);
+  gap: 8px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tool-btn {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  font-size: 15px;
+  color: var(--slate-400);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-btn:hover {
+  color: var(--slate-600);
+  background: var(--slate-100);
+}
+
+.tool-btn.recording {
+  color: #ef4444;
+  background: #fef2f2;
+  animation: pulse-red 1.2s ease-in-out infinite;
+}
+
+.recording-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: #ef4444;
+}
+
+.input-hint {
+  font-size: 11px;
+  color: var(--slate-300);
+  white-space: nowrap;
+}
+
+/* 发送按钮 */
+.send-btn {
+  display: inline-flex;
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--white);
+  white-space: nowrap;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: 0 2px 8px rgb(14 165 233 / 30%);
+  transition: all 0.2s;
   align-items: center;
   gap: 6px;
 }
 
-.file-chip-icon {
-  width: 12px;
-  height: 12px;
-  color: #0369a1;
-  flex-shrink: 0;
-}
-
-.file-chip-name {
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 500;
-  color: #0369a1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-chip-remove {
-  padding: 2px;
-  margin-left: 4px;
-}
-
-.input-wrapper {
-  max-width: 960px;
-  margin: 0 auto;
-}
-
-/* Input textarea */
-.input-panel :deep(.el-textarea__inner) {
-  padding: 12px 14px;
-  font-size: 14px;
-  color: #0f172a;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  box-shadow: none;
-  transition: all 0.2s;
-  resize: none;
-}
-
-.input-panel :deep(.el-textarea__inner::placeholder) {
-  color: #94a3b8;
-}
-
-.input-panel :deep(.el-textarea__inner:hover) {
-  background: #fff;
-  border-color: #cbd5e1;
-}
-
-.input-panel :deep(.el-textarea__inner:focus) {
-  background: #fff;
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgb(14 165 233 / 12%);
-}
-
-.input-actions {
-  display: flex;
-  max-width: 960px;
-  margin-top: 10px;
-  margin-right: auto;
-  margin-left: auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.input-actions-left {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.input-actions-left :deep(.el-button) {
-  margin-left: 0;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.input-actions-left :deep(.el-button + .el-button) {
-  margin-left: 0;
-}
-
-.input-actions-left :deep(.el-button.is-text:not(.is-disabled):hover) {
-  color: #0ea5e9;
-  background: rgb(14 165 233 / 8%);
-}
-
-.input-actions-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.input-hint-text {
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  color: #cbd5e1;
-}
-
-.input-actions :deep(.el-icon) {
-  margin-right: 4px;
-}
-
-.input-actions :deep(.el-button .el-icon:only-child) {
-  margin-right: 0;
-}
-
-/* Send button - 对齐登录页主按钮 */
-.send-btn,
-.input-actions :deep(.el-button--primary) {
-  position: relative;
-  padding: 8px 24px !important;
-  overflow: hidden;
-  font-weight: 600 !important;
-  letter-spacing: 0.05em;
-  color: #f0f9ff !important;
-  background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 50%, #38bdf8 100%) !important;
-  background-size: 200% 200% !important;
-  border: none !important;
-  border-radius: 8px !important;
-  box-shadow:
-    0 4px 12px rgb(14 165 233 / 30%),
-    inset 0 1px 0 rgb(255 255 255 / 20%) !important;
-  transition: all 0.2s ease !important;
-}
-
-.stop-btn {
-  padding: 8px 18px !important;
-  font-weight: 600 !important;
-  border-radius: 8px !important;
-}
-
-.input-actions :deep(.el-button--primary:hover:not(.is-disabled)) {
+.send-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow:
-    0 6px 18px rgb(14 165 233 / 40%),
-    inset 0 1px 0 rgb(255 255 255 / 30%) !important;
+  box-shadow: 0 4px 14px rgb(14 165 233 / 40%);
 }
 
-.input-actions :deep(.el-button--primary.is-disabled) {
-  opacity: 0.5;
-  box-shadow: none !important;
+.send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  box-shadow: none;
 }
 
-/* ═══════════════════════════════════════════════════
- * Tip text
- * ═══════════════════════════════════════════════════ */
-.tip-text {
-  padding: 24px 12px;
-  font-size: 12px;
-  color: #94a3b8;
-  text-align: center;
+.send-btn.stop {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  box-shadow: 0 2px 8px rgb(239 68 68 / 25%);
 }
 
-/* ═══════════════════════════════════════════════════
- * Page Shell
- * ═══════════════════════════════════════════════════ */
+.draft-waiting {
+  display: flex;
+  height: 24px;
+  padding: 4px 2px;
+  align-items: center;
+  gap: 5px;
+}
+
+.draft-waiting span {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--sky);
+  border-radius: 50%;
+  animation: dot-bounce 1.4s ease-in-out infinite;
+}
+
+.draft-waiting span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.draft-waiting span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+/* ═══════════════════════════════
+   基础变量
+═══════════════════════════════ */
 </style>
