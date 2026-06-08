@@ -2167,8 +2167,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-
-
 /* ═══════════════════════════════
    Welcome Screen
 ═══════════════════════════════ */
