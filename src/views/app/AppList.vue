@@ -712,9 +712,8 @@ onMounted(() => {
               @change="handlePublishStatusChange"
             >
               <el-option label="全部状态" value="" />
-              <el-option label="草稿" value="DRAFT" />
               <el-option label="已发布" value="PUBLISHED" />
-              <el-option label="未发布" value="SAVED" />
+              <el-option label="未发布" value="UNPUBLISHED" />
             </el-select>
 
             <el-input
