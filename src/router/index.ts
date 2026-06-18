@@ -95,6 +95,25 @@ const staticRoutes: RouteRecordRaw[] = [
           icon: 'House',
           permission: 'dashboard:view'
         }
+      },
+      {
+        path: 'knowledge',
+        name: 'KnowledgeList',
+        component: () => import('@/views/knowledge/KnowledgeList.vue'),
+        meta: {
+          title: '知识库',
+          hidden: true
+        }
+      },
+      {
+        path: 'knowledge/:datasetId',
+        name: 'KnowledgeDetail',
+        component: () => import('@/views/knowledge/KnowledgeDetail.vue'),
+        meta: {
+          title: '知识库详情',
+          hidden: true,
+          activeMenu: '/knowledge'
+        }
       }
     ]
   },
