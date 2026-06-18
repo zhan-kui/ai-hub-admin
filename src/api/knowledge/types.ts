@@ -146,11 +146,11 @@ export interface PreProcessingRule {
 export interface Segmentation {
   separator: string
   max_tokens: number
-  chunk_overlap: number
+  chunk_overlap?: number
 }
 
 export interface ProcessRule {
-  mode: 'custom' | 'automatic'
+  mode: 'custom' | 'automatic' | 'hierarchical'
   rules?: {
     pre_processing_rules?: PreProcessingRule[]
     segmentation?: Segmentation
@@ -161,7 +161,7 @@ export interface ProcessRule {
 
 export interface CreateDocByFileData {
   indexing_technique: IndexingTechnique
-  doc_form?: 'text_model'
+  doc_form?: 'text_model' | 'hierarchical_model'
   doc_language?: string
   process_rule?: ProcessRule
   embedding_model?: string

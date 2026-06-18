@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage, type UploadFile, type UploadFiles, type UploadInstance } from 'element-plus'
-import { CircleClose, Document, UploadFilled } from '@element-plus/icons-vue'
+import { CircleClose, Document, QuestionFilled, UploadFilled } from '@element-plus/icons-vue'
 import { knowledgeDocApi } from '@/api/knowledge'
 import type { CreateDocByFileData, IndexingTechnique } from '@/api/knowledge/types'
 import { SEPARATOR_PRESETS } from '../constants'
@@ -12,11 +12,12 @@ const props = defineProps<{
   indexingTechnique: IndexingTechnique
   embeddingModel?: string | null
   embeddingModelProvider?: string | null
+  forceHierarchical?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [boolean]
-  uploaded: [{ batch: string; documentId: string; documentName: string }]
+  uploaded: [{ batch: string; documentId: string; documentName: string; docForm: string }]
 }>()
 
 const visible = computed({
@@ -43,9 +44,24 @@ const form = reactive({
 })
 
 const isHighQuality = computed(() => props.indexingTechnique === 'high_quality')
+const isHierarchicalMode = computed(() => isHighQuality.value && form.parentChild)
+
+function applyHierarchicalDefaults() {
+  form.separatorPreset = '\n\n'
+  form.separator = '\n\n'
+  form.maxTokens = 1024
+  form.chunkOverlap = 0
+  form.preRules = ['remove_extra_spaces']
+  form.parentChild = true
+  form.subSeparator = '\n'
+  form.subMaxTokens = 512
+  form.subChunkOverlap = 0
+}
 
 function resetForm() {
-  if (isHighQuality.value) {
+  if (props.forceHierarchical) {
+    applyHierarchicalDefaults()
+  } else if (isHighQuality.value) {
     form.separatorPreset = '\n\n'
     form.separator = '\n\n'
     form.maxTokens = 1024
@@ -67,6 +83,12 @@ function resetForm() {
   uploadRef.value?.clearFiles()
   uploadPercent.value = 0
   uploadState.value = 'idle'
+}
+
+function handleParentChildChange(value: string | number | boolean) {
+  if (value) {
+    applyHierarchicalDefaults()
+  }
 }
 
 function handleSeparatorChange(value: string) {
@@ -116,18 +138,19 @@ function removeSelectedFile() {
 }
 
 function buildData(): CreateDocByFileData {
+  const hierarchical = isHierarchicalMode.value
   const data: CreateDocByFileData = {
     indexing_technique: props.indexingTechnique,
-    doc_form: 'text_model',
+    doc_form: hierarchical ? 'hierarchical_model' : 'text_model',
     doc_language: 'Chinese Simplified',
     process_rule: {
-      mode: 'custom',
+      mode: hierarchical ? 'hierarchical' : 'custom',
       rules: {
         pre_processing_rules: form.preRules.map((id) => ({ id, enabled: true })),
         segmentation: {
           separator: form.separator,
           max_tokens: Number(form.maxTokens || 1),
-          chunk_overlap: Number(form.chunkOverlap || 0)
+          ...(hierarchical ? {} : { chunk_overlap: Number(form.chunkOverlap || 0) })
         }
       }
     }
@@ -136,12 +159,11 @@ function buildData(): CreateDocByFileData {
   if (isHighQuality.value) {
     if (props.embeddingModel) data.embedding_model = props.embeddingModel
     if (props.embeddingModelProvider) data.embedding_model_provider = props.embeddingModelProvider
-    if (form.parentChild) {
+    if (hierarchical) {
       data.process_rule!.rules!.parent_mode = 'paragraph'
       data.process_rule!.rules!.subchunk_segmentation = {
         separator: form.subSeparator,
-        max_tokens: Number(form.subMaxTokens || 1),
-        chunk_overlap: Number(form.subChunkOverlap || 0)
+        max_tokens: Number(form.subMaxTokens || 1)
       }
     }
   }
@@ -159,22 +181,19 @@ async function submit() {
   uploadState.value = 'uploading'
   uploadPercent.value = 0
   try {
-    const res = await knowledgeDocApi.createByFile(
-      props.datasetId,
-      rawFile,
-      buildData(),
-      (event) => {
-        if (!event.total) return
-        uploadPercent.value = Math.min(99, Math.round((event.loaded / event.total) * 100))
-      }
-    )
+    const payload = buildData()
+    const res = await knowledgeDocApi.createByFile(props.datasetId, rawFile, payload, (event) => {
+      if (!event.total) return
+      uploadPercent.value = Math.min(99, Math.round((event.loaded / event.total) * 100))
+    })
     uploadPercent.value = 100
     uploadState.value = 'done'
     ElMessage.success('上传成功，开始建立索引')
     emit('uploaded', {
       batch: res.batch,
       documentId: res.document.id,
-      documentName: res.document.name
+      documentName: res.document.name,
+      docForm: payload.doc_form || 'text_model'
     })
     visible.value = false
   } catch (error: any) {
@@ -243,7 +262,18 @@ watch(
       <div class="panel-title">分段设置</div>
       <el-row :gutter="16">
         <el-col :span="12">
-          <label class="field-label">分段标识符</label>
+          <label class="field-label">
+            分段标识符
+            <el-tooltip
+              content="文本分隔符是用于分隔文本的字符。建议用 \n\n 将原始文档划分为较大的父级片段。您也可以自定义特殊分隔符。"
+              placement="top"
+              :show-after="120"
+            >
+              <button type="button" class="help-btn" aria-label="分段标识符说明">
+                <el-icon><QuestionFilled /></el-icon>
+              </button>
+            </el-tooltip>
+          </label>
           <el-select v-model="form.separatorPreset" class="w-full" @change="handleSeparatorChange">
             <el-option
               v-for="item in SEPARATOR_PRESETS"
@@ -258,10 +288,10 @@ watch(
           <el-input v-model="form.separator" placeholder="例如 ###" />
         </el-col>
         <el-col :span="12">
-          <label class="field-label">最大分段长度</label>
+          <label class="field-label">最大分段长度 <span class="field-unit">characters</span></label>
           <el-input-number v-model="form.maxTokens" :min="100" :max="4000" :step="50" />
         </el-col>
-        <el-col :span="12">
+        <el-col v-if="!isHierarchicalMode" :span="12">
           <label class="field-label">分段重叠</label>
           <el-input-number v-model="form.chunkOverlap" :min="0" :max="1000" :step="10" />
         </el-col>
@@ -274,25 +304,39 @@ watch(
     </div>
 
     <div v-if="isHighQuality" class="chunk-panel">
+      <div v-if="forceHierarchical" class="hierarchical-lock">
+        当前知识库已存在父子分段文档，后续上传必须继续使用父子分段模式。
+      </div>
       <div class="parent-line">
         <div>
           <strong>父子分段</strong>
           <p>用于高质量知识库的细粒度召回。</p>
         </div>
-        <el-switch v-model="form.parentChild" />
+        <el-switch
+          v-model="form.parentChild"
+          :disabled="forceHierarchical"
+          @change="handleParentChildChange"
+        />
       </div>
       <el-row v-if="form.parentChild" :gutter="16">
-        <el-col :span="8">
-          <label class="field-label">子段标识符</label>
+        <el-col :span="12">
+          <label class="field-label">
+            子段标识符
+            <el-tooltip
+              content="文本分隔符是用于分隔文本的字符。建议使用 \n 将父级片段拆分为较小的子级片段。您也可以自定义特殊分隔符。"
+              placement="top"
+              :show-after="120"
+            >
+              <button type="button" class="help-btn" aria-label="子段标识符说明">
+                <el-icon><QuestionFilled /></el-icon>
+              </button>
+            </el-tooltip>
+          </label>
           <el-input v-model="form.subSeparator" />
         </el-col>
-        <el-col :span="8">
-          <label class="field-label">子段长度</label>
+        <el-col :span="12">
+          <label class="field-label">子段长度 <span class="field-unit">characters</span></label>
           <el-input-number v-model="form.subMaxTokens" :min="100" :max="2000" :step="50" />
-        </el-col>
-        <el-col :span="8">
-          <label class="field-label">子段重叠</label>
-          <el-input-number v-model="form.subChunkOverlap" :min="0" :max="500" :step="10" />
         </el-col>
       </el-row>
     </div>
@@ -466,15 +510,52 @@ watch(
 }
 
 .field-label {
-  display: block;
+  display: flex;
   margin: 8px 0 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary, #64748b);
+  align-items: center;
+  gap: 4px;
+}
+
+.help-btn {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 14px;
+  color: #94a3b8;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.help-btn:hover {
+  color: #64748b;
+}
+
+.field-unit {
+  font-weight: 500;
+  color: #94a3b8;
 }
 
 .pre-rules {
   margin-top: 12px;
+}
+
+.hierarchical-lock {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #1d4ed8;
+  background: #eaf1ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
 }
 
 .parent-line {

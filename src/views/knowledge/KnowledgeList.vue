@@ -306,8 +306,7 @@ onMounted(load)
 }
 
 .kb-shell {
-  max-width: 1240px;
-  margin: 0 auto;
+  width: 100%;
 }
 
 .kb-hero {

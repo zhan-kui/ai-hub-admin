@@ -29,6 +29,7 @@ const uploadVisible = ref(false)
 const activeTab = ref<'documents' | 'retrieve'>('documents')
 const refreshedBatches = new Set<string>()
 const batchByDoc = ref<Record<string, string>>({})
+const hasHierarchicalDocument = ref(false)
 const documentStats = reactive({
   total: 0,
   wordCount: 0
@@ -70,6 +71,9 @@ async function loadDocuments() {
     })
     docs.value = res.data || []
     pager.total = res.total || 0
+    if (docs.value.some((doc) => doc.doc_form === 'hierarchical_model')) {
+      hasHierarchicalDocument.value = true
+    }
   } catch (error: any) {
     ElMessage.error(error?.message || '文档列表加载失败')
   } finally {
@@ -84,6 +88,7 @@ async function loadDocumentStats() {
   let total = 0
   let wordCount = 0
   let hasMore = true
+  let hierarchical = false
 
   try {
     while (hasMore && page <= 50) {
@@ -92,19 +97,25 @@ async function loadDocumentStats() {
       if (page === 1) {
         total = Number(res.total || records.length)
       }
+      if (records.some((doc) => doc.doc_form === 'hierarchical_model')) {
+        hierarchical = true
+      }
       wordCount += records.reduce((sum, doc) => sum + Number(doc.word_count || 0), 0)
       hasMore = Boolean(res.has_more) && records.length > 0
       page += 1
     }
     documentStats.total = total
     documentStats.wordCount = wordCount
+    hasHierarchicalDocument.value = hierarchical
   } catch {
     documentStats.total = pager.total || docs.value.length
     documentStats.wordCount = docs.value.reduce((sum, doc) => sum + Number(doc.word_count || 0), 0)
+    hasHierarchicalDocument.value = docs.value.some((doc) => doc.doc_form === 'hierarchical_model')
   }
 }
 
 async function reloadAll() {
+  hasHierarchicalDocument.value = false
   await Promise.all([loadDetail(), loadDocuments(), loadDocumentStats()])
 }
 
@@ -122,12 +133,21 @@ function isRunning(doc: DocumentVO) {
   return RUNNING_STATUSES.includes(status as IndexingStatus)
 }
 
-function onUploaded(payload: { batch: string; documentId: string; documentName: string }) {
+function onUploaded(payload: {
+  batch: string
+  documentId: string
+  documentName: string
+  docForm?: string
+}) {
+  if (payload.docForm === 'hierarchical_model') {
+    hasHierarchicalDocument.value = true
+  }
   batchByDoc.value = { ...batchByDoc.value, [payload.documentId]: payload.batch }
   docs.value = [
     {
       id: payload.documentId,
       name: payload.documentName,
+      doc_form: payload.docForm,
       indexing_status: 'waiting',
       created_at: Math.floor(Date.now() / 1000)
     },
@@ -297,6 +317,7 @@ onMounted(reloadAll)
       :indexing-technique="dataset.indexingTechnique"
       :embedding-model="dataset.embeddingModel"
       :embedding-model-provider="dataset.embeddingModelProvider"
+      :force-hierarchical="hasHierarchicalDocument"
       @uploaded="onUploaded"
     />
   </div>
