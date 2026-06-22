@@ -108,3 +108,5 @@ export const knowledgeDocApi = {
       apiClient.get(`${BASE}/datasets/${datasetId}/documents/indexing-status/${batch}`)
     )
 }
+
+export { knowledgeSegmentApi } from './segment'

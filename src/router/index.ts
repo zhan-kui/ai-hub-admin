@@ -114,6 +114,16 @@ const staticRoutes: RouteRecordRaw[] = [
           hidden: true,
           activeMenu: '/knowledge'
         }
+      },
+      {
+        path: 'knowledge/:datasetId/documents/:documentId/segments',
+        name: 'KnowledgeSegment',
+        component: () => import('@/views/knowledge/KnowledgeSegment.vue'),
+        meta: {
+          title: '文档分段',
+          hidden: true,
+          activeMenu: '/knowledge'
+        }
       }
     ]
   },

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Delete, Download } from '@element-plus/icons-vue'
+import { Delete, Download, View } from '@element-plus/icons-vue'
 import { Icon } from '@/components/Icon'
 import type { DocumentVO, IndexingStatusItem } from '@/api/knowledge/types'
 import { RUNNING_STATUSES } from '../constants'
@@ -15,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   download: [DocumentVO]
   remove: [DocumentVO]
+  preview: [DocumentVO]
 }>()
 
 const currentStatus = computed(() => props.status?.indexing_status || props.doc.indexing_status)
@@ -35,7 +36,7 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
     </div>
 
     <div class="doc-main">
-      <h3>{{ doc.name }}</h3>
+      <button type="button" class="doc-name" @click="emit('preview', doc)">{{ doc.name }}</button>
       <div class="doc-meta">
         <span>{{ compactNumber(doc.word_count) }} 字</span>
         <span>{{ fmtTs(doc.created_at) }}</span>
@@ -47,6 +48,7 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
     </div>
 
     <div class="doc-actions">
+      <el-button :icon="View" text bg @click="emit('preview', doc)">预览分段</el-button>
       <el-button :icon="Download" text bg @click="emit('download', doc)">下载</el-button>
       <el-button
         :icon="Delete"
@@ -86,7 +88,7 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
     border-color 0.18s ease,
     box-shadow 0.18s ease,
     transform 0.18s ease;
-  grid-template-columns: 48px minmax(320px, 1fr) 116px 160px;
+  grid-template-columns: 48px minmax(280px, 1fr) 116px 264px;
   gap: 16px;
 }
 
@@ -111,14 +113,26 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
   min-width: 0;
 }
 
-.doc-main h3 {
+.doc-name {
+  display: block;
+  max-width: 100%;
+  padding: 0;
   margin: 0;
   overflow: hidden;
   font-size: 15px;
   font-weight: 700;
   color: var(--text-main, #172033);
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.doc-name:hover {
+  color: var(--primary, #2563eb);
+  text-decoration: underline;
 }
 
 .doc-status {
@@ -174,6 +188,10 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.doc-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 @media (width <= 760px) {

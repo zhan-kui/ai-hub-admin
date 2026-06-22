@@ -123,6 +123,14 @@ function goBack() {
   router.push({ name: 'KnowledgeList' })
 }
 
+function openSegments(doc: DocumentVO) {
+  router.push({
+    name: 'KnowledgeSegment',
+    params: { datasetId: datasetId.value, documentId: doc.id },
+    query: { name: doc.name, docForm: doc.doc_form ?? '' }
+  })
+}
+
 function statusFor(doc: DocumentVO): IndexingStatusItem | undefined {
   const batch = batchByDoc.value[doc.id]
   return batch ? poller.statusMap.value[batch] : undefined
@@ -276,6 +284,7 @@ onMounted(reloadAll)
               :key="doc.id"
               :doc="doc"
               :status="statusFor(doc)"
+              @preview="openSegments"
               @download="downloadDoc"
               @remove="removeDoc"
             />
