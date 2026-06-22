@@ -75,7 +75,8 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
 <style scoped lang="less">
 .doc-row {
   display: grid;
-  padding: 16px;
+  min-height: 82px;
+  padding: 16px 18px;
   align-items: center;
   background: var(--surface, #fff);
   border: 1px solid var(--border-soft, #e4eaf3);
@@ -85,8 +86,8 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
     border-color 0.18s ease,
     box-shadow 0.18s ease,
     transform 0.18s ease;
-  grid-template-columns: 48px minmax(0, 1fr) auto auto;
-  gap: 14px;
+  grid-template-columns: 48px minmax(320px, 1fr) 116px 160px;
+  gap: 16px;
 }
 
 .doc-row:hover {
@@ -171,6 +172,7 @@ const canRemove = computed(() => !isRunning.value && !props.doc.archived)
 .doc-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 

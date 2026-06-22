@@ -349,8 +349,7 @@ onMounted(reloadAll)
 }
 
 .detail-shell {
-  max-width: 1240px;
-  margin: 0 auto;
+  width: 100%;
 }
 
 .back-btn {
@@ -494,6 +493,7 @@ onMounted(reloadAll)
   background: rgb(248 250 255 / 70%);
   border: 1px solid var(--border-soft);
   border-radius: 18px;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
 }
 
 .detail-tabs :deep(.el-tabs__header) {
@@ -567,7 +567,7 @@ onMounted(reloadAll)
   }
 
   .detail-metrics {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
