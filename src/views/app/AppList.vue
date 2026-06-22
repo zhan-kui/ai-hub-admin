@@ -115,12 +115,6 @@ const appTypeMetaList: AppTypeMeta[] = [
   }
 ]
 
-const appTypeCounts = computed<Record<Exclude<AppTypeFilter, ''>, number>>(() => ({
-  chat: appList.value.filter((item) => normalizeAppTypeKey(item.appType) === 'chat').length,
-  agent: appList.value.filter((item) => normalizeAppTypeKey(item.appType) === 'agent').length,
-  workflow: appList.value.filter((item) => normalizeAppTypeKey(item.appType) === 'workflow').length
-}))
-
 const formRules: FormRules = {
   appName: [{ required: true, message: '请输入智能体名称', trigger: 'blur' }]
 }
@@ -681,7 +675,6 @@ onMounted(() => {
               @click="setAppTypeFilter('chat')"
             >
               <span>聊天助手</span>
-              <em>{{ appTypeCounts.chat }}</em>
             </button>
             <button
               type="button"
@@ -690,7 +683,6 @@ onMounted(() => {
               @click="setAppTypeFilter('agent')"
             >
               <span>Agent 智能体</span>
-              <em>{{ appTypeCounts.agent }}</em>
             </button>
             <button
               type="button"
@@ -699,7 +691,6 @@ onMounted(() => {
               @click="setAppTypeFilter('workflow')"
             >
               <span>Chatflow 对话流</span>
-              <em>{{ appTypeCounts.workflow }}</em>
             </button>
           </div>
 

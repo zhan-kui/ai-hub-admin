@@ -52,11 +52,6 @@ const wordSum = computed(() =>
 const hitSum = computed(() =>
   list.value.reduce((sum, item) => sum + Number(item.hit_count || 0), 0)
 )
-const statusCounts = computed(() => ({
-  completed: list.value.filter((item) => item.status === 'completed').length,
-  indexing: list.value.filter((item) => item.status === 'indexing').length,
-  error: list.value.filter((item) => item.status === 'error').length
-}))
 const aggregateStatus = computed<DifySegmentStatus | undefined>(() => {
   if (list.value.some((item) => item.status === 'error')) return 'error'
   if (list.value.some((item) => item.status === 'indexing')) return 'indexing'
@@ -64,11 +59,6 @@ const aggregateStatus = computed<DifySegmentStatus | undefined>(() => {
     return 'completed'
   return undefined
 })
-
-function tabCount(status: StatusFilter) {
-  if (!status) return query.total
-  return statusCounts.value[status]
-}
 
 function showError(error: unknown, fallback: string) {
   const text = segmentErrorText(error, fallback)
@@ -247,7 +237,7 @@ onMounted(load)
               @click="setStatus(tab.key)"
             >
               <span>{{ tab.label }}</span>
-              <em>{{ tabCount(tab.key) }}</em>
+              <em v-if="tab.key === ''">{{ query.total }}</em>
             </button>
           </div>
 
@@ -285,7 +275,9 @@ onMounted(load)
             ></div>
             <h3>还没有分段</h3>
             <p>该文档还没有分段，新增第一个分段或等待索引完成。</p>
-            <el-button type="primary" :icon="Plus" @click="openCreate">新增分段</el-button>
+            <el-button v-if="activeStatus === ''" type="primary" :icon="Plus" @click="openCreate">
+              新增分段
+            </el-button>
           </div>
         </div>
 

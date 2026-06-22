@@ -29,9 +29,6 @@ const query = reactive({
 const highQualityCount = computed(
   () => list.value.filter((item) => item.indexingTechnique === 'high_quality').length
 )
-const economyCount = computed(
-  () => list.value.filter((item) => item.indexingTechnique === 'economy').length
-)
 const documentTotal = computed(() =>
   list.value.reduce((sum, item) => sum + Number(item.documentCount || 0), 0)
 )
@@ -168,7 +165,6 @@ onMounted(load)
               @click="setFilter('high_quality')"
             >
               <span>高质量</span>
-              <em>{{ highQualityCount }}</em>
             </button>
             <button
               type="button"
@@ -177,7 +173,6 @@ onMounted(load)
               @click="setFilter('economy')"
             >
               <span>经济</span>
-              <em>{{ economyCount }}</em>
             </button>
           </div>
 
