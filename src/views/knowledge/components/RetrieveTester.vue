@@ -1,21 +1,53 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { knowledgeApi } from '@/api/knowledge'
+import type { KnowledgeRetrieveRecord } from '@/api/knowledge/types'
 
-const props = defineProps<{ datasetId: string }>()
+const props = withDefaults(
+  defineProps<{
+    datasetId: string
+    datasetName?: string
+    defaultTopK?: number | null
+    defaultScoreThreshold?: number | null
+    defaultScoreThresholdEnabled?: boolean
+  }>(),
+  {
+    datasetName: '',
+    defaultTopK: 3,
+    defaultScoreThreshold: 0.5,
+    defaultScoreThresholdEnabled: false
+  }
+)
 
 const loading = ref(false)
 const query = ref('')
-const records = ref<any[]>([])
+const topK = ref(3)
+const scoreThresholdEnabled = ref(false)
+const scoreThreshold = ref(0.5)
+const records = ref<KnowledgeRetrieveRecord[]>([])
+const searched = ref(false)
 
-function pickRecords(payload: any): any[] {
-  if (Array.isArray(payload)) return payload
-  if (Array.isArray(payload?.records)) return payload.records
-  if (Array.isArray(payload?.data?.records)) return payload.data.records
-  if (Array.isArray(payload?.data)) return payload.data
-  return []
+function resetParameters() {
+  topK.value = Math.max(1, Number(props.defaultTopK) || 3)
+  scoreThreshold.value = Number(props.defaultScoreThreshold ?? 0.5)
+  scoreThresholdEnabled.value = Boolean(props.defaultScoreThresholdEnabled)
+  records.value = []
+  searched.value = false
+}
+
+function documentName(item: KnowledgeRetrieveRecord) {
+  return item.segment?.document?.name || '未命名文档'
+}
+
+function resultContent(item: KnowledgeRetrieveRecord) {
+  return item.segment?.content || item.segment?.answer || item.summary || '暂无可展示的分段内容'
+}
+
+function scoreText(score?: number) {
+  if (score == null || !Number.isFinite(Number(score))) return ''
+  return `${(Number(score) * 100).toFixed(1)}%`
 }
 
 async function submit() {
@@ -24,62 +56,277 @@ async function submit() {
     ElMessage.warning('请输入检索内容')
     return
   }
+  if (!props.datasetId) {
+    ElMessage.warning('请先选择知识库')
+    return
+  }
   loading.value = true
   try {
-    const res = await knowledgeApi.retrieve(props.datasetId, { query: text })
-    records.value = pickRecords(res)
+    const res = await knowledgeApi.retrieve(props.datasetId, {
+      query: text,
+      external_retrieval_model: {
+        top_k: Math.max(1, Math.floor(Number(topK.value) || 3)),
+        score_threshold: Number(scoreThreshold.value),
+        score_threshold_enabled: scoreThresholdEnabled.value
+      }
+    })
+    records.value = Array.isArray(res?.records) ? res.records : []
+    searched.value = true
   } catch (error: any) {
     ElMessage.error(error?.message || '检索测试失败')
   } finally {
     loading.value = false
   }
 }
+
+watch(
+  () => [
+    props.datasetId,
+    props.defaultTopK,
+    props.defaultScoreThreshold,
+    props.defaultScoreThresholdEnabled
+  ],
+  resetParameters,
+  { immediate: true }
+)
 </script>
 
 <template>
   <div class="retrieve-tester">
-    <div class="retrieve-input">
-      <el-input
-        v-model="query"
-        type="textarea"
-        :rows="3"
-        resize="none"
-        placeholder="输入一段问题或关键词，测试当前知识库的命中效果"
-        @keyup.ctrl.enter="submit"
-      />
-      <el-button type="primary" :icon="Search" :loading="loading" @click="submit">测试</el-button>
-    </div>
-
-    <div v-if="records.length" class="retrieve-list">
-      <article v-for="(item, index) in records" :key="item.id || index" class="retrieve-item">
-        <div class="retrieve-head">
-          <strong>{{
-            item.document_name || item.documentName || item.source || `命中 ${index + 1}`
-          }}</strong>
-          <span v-if="item.score != null">{{ Math.round(Number(item.score) * 100) }}%</span>
+    <section class="query-panel">
+      <div class="panel-heading">
+        <div>
+          <span>RETRIEVAL QUERY</span>
+          <h3>输入检索内容</h3>
         </div>
-        <p>{{ item.content || item.text || item.segment || item.answer || '-' }}</p>
-      </article>
-    </div>
+        <em v-if="datasetName">{{ datasetName }}</em>
+      </div>
 
-    <el-empty v-else description="暂无检索结果" />
+      <div class="retrieve-input">
+        <el-input
+          v-model="query"
+          type="textarea"
+          :rows="3"
+          maxlength="250"
+          show-word-limit
+          resize="none"
+          placeholder="输入问题或关键词，查看知识库中最相关的内容"
+          @keyup.ctrl.enter="submit"
+        />
+        <el-button type="primary" :icon="Search" :loading="loading" @click="submit">
+          开始检索
+        </el-button>
+      </div>
+
+      <div class="parameter-row">
+        <div class="parameter-item">
+          <div class="parameter-copy">
+            <strong>召回数量</strong>
+            <span>最多返回的相关分段数</span>
+          </div>
+          <el-input-number v-model="topK" :min="1" :precision="0" controls-position="right" />
+        </div>
+        <div class="parameter-item threshold-item">
+          <div class="parameter-copy">
+            <strong>相关度阈值</strong>
+            <span>过滤低于指定分数的内容</span>
+          </div>
+          <el-switch v-model="scoreThresholdEnabled" />
+          <el-input-number
+            v-model="scoreThreshold"
+            :min="0"
+            :max="1"
+            :step="0.1"
+            :precision="2"
+            :disabled="!scoreThresholdEnabled"
+            controls-position="right"
+          />
+        </div>
+      </div>
+      <p class="shortcut-hint">快捷键：Ctrl + Enter</p>
+    </section>
+
+    <section v-if="records.length" class="result-panel">
+      <div class="result-summary">
+        <div>
+          <span>RETRIEVAL RESULT</span>
+          <h3>召回结果</h3>
+        </div>
+        <em>共 {{ records.length }} 条</em>
+      </div>
+
+      <div class="retrieve-list">
+        <article
+          v-for="(item, index) in records"
+          :key="item.segment?.id || index"
+          class="retrieve-item"
+        >
+          <div class="retrieve-head">
+            <div class="document-title">
+              <span class="result-index">{{ index + 1 }}</span>
+              <div>
+                <strong>{{ documentName(item) }}</strong>
+                <small v-if="item.segment?.position != null">
+                  文档分段 #{{ item.segment.position }}
+                </small>
+              </div>
+            </div>
+            <span v-if="scoreText(item.score)" class="score-tag">{{ scoreText(item.score) }}</span>
+          </div>
+          <p>{{ resultContent(item) }}</p>
+          <div
+            v-if="item.segment?.answer && item.segment.answer !== item.segment.content"
+            class="result-answer"
+          >
+            <span>参考答案</span>
+            <p>{{ item.segment.answer }}</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <div v-else class="empty-panel">
+      <el-empty
+        :description="
+          searched ? '没有召回到相关内容，请尝试调整关键词或检索参数' : '输入内容后开始检索测试'
+        "
+      />
+    </div>
   </div>
 </template>
 
 <style scoped lang="less">
 .retrieve-tester {
   display: grid;
-  gap: 14px;
+  gap: 16px;
+}
+
+.query-panel,
+.result-panel,
+.empty-panel {
+  background: #fff;
+  border: 1px solid var(--border-soft, #e4eaf3);
+  border-radius: 16px;
+}
+
+.query-panel {
+  padding: 20px;
+}
+
+.panel-heading,
+.result-summary {
+  display: flex;
+  margin-bottom: 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.panel-heading span,
+.result-summary span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--primary, #2563eb);
+}
+
+.panel-heading h3,
+.result-summary h3 {
+  margin: 4px 0 0;
+  font-size: 17px;
+  color: var(--text-main, #172033);
+}
+
+.panel-heading em,
+.result-summary em {
+  max-width: 48%;
+  padding: 5px 10px;
+  overflow: hidden;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--primary, #2563eb);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--primary-soft, #eaf1ff);
+  border-radius: 999px;
 }
 
 .retrieve-input {
   display: grid;
-  padding: 14px;
-  background: var(--panel-soft, #f8faff);
-  border: 1px solid var(--border-soft, #e4eaf3);
-  border-radius: 16px;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
+}
+
+.retrieve-input :deep(.el-textarea__inner) {
+  min-height: 88px !important;
+  padding: 12px 14px;
+  line-height: 1.65;
+  border-radius: 12px;
+}
+
+.retrieve-input .el-button {
+  width: 112px;
+  height: 88px;
+  margin: 0;
+  border-radius: 12px;
+}
+
+.parameter-row {
+  display: grid;
+  padding: 14px;
+  margin-top: 14px;
+  background: var(--panel-soft, #f8faff);
+  border: 1px solid var(--border-soft, #e4eaf3);
+  border-radius: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.parameter-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.parameter-copy {
+  min-width: 0;
+  margin-right: auto;
+}
+
+.parameter-copy strong,
+.parameter-copy span {
+  display: block;
+}
+
+.parameter-copy strong {
+  font-size: 13px;
+  color: var(--text-main, #172033);
+}
+
+.parameter-copy span {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-tertiary, #94a3b8);
+}
+
+.parameter-item :deep(.el-input-number) {
+  width: 108px;
+}
+
+.shortcut-hint {
+  margin: 9px 2px 0;
+  font-size: 11px;
+  color: var(--text-tertiary, #94a3b8);
+}
+
+.result-panel {
+  padding: 18px;
+}
+
+.result-summary {
+  margin-bottom: 12px;
 }
 
 .retrieve-list {
@@ -88,8 +335,8 @@ async function submit() {
 }
 
 .retrieve-item {
-  padding: 14px;
-  background: #fff;
+  padding: 16px;
+  background: var(--panel-soft, #f8faff);
   border: 1px solid var(--border-soft, #e4eaf3);
   border-radius: 14px;
 }
@@ -101,30 +348,112 @@ async function submit() {
   gap: 12px;
 }
 
-.retrieve-head strong {
+.document-title {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.document-title > div {
+  min-width: 0;
+}
+
+.result-index {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary, #2563eb);
+  background: #fff;
+  border: 1px solid #dbe6f7;
+  border-radius: 9px;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.document-title strong,
+.document-title small {
+  display: block;
+}
+
+.document-title strong {
   overflow: hidden;
+  font-size: 13px;
   color: var(--text-main, #172033);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.retrieve-head span {
+.document-title small {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-tertiary, #94a3b8);
+}
+
+.score-tag {
+  padding: 4px 9px;
   font-family: var(--font-mono);
   font-size: 12px;
+  font-weight: 700;
   color: var(--primary, #2563eb);
+  background: var(--primary-soft, #eaf1ff);
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .retrieve-item p {
-  margin: 10px 0 0;
+  margin: 12px 0 0;
   font-size: 13px;
-  line-height: 1.7;
-  color: var(--text-secondary, #64748b);
+  line-height: 1.8;
+  color: #475569;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
-@media (width <= 760px) {
+.result-answer {
+  padding: 10px 12px;
+  margin-top: 12px;
+  background: #fff;
+  border-left: 3px solid var(--primary, #2563eb);
+  border-radius: 0 10px 10px 0;
+}
+
+.result-answer span {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary, #2563eb);
+}
+
+.result-answer p {
+  margin-top: 5px;
+}
+
+.empty-panel {
+  display: grid;
+  min-height: 210px;
+  place-items: center;
+}
+
+@media (width <= 640px) {
   .retrieve-input {
     grid-template-columns: 1fr;
+  }
+
+  .retrieve-input .el-button {
+    width: 100%;
+    height: 42px;
+  }
+
+  .threshold-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .threshold-item .parameter-copy {
+    width: calc(100% - 60px);
   }
 }
 </style>

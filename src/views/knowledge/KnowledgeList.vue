@@ -268,7 +268,19 @@ onMounted(load)
     <CreateDatasetDialog v-model="createVisible" @created="onCreated" />
 
     <el-drawer v-model="retrieveVisible" size="520px" title="检索测试">
-      <RetrieveTester v-if="retrieveDataset" :dataset-id="retrieveDataset.id" />
+      <RetrieveTester
+        v-if="retrieveDataset"
+        :dataset-id="retrieveDataset.id"
+        :dataset-name="retrieveDataset.name"
+        :default-top-k="retrieveDataset.topK ?? retrieveDataset.retrievalModel?.top_k"
+        :default-score-threshold="
+          retrieveDataset.scoreThreshold ?? retrieveDataset.retrievalModel?.score_threshold
+        "
+        :default-score-threshold-enabled="
+          retrieveDataset.scoreThresholdEnabled ??
+          retrieveDataset.retrievalModel?.score_threshold_enabled
+        "
+      />
     </el-drawer>
   </div>
 </template>

@@ -46,6 +46,37 @@ export interface RetrievalModel {
   score_threshold?: number | null
 }
 
+export interface KnowledgeRetrieveRequest {
+  query: string
+  external_retrieval_model: {
+    top_k: number
+    score_threshold: number
+    score_threshold_enabled: boolean
+  }
+}
+
+export interface KnowledgeRetrieveSegment {
+  id?: string
+  position?: number
+  content?: string
+  answer?: string | null
+  document?: {
+    id?: string | null
+    name?: string | null
+  }
+}
+
+export interface KnowledgeRetrieveRecord {
+  segment?: KnowledgeRetrieveSegment
+  score?: number
+  summary?: string | null
+}
+
+export interface KnowledgeRetrieveResponse {
+  query: string | { content?: string }
+  records: KnowledgeRetrieveRecord[]
+}
+
 export interface CreateDatasetRequest {
   name: string
   description?: string

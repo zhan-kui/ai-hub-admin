@@ -106,6 +106,16 @@ const staticRoutes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'knowledge/retrieve',
+        name: 'KnowledgeRetrieve',
+        component: () => import('@/views/knowledge/RetrievalTest.vue'),
+        meta: {
+          title: '检索测试',
+          hidden: true,
+          activeMenu: '/knowledge/retrieve'
+        }
+      },
+      {
         path: 'knowledge/:datasetId',
         name: 'KnowledgeDetail',
         component: () => import('@/views/knowledge/KnowledgeDetail.vue'),

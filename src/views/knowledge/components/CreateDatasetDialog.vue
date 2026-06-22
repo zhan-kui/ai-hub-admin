@@ -71,6 +71,10 @@ const rules: FormRules = {
       },
       trigger: 'change'
     }
+  ],
+  topK: [
+    { required: true, message: '请输入召回数量', trigger: 'change' },
+    { type: 'number', min: 1, message: '召回数量至少为 1', trigger: 'change' }
   ]
 }
 
@@ -144,7 +148,10 @@ function buildPayload(): CreateDatasetRequest {
     reranking_enable: form.mode === 'high_quality' ? form.rerankingEnable : false,
     top_k: Number(form.topK || 3),
     score_threshold_enabled: Boolean(form.scoreThresholdEnabled),
-    score_threshold: form.scoreThresholdEnabled ? Number(form.scoreThreshold || 0) : null
+    score_threshold:
+      form.scoreThresholdEnabled || form.mode === 'high_quality'
+        ? Number(form.scoreThreshold || 0)
+        : null
   }
 
   const payload: CreateDatasetRequest = {
@@ -280,6 +287,21 @@ watch(
                 :value="item.value"
               />
             </el-select>
+          </el-form-item>
+        </el-col>
+      </el-row>
+
+      <el-row :gutter="16">
+        <el-col :span="12">
+          <el-form-item label="召回数量 Top K" prop="topK">
+            <el-input-number
+              v-model="form.topK"
+              class="w-full"
+              :min="1"
+              :precision="0"
+              controls-position="right"
+            />
+            <span class="field-tip">检索时最多返回的相关分段数，默认为 3</span>
           </el-form-item>
         </el-col>
       </el-row>
@@ -465,6 +487,14 @@ watch(
 
 .w-full {
   width: 100%;
+}
+
+.field-tip {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-tertiary, #94a3b8);
 }
 
 @media (width <= 760px) {

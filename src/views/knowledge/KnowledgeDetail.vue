@@ -314,7 +314,18 @@ onMounted(reloadAll)
         </el-tab-pane>
 
         <el-tab-pane label="检索测试" name="retrieve">
-          <RetrieveTester v-if="dataset" :dataset-id="dataset.id" />
+          <RetrieveTester
+            v-if="dataset"
+            :dataset-id="dataset.id"
+            :dataset-name="dataset.name"
+            :default-top-k="dataset.topK ?? dataset.retrievalModel?.top_k"
+            :default-score-threshold="
+              dataset.scoreThreshold ?? dataset.retrievalModel?.score_threshold
+            "
+            :default-score-threshold-enabled="
+              dataset.scoreThresholdEnabled ?? dataset.retrievalModel?.score_threshold_enabled
+            "
+          />
         </el-tab-pane>
       </el-tabs>
     </section>

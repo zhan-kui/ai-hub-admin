@@ -9,6 +9,8 @@ import type {
   DocumentPageResult,
   DocumentVO,
   IndexingStatusItem,
+  KnowledgeRetrieveRequest,
+  KnowledgeRetrieveResponse,
   ModelOption,
   ModelType,
   PageResult,
@@ -59,8 +61,10 @@ export const knowledgeApi = {
 
   remove: (datasetId: string) => unwrap<boolean>(apiClient.delete(`${BASE}/datasets/${datasetId}`)),
 
-  retrieve: (datasetId: string, body: { query: string }) =>
-    unwrap<any>(apiClient.post(`${BASE}/datasets/${datasetId}/retrieve`, body))
+  retrieve: (datasetId: string, body: KnowledgeRetrieveRequest) =>
+    unwrap<KnowledgeRetrieveResponse>(
+      apiClient.post(`${BASE}/datasets/${datasetId}/retrieve`, body)
+    )
 }
 
 export const knowledgeDocApi = {
