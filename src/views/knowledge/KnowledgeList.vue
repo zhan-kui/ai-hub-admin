@@ -7,7 +7,6 @@ import { knowledgeApi } from '@/api/knowledge'
 import type { DatasetVO, IndexingTechnique } from '@/api/knowledge/types'
 import { avatarColor, compactNumber, datasetInitial } from './utils'
 import CreateDatasetDialog from './components/CreateDatasetDialog.vue'
-import RetrieveTester from './components/RetrieveTester.vue'
 
 type FilterType = '' | IndexingTechnique
 
@@ -16,8 +15,6 @@ const loading = ref(false)
 const list = ref<DatasetVO[]>([])
 const total = ref(0)
 const createVisible = ref(false)
-const retrieveVisible = ref(false)
-const retrieveDataset = ref<DatasetVO | null>(null)
 
 const query = reactive({
   page: 1,
@@ -73,11 +70,6 @@ function openDetail(row: DatasetVO) {
   router.push(`/knowledge/${row.id}`)
 }
 
-function openRetrieve(row: DatasetVO) {
-  retrieveDataset.value = row
-  retrieveVisible.value = true
-}
-
 async function removeDataset(row: DatasetVO) {
   try {
     await ElMessageBox.confirm(`确认删除知识库「${row.name}」？该操作不可恢复。`, '删除确认', {
@@ -99,7 +91,6 @@ async function removeDataset(row: DatasetVO) {
 
 function handleMore(command: string, row: DatasetVO) {
   if (command === 'detail') openDetail(row)
-  if (command === 'retrieve') openRetrieve(row)
   if (command === 'delete') void removeDataset(row)
 }
 
@@ -237,7 +228,6 @@ onMounted(load)
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item command="detail">进入知识库</el-dropdown-item>
-                    <el-dropdown-item command="retrieve">检索测试</el-dropdown-item>
                     <el-dropdown-item command="delete">
                       <span class="danger-text">删除</span>
                     </el-dropdown-item>
@@ -266,22 +256,6 @@ onMounted(load)
     </section>
 
     <CreateDatasetDialog v-model="createVisible" @created="onCreated" />
-
-    <el-drawer v-model="retrieveVisible" size="520px" title="检索测试">
-      <RetrieveTester
-        v-if="retrieveDataset"
-        :dataset-id="retrieveDataset.id"
-        :dataset-name="retrieveDataset.name"
-        :default-top-k="retrieveDataset.topK ?? retrieveDataset.retrievalModel?.top_k"
-        :default-score-threshold="
-          retrieveDataset.scoreThreshold ?? retrieveDataset.retrievalModel?.score_threshold
-        "
-        :default-score-threshold-enabled="
-          retrieveDataset.scoreThresholdEnabled ??
-          retrieveDataset.retrievalModel?.score_threshold_enabled
-        "
-      />
-    </el-drawer>
   </div>
 </template>
 

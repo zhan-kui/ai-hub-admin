@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { knowledgeApi, knowledgeDocApi } from '@/api/knowledge'
@@ -25,18 +25,28 @@ const loading = ref(false)
 const query = ref('')
 const topK = ref(3)
 const scoreThresholdEnabled = ref(false)
-const scoreThreshold = ref(0.5)
-const records = ref<KnowledgeRetrieveRecord[]>([])
+const scoreThresholdPercent = ref(50)
+const rawRecords = ref<KnowledgeRetrieveRecord[]>([])
 const searched = ref(false)
 const documentNames = ref<Record<string, string>>({})
 const expandedRecordKeys = ref<string[]>([])
 let documentLoadToken = 0
 
+const scoreThreshold = computed(() => scoreThresholdPercent.value / 100)
+const records = computed(() => {
+  if (!scoreThresholdEnabled.value) return rawRecords.value
+  return rawRecords.value.filter((item) => {
+    const score = Number(item.score)
+    return Number.isFinite(score) && score >= scoreThreshold.value
+  })
+})
+
 function resetParameters() {
   topK.value = Math.max(1, Number(props.defaultTopK) || 3)
-  scoreThreshold.value = Number(props.defaultScoreThreshold ?? 0.5)
+  const defaultThreshold = Number(props.defaultScoreThreshold ?? 0.5)
+  scoreThresholdPercent.value = Math.round(Math.min(1, Math.max(0, defaultThreshold)) * 100)
   scoreThresholdEnabled.value = Boolean(props.defaultScoreThresholdEnabled)
-  records.value = []
+  rawRecords.value = []
   searched.value = false
   expandedRecordKeys.value = []
 }
@@ -123,11 +133,11 @@ async function submit() {
       query: text,
       external_retrieval_model: {
         top_k: Math.max(1, Math.floor(Number(topK.value) || 3)),
-        score_threshold: Number(scoreThreshold.value),
+        score_threshold: scoreThreshold.value,
         score_threshold_enabled: scoreThresholdEnabled.value
       }
     })
-    records.value = Array.isArray(res?.records) ? res.records : []
+    rawRecords.value = Array.isArray(res?.records) ? res.records : []
     searched.value = true
   } catch (error: any) {
     ElMessage.error(error?.message || '检索测试失败')
@@ -195,19 +205,28 @@ watch(
           <div class="parameter-head">
             <div class="parameter-copy">
               <strong>相关度阈值</strong>
-              <span>过滤低于指定分数的内容</span>
+              <span>
+                {{
+                  scoreThresholdEnabled
+                    ? `仅保留相关度不低于 ${scoreThresholdPercent}% 的内容`
+                    : '开启后过滤低于指定百分比的内容'
+                }}
+              </span>
             </div>
             <el-switch v-model="scoreThresholdEnabled" />
           </div>
-          <el-input-number
-            v-model="scoreThreshold"
-            :min="0"
-            :max="1"
-            :step="0.1"
-            :precision="2"
-            :disabled="!scoreThresholdEnabled"
-            controls-position="right"
-          />
+          <div class="threshold-control">
+            <el-input-number
+              v-model="scoreThresholdPercent"
+              :min="0"
+              :max="100"
+              :step="5"
+              :precision="0"
+              :disabled="!scoreThresholdEnabled"
+              controls-position="right"
+            />
+            <span class="threshold-unit" :class="{ disabled: !scoreThresholdEnabled }">%</span>
+          </div>
         </div>
       </div>
       <p class="shortcut-hint">快捷键：Ctrl + Enter</p>
@@ -398,6 +417,29 @@ watch(
 
 .parameter-item :deep(.el-input-number) {
   width: 100%;
+}
+
+.threshold-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  gap: 8px;
+}
+
+.threshold-unit {
+  display: grid;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary, #64748b);
+  background: #fff;
+  border: 1px solid var(--border-soft, #e4eaf3);
+  border-radius: 8px;
+  place-items: center;
+}
+
+.threshold-unit.disabled {
+  color: var(--text-tertiary, #94a3b8);
+  background: #f5f7fa;
 }
 
 .shortcut-hint {
