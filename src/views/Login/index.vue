@@ -24,6 +24,7 @@ const captchaRaw = ref('')
 const formRef = ref<FormInstance>()
 
 const LOGIN_TRANSITION_DELAY = 600
+const DEFAULT_HOME_PATH = '/dashboard/home'
 
 const form = reactive<LoginForm>({
   username: 'admin',
@@ -56,6 +57,15 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
+function resolvePostLoginPath() {
+  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+  const redirectPath = redirect.split('?')[0]
+  if (!redirect || ['/', '/login', '/404'].includes(redirectPath)) {
+    return DEFAULT_HOME_PATH
+  }
+  return redirect
+}
+
 async function submit() {
   if (!formRef.value) return
   await formRef.value.validate()
@@ -78,9 +88,8 @@ async function submit() {
       duration: 1800,
       customClass: 'login-success-message'
     })
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
     await delay(LOGIN_TRANSITION_DELAY)
-    await router.replace(redirect)
+    await router.replace(resolvePostLoginPath())
   } catch (error: any) {
     loginTransition.value = false
     ElMessage.error(error?.message || '登录失败，请重试')

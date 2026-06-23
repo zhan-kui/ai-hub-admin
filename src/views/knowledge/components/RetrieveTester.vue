@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
-import { knowledgeApi } from '@/api/knowledge'
+import { knowledgeApi, knowledgeDocApi } from '@/api/knowledge'
 import type { KnowledgeRetrieveRecord } from '@/api/knowledge/types'
 
 const props = withDefaults(
@@ -28,6 +28,9 @@ const scoreThresholdEnabled = ref(false)
 const scoreThreshold = ref(0.5)
 const records = ref<KnowledgeRetrieveRecord[]>([])
 const searched = ref(false)
+const documentNames = ref<Record<string, string>>({})
+const expandedRecordKeys = ref<string[]>([])
+let documentLoadToken = 0
 
 function resetParameters() {
   topK.value = Math.max(1, Number(props.defaultTopK) || 3)
@@ -35,10 +38,12 @@ function resetParameters() {
   scoreThresholdEnabled.value = Boolean(props.defaultScoreThresholdEnabled)
   records.value = []
   searched.value = false
+  expandedRecordKeys.value = []
 }
 
 function documentName(item: KnowledgeRetrieveRecord) {
-  return item.segment?.document?.name || '未命名文档'
+  const documentId = item.segment?.document_id || item.segment?.document?.id || ''
+  return item.segment?.document?.name || documentNames.value[documentId] || '未知来源文档'
 }
 
 function resultContent(item: KnowledgeRetrieveRecord) {
@@ -48,6 +53,58 @@ function resultContent(item: KnowledgeRetrieveRecord) {
 function scoreText(score?: number) {
   if (score == null || !Number.isFinite(Number(score))) return ''
   return `${(Number(score) * 100).toFixed(1)}%`
+}
+
+function recordKey(item: KnowledgeRetrieveRecord, index: number) {
+  return item.segment?.id || `${item.segment?.document_id || 'record'}-${index}`
+}
+
+function isExpanded(item: KnowledgeRetrieveRecord, index: number) {
+  return expandedRecordKeys.value.includes(recordKey(item, index))
+}
+
+function hasMoreDetails(item: KnowledgeRetrieveRecord) {
+  const content = resultContent(item)
+  const hasAnswer = Boolean(item.segment?.answer && item.segment.answer !== item.segment.content)
+  return content.length > 160 || content.split(/\r?\n/).length > 5 || hasAnswer
+}
+
+function toggleDetails(item: KnowledgeRetrieveRecord, index: number) {
+  const key = recordKey(item, index)
+  expandedRecordKeys.value = isExpanded(item, index)
+    ? expandedRecordKeys.value.filter((itemKey) => itemKey !== key)
+    : [...expandedRecordKeys.value, key]
+}
+
+async function loadDocumentNames(datasetId: string) {
+  const token = ++documentLoadToken
+  documentNames.value = {}
+  if (!datasetId) return
+
+  try {
+    const names: Record<string, string> = {}
+    const limit = 100
+    let page = 1
+    let hasMore = true
+
+    while (hasMore) {
+      const result = await knowledgeDocApi.list(datasetId, { page, limit })
+      const documents = result.data || []
+      documents.forEach((document) => {
+        names[document.id] = document.name
+      })
+      hasMore = Boolean(result.has_more) && documents.length > 0
+      page += 1
+    }
+
+    if (token === documentLoadToken) {
+      documentNames.value = names
+    }
+  } catch (error: any) {
+    if (token === documentLoadToken) {
+      ElMessage.warning(error?.message || '文档名称加载失败，召回内容仍可正常查看')
+    }
+  }
 }
 
 async function submit() {
@@ -89,6 +146,12 @@ watch(
   resetParameters,
   { immediate: true }
 )
+
+watch(
+  () => props.datasetId,
+  (datasetId) => void loadDocumentNames(datasetId),
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -120,18 +183,22 @@ watch(
 
       <div class="parameter-row">
         <div class="parameter-item">
-          <div class="parameter-copy">
-            <strong>召回数量</strong>
-            <span>最多返回的相关分段数</span>
+          <div class="parameter-head">
+            <div class="parameter-copy">
+              <strong>召回数量</strong>
+              <span>最多返回的相关分段数</span>
+            </div>
           </div>
           <el-input-number v-model="topK" :min="1" :precision="0" controls-position="right" />
         </div>
         <div class="parameter-item threshold-item">
-          <div class="parameter-copy">
-            <strong>相关度阈值</strong>
-            <span>过滤低于指定分数的内容</span>
+          <div class="parameter-head">
+            <div class="parameter-copy">
+              <strong>相关度阈值</strong>
+              <span>过滤低于指定分数的内容</span>
+            </div>
+            <el-switch v-model="scoreThresholdEnabled" />
           </div>
-          <el-switch v-model="scoreThresholdEnabled" />
           <el-input-number
             v-model="scoreThreshold"
             :min="0"
@@ -173,9 +240,25 @@ watch(
             </div>
             <span v-if="scoreText(item.score)" class="score-tag">{{ scoreText(item.score) }}</span>
           </div>
-          <p>{{ resultContent(item) }}</p>
+          <p class="result-content" :class="{ expanded: isExpanded(item, index) }">
+            {{ resultContent(item) }}
+          </p>
+          <div class="detail-action">
+            <button
+              v-if="hasMoreDetails(item)"
+              type="button"
+              class="detail-toggle"
+              @click="toggleDetails(item, index)"
+            >
+              {{ isExpanded(item, index) ? '收起详情' : '查看详情' }}
+            </button>
+          </div>
           <div
-            v-if="item.segment?.answer && item.segment.answer !== item.segment.content"
+            v-if="
+              isExpanded(item, index) &&
+              item.segment?.answer &&
+              item.segment.answer !== item.segment.content
+            "
             class="result-answer"
           >
             <span>参考答案</span>
@@ -274,25 +357,27 @@ watch(
 
 .parameter-row {
   display: grid;
-  padding: 14px;
   margin-top: 14px;
-  background: var(--panel-soft, #f8faff);
-  border: 1px solid var(--border-soft, #e4eaf3);
-  border-radius: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
 .parameter-item {
-  display: flex;
+  display: grid;
   min-width: 0;
-  align-items: center;
+  padding: 14px;
+  background: var(--panel-soft, #f8faff);
+  border: 1px solid var(--border-soft, #e4eaf3);
+  border-radius: 12px;
   gap: 12px;
 }
 
-.parameter-copy {
-  min-width: 0;
-  margin-right: auto;
+.parameter-head {
+  display: flex;
+  min-height: 38px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .parameter-copy strong,
@@ -312,7 +397,7 @@ watch(
 }
 
 .parameter-item :deep(.el-input-number) {
-  width: 108px;
+  width: 100%;
 }
 
 .shortcut-hint {
@@ -404,13 +489,47 @@ watch(
   flex-shrink: 0;
 }
 
-.retrieve-item p {
+.result-content {
+  display: -webkit-box;
+  height: 112px;
   margin: 12px 0 0;
+  overflow: hidden;
   font-size: 13px;
   line-height: 1.8;
   color: #475569;
   word-break: break-word;
   white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+}
+
+.result-content.expanded {
+  display: block;
+  height: auto;
+  min-height: 112px;
+  overflow: visible;
+}
+
+.detail-action {
+  display: flex;
+  min-height: 28px;
+  padding-top: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.detail-toggle {
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--primary, #2563eb);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.detail-toggle:hover {
+  color: var(--primary-strong, #1d4ed8);
 }
 
 .result-answer {
@@ -428,7 +547,12 @@ watch(
 }
 
 .result-answer p {
-  margin-top: 5px;
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #475569;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .empty-panel {
@@ -447,13 +571,8 @@ watch(
     height: 42px;
   }
 
-  .threshold-item {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .threshold-item .parameter-copy {
-    width: calc(100% - 60px);
+  .parameter-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -7,6 +7,7 @@ import { resetRouter } from '@/router'
 import { useNProgress } from '@/hooks/web/useNProgress'
 
 const PLATFORM = 'pc'
+const DEFAULT_HOME_PATH = '/dashboard/home'
 const WHITE_LIST = new Set<string>(['/login', '/404'])
 
 let isLoadingDynamicRoutes = false
@@ -37,7 +38,7 @@ export function setupAuthGuard(router: Router): void {
     setStaticToken(token)
 
     if (to.path === '/login') {
-      return '/'
+      return DEFAULT_HOME_PATH
     }
 
     try {

@@ -58,6 +58,7 @@ export interface KnowledgeRetrieveRequest {
 export interface KnowledgeRetrieveSegment {
   id?: string
   position?: number
+  document_id?: string
   content?: string
   answer?: string | null
   document?: {
