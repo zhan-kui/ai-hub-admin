@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
+import { Icon } from '@iconify/vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type { PromptTemplate } from '@/api/promptTemplate'
+import ImportPromptDialog from '@/views/PromptTemplate/components/ImportPromptDialog.vue'
 import { MODEL_OPTIONS } from '../../constants'
 import type { CanvasGraphEdge, CanvasGraphNode, LlmNodeData } from '../../types'
 import VariablePicker from '../../variables/VariablePicker.vue'
@@ -26,6 +30,7 @@ const systemScene = computed(() => 'system' as const)
 const userScene = computed(() => 'user' as const)
 const systemSources = useVariableSources(systemScene, currentNodeId, graphNodes, graphEdges)
 const userSources = useVariableSources(userScene, currentNodeId, graphNodes, graphEdges)
+const importVisible = ref(false)
 
 watch(
   () => props.nodeData,
@@ -46,6 +51,27 @@ function handleSave() {
   emit('save', cloneData(formData))
 }
 
+async function handleImportPrompt(template: PromptTemplate) {
+  const currentPrompt = formData.systemPrompt?.trim()
+  if (!currentPrompt) {
+    formData.systemPrompt = template.content
+  } else {
+    try {
+      await ElMessageBox.confirm('系统提示词已有内容，请选择替换或追加。', '引入提示词', {
+        confirmButtonText: '替换',
+        cancelButtonText: '追加',
+        distinguishCancelAndClose: true,
+        type: 'warning'
+      })
+      formData.systemPrompt = template.content
+    } catch (action) {
+      if (action !== 'cancel') return
+      formData.systemPrompt = `${formData.systemPrompt}\n\n${template.content}`
+    }
+  }
+  ElMessage.success('已引入，请用 / 把 {{占位符}} 替换为变量')
+}
+
 function cloneData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
@@ -57,17 +83,31 @@ function cloneData<T>(value: T): T {
       <el-input v-model="formData.title" maxlength="40" />
     </el-form-item>
 
-    <el-form-item label="系统提示词" required>
-      <VariablePicker
-        :model-value="formData.systemPrompt"
-        :sources="systemSources"
-        :rows="6"
-        :maxlength="4000"
-        :show-word-limit="true"
-        placeholder="输入 / 可插入变量，例如：根据用户输入回答问题"
-        aria-label="系统提示词"
-        @update:model-value="(value) => (formData.systemPrompt = value)"
-      />
+    <el-form-item required>
+      <template #label>
+        <div class="prompt-label">
+          <span>系统提示词</span>
+        </div>
+      </template>
+      <div class="system-prompt-wrap">
+        <VariablePicker
+          :model-value="formData.systemPrompt"
+          :sources="systemSources"
+          :rows="6"
+          :maxlength="4000"
+          :show-word-limit="true"
+          placeholder="输入 / 可插入变量，例如：根据用户输入回答问题"
+          aria-label="系统提示词"
+          @update:model-value="(value) => (formData.systemPrompt = value)"
+        />
+        <button type="button" class="import-prompt-btn" @click="importVisible = true">
+          <span class="import-icon"><Icon icon="tabler:sparkles" /></span>
+          <span>
+            <strong>引入提示词</strong>
+            <em>模板库</em>
+          </span>
+        </button>
+      </div>
       <div class="form-tip">提示：输入 <code>/</code> 可插入变量。系统提示词不支持文件变量。</div>
     </el-form-item>
 
@@ -147,6 +187,8 @@ function cloneData<T>(value: T): T {
   <div class="footer">
     <el-button type="primary" @click="handleSave">保存配置</el-button>
   </div>
+
+  <ImportPromptDialog v-model="importVisible" @selected="handleImportPrompt" />
 </template>
 
 <style scoped lang="less">
@@ -155,6 +197,83 @@ function cloneData<T>(value: T): T {
   font-size: 12px;
   line-height: 1.4;
   color: var(--el-text-color-secondary);
+}
+
+.prompt-label {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.system-prompt-wrap {
+  position: relative;
+  width: 100%;
+
+  :deep(.vp-textarea),
+  :deep(.vp-highlight-layer) {
+    padding-top: 42px;
+  }
+}
+
+.import-prompt-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: inline-flex;
+  height: 30px;
+  padding: 3px 10px 3px 5px;
+  color: #1d4ed8;
+  cursor: pointer;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 95%), rgb(239 246 255 / 92%)) padding-box,
+    linear-gradient(135deg, #93c5fd, #c4b5fd) border-box;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  box-shadow:
+    0 8px 18px rgb(37 99 235 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 80%);
+  align-items: center;
+  gap: 6px;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 12px 24px rgb(37 99 235 / 18%),
+      inset 0 1px 0 rgb(255 255 255 / 90%);
+  }
+
+  strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  em {
+    display: block;
+    margin-top: 1px;
+    font-size: 10px;
+    font-style: normal;
+    line-height: 1;
+    color: #64748b;
+    transform: scale(0.9);
+    transform-origin: left center;
+  }
+}
+
+.import-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-radius: 50%;
+  place-items: center;
 }
 
 .footer {

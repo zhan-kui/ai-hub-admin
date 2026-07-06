@@ -232,7 +232,10 @@ function handleBlur() {
     <div ref="highlightRef" class="vp-highlight-layer" aria-hidden="true">
       <template v-for="(seg, index) in segments" :key="index">
         <span v-if="seg.type === 'text'" class="vp-text">{{ seg.raw }}</span>
-        <span v-else class="vp-chip" :title="seg.raw">{{ seg.label }}</span>
+        <span v-else class="vp-chip" :title="seg.raw">
+          <span class="vp-chip-measure">{{ seg.raw }}</span>
+          <span class="vp-chip-label">{{ seg.label }}</span>
+        </span>
       </template>
       <span class="vp-tail">&#8203;</span>
     </div>
@@ -344,18 +347,31 @@ function handleBlur() {
 }
 
 .vp-chip {
-  display: inline-flex;
-  padding: 0 6px;
+  position: relative;
+  display: inline-block;
+  min-width: 2.8em;
   margin: 0 1px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--el-color-primary);
+  color: transparent;
   white-space: nowrap;
   vertical-align: baseline;
   background: rgb(64 158 255 / 12%);
-  border: 1px solid rgb(64 158 255 / 35%);
   border-radius: 4px;
-  align-items: center;
+  box-shadow: inset 0 0 0 1px rgb(64 158 255 / 35%);
+}
+
+.vp-chip-measure {
+  visibility: hidden;
+}
+
+.vp-chip-label {
+  position: absolute;
+  inset: 0 5px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: inherit;
+  color: var(--el-color-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .vp-word-limit {

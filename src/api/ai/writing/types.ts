@@ -11,8 +11,8 @@ export interface WritingGeneratePayload {
 }
 
 export const WRITING_APP_ID_MAP: Record<WritingActionType, number> = {
-  continue: 2,
-  polish: 3
+  continue: 9,
+  polish: 10
 }
 
 export type DocId = string | number

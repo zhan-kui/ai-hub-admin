@@ -97,6 +97,17 @@ const staticRoutes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'prompt-template',
+        alias: 'prompt-template/index',
+        name: 'PromptTemplate',
+        component: () => import('@/views/PromptTemplate/PromptTemplate.vue'),
+        meta: {
+          title: '提示词模板',
+          hidden: true,
+          activeMenu: '/prompt-template'
+        }
+      },
+      {
         path: 'knowledge',
         name: 'KnowledgeList',
         component: () => import('@/views/knowledge/KnowledgeList.vue'),
