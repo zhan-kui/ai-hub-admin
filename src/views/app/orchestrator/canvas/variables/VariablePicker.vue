@@ -303,6 +303,8 @@ function handleBlur() {
   font-family: var(--el-font-family, inherit);
   font-size: var(--el-input-font-size, 14px);
   line-height: 1.6;
+  letter-spacing: 0;
+  tab-size: 2;
   word-wrap: break-word;
   white-space: pre-wrap;
   border-radius: var(--el-input-border-radius, 4px);
@@ -349,8 +351,6 @@ function handleBlur() {
 .vp-chip {
   position: relative;
   display: inline-block;
-  min-width: 2.8em;
-  margin: 0 1px;
   color: transparent;
   white-space: nowrap;
   vertical-align: baseline;
@@ -365,11 +365,15 @@ function handleBlur() {
 
 .vp-chip-label {
   position: absolute;
-  inset: 0 5px;
+  inset: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
   font-size: 12px;
   line-height: inherit;
   color: var(--el-color-primary);
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
