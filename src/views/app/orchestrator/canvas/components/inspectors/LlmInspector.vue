@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { knowledgeModelApi } from '@/api/knowledge'
+import type { ModelOption as KnowledgeModelOption } from '@/api/knowledge/types'
 import type { PromptTemplate } from '@/api/promptTemplate'
 import ImportPromptDialog from '@/views/PromptTemplate/components/ImportPromptDialog.vue'
-import { MODEL_OPTIONS } from '../../constants'
 import type { CanvasGraphEdge, CanvasGraphNode, LlmNodeData } from '../../types'
 import VariablePicker from '../../variables/VariablePicker.vue'
 import { useVariableSources } from '../../variables/useVariableSources'
@@ -31,6 +32,30 @@ const userScene = computed(() => 'user' as const)
 const systemSources = useVariableSources(systemScene, currentNodeId, graphNodes, graphEdges)
 const userSources = useVariableSources(userScene, currentNodeId, graphNodes, graphEdges)
 const importVisible = ref(false)
+const loadingModels = ref(false)
+const llmModels = ref<KnowledgeModelOption[]>([])
+const selectedModelKey = computed({
+  get: () => toModelKey(formData.model.provider, formData.model.name),
+  set: (value: string) => updateSelectedModel(value)
+})
+const llmOptions = computed(() => {
+  const options = llmModels.value.map((item) => ({
+    label: item.name || item.model,
+    value: toModelKey(item.provider, item.model),
+    provider: item.provider,
+    model: item.model
+  }))
+  const selectedValue = selectedModelKey.value
+  if (selectedValue && !options.some((item) => item.value === selectedValue)) {
+    options.unshift({
+      label: formData.model.name,
+      value: selectedValue,
+      provider: formData.model.provider,
+      model: formData.model.name
+    })
+  }
+  return options
+})
 
 watch(
   () => props.nodeData,
@@ -40,10 +65,32 @@ watch(
   { deep: true, immediate: true }
 )
 
-function handleModelChange(modelName: string) {
-  const matched = MODEL_OPTIONS.find((item) => item.value === modelName)
+function toModelKey(provider: string, model: string) {
+  if (!model) return ''
+  return `${provider}::${model}`
+}
+
+function updateSelectedModel(value: string) {
+  const matched = llmOptions.value.find((item) => item.value === value)
   if (matched) {
     formData.model.provider = matched.provider
+    formData.model.name = matched.model
+  }
+}
+
+async function loadLlmModels() {
+  if (loadingModels.value || llmModels.value.length) return
+  loadingModels.value = true
+  try {
+    const models = await knowledgeModelApi.getAvailableModels('llm')
+    llmModels.value = models || []
+    if (!formData.model.name && llmOptions.value[0]) {
+      selectedModelKey.value = llmOptions.value[0].value
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || '模型列表加载失败')
+  } finally {
+    loadingModels.value = false
   }
 }
 
@@ -75,6 +122,10 @@ async function handleImportPrompt(template: PromptTemplate) {
 function cloneData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
+
+onMounted(() => {
+  void loadLlmModels()
+})
 </script>
 
 <template>
@@ -130,9 +181,14 @@ function cloneData<T>(value: T): T {
     <el-row :gutter="12">
       <el-col :span="14">
         <el-form-item label="模型">
-          <el-select v-model="formData.model.name" @change="handleModelChange">
+          <el-select
+            v-model="selectedModelKey"
+            filterable
+            :loading="loadingModels"
+            placeholder="请选择模型"
+          >
             <el-option
-              v-for="item in MODEL_OPTIONS"
+              v-for="item in llmOptions"
               :key="item.value"
               :label="item.label"
               :value="item.value"
