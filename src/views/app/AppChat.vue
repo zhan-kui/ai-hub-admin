@@ -3,7 +3,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import { useResizeObserver } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Close, Delete, Microphone, Paperclip, Plus } from '@element-plus/icons-vue'
+import {
+  ArrowDown,
+  ArrowLeft,
+  Close,
+  Delete,
+  Microphone,
+  Paperclip,
+  Plus
+} from '@element-plus/icons-vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
@@ -94,8 +102,8 @@ const messageListRef = ref<HTMLElement | null>(null)
 const draftRef = ref<HTMLElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const shouldStickToBottom = ref(true)
-const thoughtSettlingByMessageId = ref<Record<string, boolean>>({})
-const thoughtSettlingTimers = new Map<string, number>()
+const showJumpToLatest = ref(false)
+const thoughtOpenByMessageId = ref<Record<string, boolean>>({})
 
 // ── 流式草稿：流式过程中只更新这个 ref，完全不碰 store ──
 interface StreamingDraft {
@@ -127,10 +135,13 @@ function scheduleDraftRender() {
 
 // 自动跟底部：只监听草稿 div 的 resize，不用每帧 scrollToBottom
 const draftResizeObserver = new ResizeObserver(() => {
+  const wrap = getScrollWrapEl()
   if (shouldStickToBottom.value) {
-    const wrap = getScrollWrapEl()
     if (wrap) wrap.scrollTop = wrap.scrollHeight
+    showJumpToLatest.value = false
+    return
   }
+  if (wrap) updateJumpToLatestVisibility(wrap)
 })
 
 const currentConversationId = computed(() => chatStore.getCurrentConversationId)
@@ -438,6 +449,7 @@ async function scrollToBottom(behavior: ScrollBehavior = 'auto') {
   const wrap = getScrollWrapEl()
   if (!wrap) return
   wrap.scrollTo({ top: wrap.scrollHeight, behavior })
+  if (behavior === 'auto') showJumpToLatest.value = false
 }
 
 function requestStickBottom(behavior: ScrollBehavior = 'auto') {
@@ -445,16 +457,49 @@ function requestStickBottom(behavior: ScrollBehavior = 'auto') {
   void scrollToBottom(behavior)
 }
 
+function updateJumpToLatestVisibility(wrap: HTMLElement) {
+  const distanceToBottom = wrap.scrollHeight - (wrap.scrollTop + wrap.clientHeight)
+  const hasActiveOutput = Boolean(streamingDraft.value || isGenerating.value)
+  showJumpToLatest.value = hasActiveOutput && distanceToBottom > 120
+}
+
+async function scrollToMessageStart(messageId: string, behavior: ScrollBehavior = 'auto') {
+  await nextTick()
+  const wrap = getScrollWrapEl()
+  const list = messageListRef.value
+  if (!wrap || !list) return
+  const target = Array.from(list.querySelectorAll<HTMLElement>('[data-message-id]')).find(
+    (item) => item.dataset.messageId === messageId
+  )
+  if (!target) return
+  shouldStickToBottom.value = false
+  const targetTop = target.getBoundingClientRect().top - wrap.getBoundingClientRect().top
+  wrap.scrollTo({ top: wrap.scrollTop + targetTop, behavior })
+  updateJumpToLatestVisibility(wrap)
+}
+
 function handleMessageScroll() {
   const wrap = getScrollWrapEl()
   if (!wrap) return
   const distanceToBottom = wrap.scrollHeight - (wrap.scrollTop + wrap.clientHeight)
   shouldStickToBottom.value = distanceToBottom < 80
+  updateJumpToLatestVisibility(wrap)
 }
 
 useResizeObserver(messageListRef, () => {
-  if (shouldStickToBottom.value) void scrollToBottom('auto')
+  if (shouldStickToBottom.value) {
+    void scrollToBottom('auto')
+    return
+  }
+  const wrap = getScrollWrapEl()
+  if (wrap) updateJumpToLatestVisibility(wrap)
 })
+
+function handleJumpToLatest() {
+  shouldStickToBottom.value = true
+  showJumpToLatest.value = false
+  void scrollToBottom('smooth')
+}
 
 function pickList(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload
@@ -644,6 +689,35 @@ function summarizeConversationNameFromMessages(list: ChatMessage[]): string | nu
   return firstUserMessage.content.replace(/\s+/g, ' ').trim().slice(0, 28)
 }
 
+function summarizeConversationNameFromText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, 28) || '新对话'
+}
+
+function ensureConversationInList(conversationId: string, name: string) {
+  if (!conversationId) return
+  const fallbackName = name.trim() || '新对话'
+  const exists = conversations.value.some((item) => item.id === conversationId)
+  if (exists) {
+    conversations.value = conversations.value.map((item) => {
+      if (item.id !== conversationId) return item
+      if (!isFallbackConversationName(item.name)) return item
+      return { ...item, name: fallbackName }
+    })
+    return
+  }
+  conversations.value = [
+    {
+      id: conversationId,
+      name: fallbackName,
+      raw: {
+        id: conversationId,
+        name: fallbackName
+      }
+    },
+    ...conversations.value
+  ]
+}
+
 function patchConversationNameIfNeeded(conversationId: string, fallbackSource: ChatMessage[]) {
   if (!conversationId) return
   const nextName = summarizeConversationNameFromMessages(fallbackSource)
@@ -655,12 +729,22 @@ function patchConversationNameIfNeeded(conversationId: string, fallbackSource: C
   })
 }
 
-function isThoughtSettling(messageId: string): boolean {
-  return thoughtSettlingByMessageId.value[messageId] === true
+function isThoughtPanelOpen(message: ChatMessage): boolean {
+  return thoughtOpenByMessageId.value[message.id] === true
 }
 
-function isThoughtPanelOpen(message: ChatMessage): boolean {
-  return message.isThinking || isThoughtSettling(message.id)
+function handleThoughtToggle(message: ChatMessage, event: Event) {
+  const target = event.target as HTMLDetailsElement
+  thoughtOpenByMessageId.value = {
+    ...thoughtOpenByMessageId.value,
+    [message.id]: target.open
+  }
+}
+
+function handleDraftThoughtToggle(event: Event) {
+  if (!streamingDraft.value) return
+  const target = event.target as HTMLDetailsElement
+  streamingDraft.value.thoughtOpen = target.open
 }
 
 // 流式结束后一次性将草稿写入 store
@@ -678,6 +762,12 @@ function commitDraft(draft: StreamingDraft) {
     }
   })
   chatStore.setMessages(next)
+  if (draft.thoughtOpen) {
+    thoughtOpenByMessageId.value = {
+      ...thoughtOpenByMessageId.value,
+      [draft.id]: true
+    }
+  }
 }
 
 function normalizeStreamPayload(raw: unknown): Record<string, unknown> {
@@ -1124,6 +1214,7 @@ function resetMessageActionsState() {
   feedbackByMessageId.value = {}
   suggestedByMessageId.value = {}
   suggestedLoadingByMessageId.value = {}
+  thoughtOpenByMessageId.value = {}
 }
 
 function resetChatState() {
@@ -1169,21 +1260,35 @@ async function loadConversations(preferredId?: string, selectFirst = false, sile
     return
   }
   if (!silent) conversationLoading.value = true
+  const previousConversations = conversations.value
   try {
     const response = await conversationApi.list({ appId: appId.value, page: 1, limit: 100 })
     const list = pickList(response)
     const parsed = list
       .map((item, index) => parseConversation(item, index))
       .filter((item): item is ConversationItem => Boolean(item))
-    conversations.value = parsed
     if (parsed.length === 0) {
+      if (silent) {
+        conversations.value = previousConversations
+        return
+      }
+      conversations.value = []
       chatStore.setCurrentConversationId(null)
       chatStore.setMessages([])
       return
     }
+    conversations.value = parsed
     if (preferredId && parsed.some((item) => item.id === preferredId)) {
       chatStore.setCurrentConversationId(preferredId)
       if (!silent) await loadMessages(preferredId)
+      return
+    }
+    if (preferredId && silent) {
+      const previousPreferred = previousConversations.find((item) => item.id === preferredId)
+      if (previousPreferred) {
+        conversations.value = [previousPreferred, ...parsed]
+      }
+      chatStore.setCurrentConversationId(preferredId)
       return
     }
     if (selectFirst) {
@@ -1197,6 +1302,7 @@ async function loadConversations(preferredId?: string, selectFirst = false, sile
       parsed.some((item) => item.id === currentConversationId.value)
     )
       return
+    if (silent) return
     chatStore.setCurrentConversationId(null)
     chatStore.setMessages([])
   } catch (error: unknown) {
@@ -1264,6 +1370,7 @@ function handleNewConversation() {
   chatStore.setMessages([])
   chatStore.setTaskId(null)
   chatStore.setUploadedFiles([])
+  showJumpToLatest.value = false
   resetMessageActionsState()
   inputValue.value = ''
   requestStickBottom('auto')
@@ -1326,6 +1433,7 @@ async function handleStopGeneration() {
       }
     }
     activeAssistantMessageId.value = null
+    showJumpToLatest.value = false
     stopLoading.value = false
   }
 }
@@ -1365,7 +1473,8 @@ async function handleSend() {
     createdAt: new Date().toISOString(),
     backendMessageId: undefined
   })
-  requestStickBottom('smooth')
+  shouldStickToBottom.value = false
+  void scrollToMessageStart(userMessageId, 'smooth')
 
   // 初始化草稿，流式内容全部写这里
   streamingDraft.value = {
@@ -1419,7 +1528,6 @@ async function handleSend() {
                 patchDraft({
                   thought: streamingDraft.value.thought + delta,
                   isThinking: true,
-                  thoughtOpen: true,
                   backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
                 })
               } else if (chunkType === 'thought_end') {
@@ -1510,8 +1618,9 @@ async function handleSend() {
 
     const latestConversationId = chatStore.getCurrentConversationId
     if (!previousConversationId && latestConversationId) {
+      const fallbackTitle = summarizeConversationNameFromText(question)
+      ensureConversationInList(latestConversationId, fallbackTitle)
       await loadConversations(latestConversationId, false, true)
-      const fallbackTitle = question.replace(/\s+/g, ' ').trim().slice(0, 28)
       if (fallbackTitle) {
         conversations.value = conversations.value.map((item) => {
           if (item.id !== latestConversationId) return item
@@ -1552,6 +1661,7 @@ async function handleSend() {
     if (streamController.value === controller) streamController.value = null
     if (activeAssistantMessageId.value === assistantMessageId) activeAssistantMessageId.value = null
     chatStore.setGenerating(false)
+    showJumpToLatest.value = false
     if (sendSucceeded && attachedFiles.length > 0) chatStore.setUploadedFiles([])
   }
 }
@@ -1600,10 +1710,9 @@ onBeforeUnmount(() => {
     streamController.value = null
   }
   activeAssistantMessageId.value = null
+  showJumpToLatest.value = false
   stopLoading.value = false
-  thoughtSettlingTimers.forEach((timerId) => window.clearTimeout(timerId))
-  thoughtSettlingTimers.clear()
-  thoughtSettlingByMessageId.value = {}
+  thoughtOpenByMessageId.value = {}
   releaseAudioResources()
   chatStore.setGenerating(false)
   // 清理草稿相关资源
@@ -1841,6 +1950,7 @@ onBeforeUnmount(() => {
                       "
                       class="msg-row"
                       :class="`role-${message.role}`"
+                      :data-message-id="message.id"
                     >
                       <!-- Avatar -->
                       <div
@@ -1876,6 +1986,7 @@ onBeforeUnmount(() => {
                               v-if="message.thought || message.isThinking"
                               class="thought-panel"
                               :open="isThoughtPanelOpen(message)"
+                              @toggle="handleThoughtToggle(message, $event)"
                             >
                               <summary class="thought-summary">
                                 <span
@@ -2016,7 +2127,8 @@ onBeforeUnmount(() => {
                         <details
                           v-if="streamingDraft.thought || streamingDraft.isThinking"
                           class="thought-panel"
-                          :open="streamingDraft.thoughtOpen || streamingDraft.isThinking"
+                          :open="streamingDraft.thoughtOpen"
+                          @toggle="handleDraftThoughtToggle"
                         >
                           <summary class="thought-summary">
                             <span
@@ -2049,14 +2161,7 @@ onBeforeUnmount(() => {
                         ></div>
 
                         <!-- 纯等待状态（还没有任何内容） -->
-                        <div
-                          v-if="
-                            !streamingDraft.thought &&
-                            !streamingDraft.content &&
-                            streamingDraft.isThinking
-                          "
-                          class="draft-waiting"
-                        >
+                        <div v-if="!streamingDraft.content && isGenerating" class="draft-waiting">
                           <span></span><span></span><span></span>
                         </div>
                       </div>
@@ -2066,6 +2171,16 @@ onBeforeUnmount(() => {
               </template>
             </div>
           </el-scrollbar>
+          <button
+            v-if="showJumpToLatest"
+            type="button"
+            class="jump-latest-btn"
+            title="跳转到最新输出"
+            aria-label="跳转到最新输出"
+            @click="handleJumpToLatest"
+          >
+            <el-icon><ArrowDown /></el-icon>
+          </button>
         </div>
 
         <!-- ═══ 输入区 ═══ -->
@@ -2611,6 +2726,7 @@ onBeforeUnmount(() => {
    Message Panel
 ═══════════════════════════════ */
 .message-panel {
+  position: relative;
   flex: 1;
   min-height: 0;
 }
@@ -2618,6 +2734,43 @@ onBeforeUnmount(() => {
 .message-scroll {
   width: 100%;
   height: 100%;
+}
+
+.jump-latest-btn {
+  position: absolute;
+  right: 28px;
+  bottom: 18px;
+  z-index: 10;
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  color: var(--sky-dark);
+  cursor: pointer;
+  background: var(--white);
+  border: 1px solid rgb(14 165 233 / 24%);
+  border-radius: 999px;
+  box-shadow:
+    0 10px 24px rgb(15 23 42 / 12%),
+    0 0 0 6px rgb(14 165 233 / 8%);
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    color 0.18s ease;
+}
+
+.jump-latest-btn:hover {
+  color: var(--sky);
+  transform: translateY(-2px);
+  box-shadow:
+    0 14px 30px rgb(15 23 42 / 16%),
+    0 0 0 8px rgb(14 165 233 / 12%);
+}
+
+.jump-latest-btn :deep(.el-icon) {
+  font-size: 18px;
 }
 
 .message-scroll-inner {
