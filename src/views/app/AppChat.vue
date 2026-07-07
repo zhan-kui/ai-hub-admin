@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowLeft,
   Close,
+  CopyDocument,
   Delete,
   Microphone,
   Paperclip,
@@ -1400,6 +1401,37 @@ async function handleFeedback(message: ChatMessage, rating: FeedbackRating) {
   }
 }
 
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+async function handleCopyMessage(message: ChatMessage) {
+  const content = message.content?.trim()
+  if (!content) {
+    ElMessage.warning('暂无可复制内容')
+    return
+  }
+  try {
+    await copyTextToClipboard(content)
+    ElMessage.success('已复制')
+  } catch (error: unknown) {
+    ElMessage.error(extractErrorMessage(error) || '复制失败')
+  }
+}
+
 function handlePickSuggestedQuestion(question: string) {
   if (!question.trim()) return
   inputValue.value = question
@@ -2061,6 +2093,15 @@ onBeforeUnmount(() => {
                                     />
                                   </svg>
                                   <span>没帮助</span>
+                                </button>
+                                <button
+                                  v-if="message.content"
+                                  class="copy-reply-btn"
+                                  title="复制回复"
+                                  aria-label="复制回复"
+                                  @click="handleCopyMessage(message)"
+                                >
+                                  <el-icon><CopyDocument /></el-icon>
                                 </button>
                               </div>
                               <div
@@ -3271,7 +3312,9 @@ onBeforeUnmount(() => {
 
 .feedback-row {
   display: flex;
+  width: 100%;
   gap: 6px;
+  align-items: center;
 }
 
 .feedback-btn {
@@ -3308,6 +3351,39 @@ onBeforeUnmount(() => {
   color: #dc2626;
   background: #fef2f2;
   border-color: #fecaca;
+}
+
+.copy-reply-btn {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin-left: auto;
+  color: var(--slate-400);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  opacity: 1;
+  align-items: center;
+  justify-content: center;
+  transition:
+    opacity 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.copy-reply-btn:hover,
+.copy-reply-btn:focus-visible {
+  color: var(--sky-dark);
+  background: var(--sky-pale);
+  border-color: rgb(14 165 233 / 22%);
+  outline: none;
+}
+
+.copy-reply-btn :deep(.el-icon) {
+  font-size: 15px;
 }
 
 .suggested-list {
