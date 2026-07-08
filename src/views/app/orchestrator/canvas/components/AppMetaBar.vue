@@ -3,6 +3,14 @@ import type { CanvasAppMeta } from '../types'
 import IconUploader from '@/views/app/components/IconUploader.vue'
 
 const appMeta = defineModel<CanvasAppMeta>({ required: true })
+withDefaults(
+  defineProps<{
+    nameLabel?: string
+  }>(),
+  {
+    nameLabel: '应用名称'
+  }
+)
 </script>
 
 <template>
@@ -14,7 +22,7 @@ const appMeta = defineModel<CanvasAppMeta>({ required: true })
         </el-form-item>
       </el-col>
       <el-col :span="8">
-        <el-form-item label="应用名称" required>
+        <el-form-item :label="nameLabel" required>
           <el-input v-model="appMeta.name" maxlength="80" show-word-limit />
         </el-form-item>
       </el-col>

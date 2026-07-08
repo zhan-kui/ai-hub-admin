@@ -4,14 +4,18 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { useRoute, useRouter } from 'vue-router'
 import { Clock, MoreFilled, Plus, Search, QuestionFilled } from '@element-plus/icons-vue'
 import IconUploader from './components/IconUploader.vue'
+import WorkflowEditConfirmDialog from './components/WorkflowEditConfirmDialog.vue'
 import {
   appApi,
   orchestrationApi,
+  workflowApi,
   type AppStarterPrompt,
   type AppConfigVO,
   type CreateAppBasicRequest,
   type PageResult,
-  type UpdateAppBasicRequest
+  type UpdateAppBasicRequest,
+  type WorkflowBindingAppVO,
+  type WorkflowVO
 } from '@/api/frontend-api'
 import {
   PROMPT_ICON_OPTIONS,
@@ -128,6 +132,15 @@ const basicDialogSubmitText = computed(() => (isCreateDialogMode.value ? '下一
 const parameterDrawerVisible = ref(false)
 const parameterTitle = ref('智能体参数')
 const parameterText = ref('')
+const workflowBindVisible = ref(false)
+const workflowBindLoading = ref(false)
+const workflowBindingRow = ref<AppRow | null>(null)
+const workflowOptions = ref<WorkflowVO[]>([])
+const selectedWorkflowId = ref<number | ''>('')
+const workflowEditConfirmVisible = ref(false)
+const workflowEditConfirmApps = ref<WorkflowBindingAppVO[]>([])
+const pendingEditWorkflowId = ref<number | null>(null)
+const pendingEditWorkflowName = ref('')
 
 const statusMap: Record<string, string> = {
   DRAFT: '草稿',
@@ -166,6 +179,10 @@ function getAppTypeMeta(value?: string): AppTypeMeta | undefined {
 
 function getAppTypeLabel(value?: string): string {
   return getAppTypeMeta(value)?.label || (value ? String(value) : 'UNKNOWN')
+}
+
+function isWorkflowRow(row: AppRow): boolean {
+  return normalizeAppTypeKey(row.appType) === 'workflow'
 }
 
 function getAppTypeChipClass(value?: string): string {
@@ -458,11 +475,26 @@ async function submitBasicForm() {
     if (isCreateDialogMode.value) {
       const result = await appApi.createBasic(toCreateBasicPayload())
       dialogVisible.value = false
+      if (pendingCreateMode.value === 'blank') {
+        ElMessage.success('基础信息保存成功，请绑定工作流')
+        await loadApps()
+        const createdRow =
+          appList.value.find((item) => Number(item.id) === Number(result.id)) ||
+          ({
+            id: result.id,
+            appName: formData.appName,
+            appType: 'workflow',
+            workflowId: undefined
+          } as AppRow)
+        void openWorkflowBind(createdRow)
+        return
+      }
+
       ElMessage.success('基础信息保存成功')
       await router.push({
         path: '/agents/orchestrator/create',
         query: {
-          mode: pendingCreateMode.value === 'blank' ? 'blank' : 'template',
+          mode: 'template',
           edit: String(result.id),
           from: route.fullPath
         }
@@ -533,7 +565,103 @@ async function showParameters(row: AppRow) {
   }
 }
 
+async function openWorkflowBind(row: AppRow) {
+  workflowBindingRow.value = row
+  selectedWorkflowId.value = row.workflowId ? Number(row.workflowId) : ''
+  workflowBindVisible.value = true
+  workflowBindLoading.value = true
+  try {
+    const response = await workflowApi.list({ pageNum: 1, pageSize: 200 })
+    workflowOptions.value = response.records || []
+  } catch (error: any) {
+    ElMessage.error(error?.message || '工作流列表加载失败')
+  } finally {
+    workflowBindLoading.value = false
+  }
+}
+
+async function removeAppFromWorkflow(workflowId: number, appId: number) {
+  const bindings = await workflowApi.getBindings(workflowId)
+  await workflowApi.updateBindings(workflowId, {
+    appIds: bindings.map((item) => Number(item.id)).filter((id) => id !== appId)
+  })
+}
+
+async function bindAppToWorkflow(workflowId: number, appId: number) {
+  const bindings = await workflowApi.getBindings(workflowId)
+  const appIds = new Set<number>(bindings.map((item: WorkflowBindingAppVO) => Number(item.id)))
+  appIds.add(appId)
+  await workflowApi.updateBindings(workflowId, { appIds: Array.from(appIds) })
+}
+
+async function submitWorkflowBind() {
+  const row = workflowBindingRow.value
+  if (!row) return
+
+  const appId = Number(row.id)
+  const prevWorkflowId = row.workflowId ? Number(row.workflowId) : null
+  const nextWorkflowId = selectedWorkflowId.value ? Number(selectedWorkflowId.value) : null
+
+  if (prevWorkflowId === nextWorkflowId) {
+    workflowBindVisible.value = false
+    return
+  }
+
+  workflowBindLoading.value = true
+  try {
+    if (!nextWorkflowId && prevWorkflowId) {
+      await removeAppFromWorkflow(prevWorkflowId, appId)
+    } else if (nextWorkflowId) {
+      await bindAppToWorkflow(nextWorkflowId, appId)
+    }
+    ElMessage.success(nextWorkflowId ? '工作流已绑定' : '工作流已解绑')
+    workflowBindVisible.value = false
+    await loadApps()
+  } catch (error: any) {
+    ElMessage.error(error?.message || '工作流绑定失败')
+  } finally {
+    workflowBindLoading.value = false
+  }
+}
+
+async function editBoundWorkflow(row: AppRow) {
+  if (!row.workflowId) {
+    ElMessage.warning('请先绑定工作流')
+    return
+  }
+  try {
+    const bindings = await workflowApi.getBindings(Number(row.workflowId))
+    if (bindings.length) {
+      pendingEditWorkflowId.value = Number(row.workflowId)
+      pendingEditWorkflowName.value = row.workflowName || ''
+      workflowEditConfirmApps.value = bindings
+      workflowEditConfirmVisible.value = true
+      return
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || '工作流绑定信息加载失败')
+    return
+  }
+  openWorkflowEditor(Number(row.workflowId))
+}
+
+function openWorkflowEditor(workflowId: number) {
+  router.push({
+    path: '/workflows/editor',
+    query: { edit: String(workflowId), from: route.fullPath }
+  })
+}
+
+function confirmEditBoundWorkflow() {
+  if (!pendingEditWorkflowId.value) return
+  openWorkflowEditor(pendingEditWorkflowId.value)
+}
+
 async function publishApp(row: AppRow) {
+  if (isWorkflowRow(row) && !row.workflowId) {
+    ElMessage.warning('请先绑定工作流')
+    return
+  }
   try {
     await ElMessageBox.confirm(
       `确认发布智能体【${row.appName}】吗？\n发布后会将当前保存流程转换为 Dify 智能体并生效。`,
@@ -587,6 +715,14 @@ function handleMoreCommand(command: string, row: AppRow) {
   }
   if (command === 'params') {
     void showParameters(row)
+    return
+  }
+  if (command === 'bindWorkflow') {
+    void openWorkflowBind(row)
+    return
+  }
+  if (command === 'editWorkflow') {
+    void editBoundWorkflow(row)
     return
   }
   if (command === 'delete') {
@@ -768,6 +904,14 @@ onMounted(() => {
               <span class="type-tag" :class="getAppTypeChipClass(row.appType)">
                 {{ getAppTypeLabel(row.appType) }}
               </span>
+              <span
+                v-if="isWorkflowRow(row)"
+                class="workflow-tag"
+                :class="{ empty: !row.workflowId }"
+              >
+                <template v-if="!row.workflowId">未绑定工作流</template>
+                <template v-else>已绑定工作流</template>
+              </span>
               <span class="version-tag">v{{ row.version || 0 }}</span>
             </div>
 
@@ -796,6 +940,16 @@ onMounted(() => {
                       {{ row.publishStatus === 'PUBLISHED' ? '重新发布' : '发布' }}
                     </el-dropdown-item>
                     <el-dropdown-item command="basic">改基本信息</el-dropdown-item>
+                    <el-dropdown-item v-if="isWorkflowRow(row)" command="bindWorkflow">
+                      绑定/更换工作流
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-if="isWorkflowRow(row)"
+                      :disabled="!row.workflowId"
+                      command="editWorkflow"
+                    >
+                      编辑绑定工作流
+                    </el-dropdown-item>
                     <el-dropdown-item command="params">参数</el-dropdown-item>
                     <el-dropdown-item command="delete">
                       <span class="danger-text">删除</span>
@@ -895,6 +1049,47 @@ onMounted(() => {
       </button>
     </div>
   </el-dialog>
+
+  <el-dialog
+    v-model="workflowBindVisible"
+    title="绑定工作流"
+    width="520px"
+    destroy-on-close
+    align-center
+  >
+    <div v-loading="workflowBindLoading" class="workflow-bind-body">
+      <p class="workflow-bind-hint">
+        Chatflow 应用发布时会读取绑定工作流生成 Dify 配置；工作流变更后需要重新发布应用。
+      </p>
+      <el-select
+        v-model="selectedWorkflowId"
+        class="w-full"
+        placeholder="请选择工作流"
+        clearable
+        filterable
+      >
+        <el-option
+          v-for="workflow in workflowOptions"
+          :key="workflow.id"
+          :label="`${workflow.workflowName} · v${workflow.version || 0}`"
+          :value="Number(workflow.id)"
+        />
+      </el-select>
+    </div>
+    <template #footer>
+      <el-button @click="workflowBindVisible = false">取消</el-button>
+      <el-button type="primary" :loading="workflowBindLoading" @click="submitWorkflowBind">
+        保存绑定
+      </el-button>
+    </template>
+  </el-dialog>
+
+  <WorkflowEditConfirmDialog
+    v-model="workflowEditConfirmVisible"
+    :workflow-name="pendingEditWorkflowName"
+    :apps="workflowEditConfirmApps"
+    @confirm="confirmEditBoundWorkflow"
+  />
 
   <!-- 优化后的“创建/修改智能体基础信息”弹框 -->
   <el-dialog
@@ -1645,6 +1840,7 @@ onMounted(() => {
 .status-tag,
 .enabled-tag,
 .type-tag,
+.workflow-tag,
 .version-tag {
   display: inline-flex;
   height: 24px;
@@ -1711,6 +1907,17 @@ onMounted(() => {
 .type-unknown {
   color: #475569;
   background: #f1f5f9;
+}
+
+.workflow-tag {
+  max-width: 138px;
+  color: #0f766e;
+  background: #ecfdf5;
+}
+
+.workflow-tag.empty {
+  color: #b91c1c;
+  background: #fff1f2;
 }
 
 .version-tag {
@@ -1825,6 +2032,16 @@ onMounted(() => {
   --text-secondary: #64748b;
   --border-soft: #e8eef7;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', menlo, monospace;
+}
+
+.workflow-bind-body {
+  min-height: 120px;
+}
+
+.workflow-bind-hint {
+  margin: 0 0 14px;
+  line-height: 1.7;
+  color: #64748b;
 }
 
 .create-dialog-header {

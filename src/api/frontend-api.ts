@@ -235,6 +235,11 @@ export interface AppConfigVO {
   version?: number
   currentDraftVersion?: number
   currentPublishedVersion?: number
+  workflowId?: number
+  workflowName?: string
+  workflowVersion?: number
+  publishedWorkflowVersion?: number
+  workflowOutdated?: boolean
   lastEditedAt?: string
   publishedAt?: string
   lastPublishedAt?: string
@@ -271,6 +276,46 @@ export interface PageResult<T> {
   total: number
   pageNum: number
   pageSize: number
+}
+
+export interface WorkflowVO {
+  id: number
+  workflowName: string
+  description?: string
+  icon?: string
+  iconBackground?: string
+  version: number
+  bindingCount: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface WorkflowCanvasDetail {
+  id: number
+  version: number
+  bindingCount: number
+  updatedAt?: string
+  appMeta: Record<string, any>
+  flow: Record<string, any>
+}
+
+export interface WorkflowBindingAppVO {
+  id: number
+  appName: string
+  description?: string
+  enabled?: boolean
+  publishStatus?: AppPublishStatus | string
+  workflowId?: number
+  workflowName?: string
+  workflowVersion?: number
+  publishedWorkflowVersion?: number
+  workflowOutdated?: boolean
+}
+
+export type SaveWorkflowCanvasPayload = CanvasSnapshotPayload & { version?: number }
+
+export interface UpdateWorkflowBindingsPayload {
+  appIds: number[]
 }
 
 function listApps(): Promise<AppConfigVO[]>
@@ -816,6 +861,47 @@ export const appApi = {
 
   getParameters(id: number, config?: AxiosRequestConfig) {
     return unwrap<AnyObject>(apiClient.get(`/apps/${id}/parameters`, config))
+  }
+}
+
+export const workflowApi = {
+  list(
+    params?: { pageNum?: number; pageSize?: number; keyword?: string },
+    config?: AxiosRequestConfig
+  ) {
+    return unwrap<PageResult<WorkflowVO>>(apiClient.get('/api/workflows', { ...config, params }))
+  },
+
+  createCanvas(payload: SaveWorkflowCanvasPayload, config?: AxiosRequestConfig) {
+    return unwrap<WorkflowCanvasDetail>(apiClient.post('/api/workflows/canvas', payload, config))
+  },
+
+  updateCanvas(id: number, payload: SaveWorkflowCanvasPayload, config?: AxiosRequestConfig) {
+    return unwrap<WorkflowCanvasDetail>(
+      apiClient.put(`/api/workflows/${id}/canvas`, payload, config)
+    )
+  },
+
+  getCanvas(id: number, config?: AxiosRequestConfig) {
+    return unwrap<WorkflowCanvasDetail>(apiClient.get(`/api/workflows/${id}/canvas`, config))
+  },
+
+  getBindings(id: number, config?: AxiosRequestConfig) {
+    return unwrap<WorkflowBindingAppVO[]>(apiClient.get(`/api/workflows/${id}/bindings`, config))
+  },
+
+  updateBindings(id: number, payload: UpdateWorkflowBindingsPayload, config?: AxiosRequestConfig) {
+    return unwrap<WorkflowBindingAppVO[]>(
+      apiClient.put(`/api/workflows/${id}/bindings`, payload, config)
+    )
+  },
+
+  listBindableApps(config?: AxiosRequestConfig) {
+    return unwrap<WorkflowBindingAppVO[]>(apiClient.get('/api/workflows/bindable-apps', config))
+  },
+
+  delete(id: number, config?: AxiosRequestConfig) {
+    return unwrap<void>(apiClient.delete(`/api/workflows/${id}`, config))
   }
 }
 
@@ -1439,6 +1525,7 @@ export const api = {
   dept: deptApi,
   menu: menuApi,
   app: appApi,
+  workflow: workflowApi,
   resourceAuth: resourceAuthApi,
   chat: chatApi,
   conversation: conversationApi,

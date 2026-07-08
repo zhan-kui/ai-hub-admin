@@ -19,7 +19,7 @@
 ### 品牌色 / Brand
 
 | Token | 值 | 用途 |
-|---|---|---|
+| --- | --- | --- |
 | `--brand-primary` | `#6366f1` | 主操作按钮、激活状态、强调色 |
 | `--brand-primary-dark` | `#4f46e5` | 主色 hover 深化 |
 | `--brand-primary-light` | `#818cf8` | 次要强调、图标点缀 |
@@ -27,37 +27,37 @@
 
 ### 功能色 / Semantic
 
-| 颜色 | 十六进制 | 用途 |
-|---|---|---|
-| 成功绿 | `#10b981` | 状态 badge、成功提示 |
+| 颜色   | 十六进制  | 用途                   |
+| ------ | --------- | ---------------------- |
+| 成功绿 | `#10b981` | 状态 badge、成功提示   |
 | 警告橙 | `#f59e0b` | 警告状态、用户管理图标 |
-| 错误红 | `#ef4444` | 危险操作、错误图标 |
-| 信息紫 | `#8b5cf6` | 请求量统计图标 |
+| 错误红 | `#ef4444` | 危险操作、错误图标     |
+| 信息紫 | `#8b5cf6` | 请求量统计图标         |
 
 ### 中性色 / Neutral
 
-| Token | 值 | 用途 |
-|---|---|---|
+| Token    | 值        | 用途               |
+| -------- | --------- | ------------------ |
 | 文字主色 | `#111827` | 页面标题、重要数据 |
 | 文字次色 | `#374151` | 普通正文、卡片标题 |
 | 文字辅助 | `#6b7280` | 描述文字、占位文字 |
-| 文字禁用 | `#9ca3af` | 禁用态、metadata |
-| 边框颜色 | `#e5e7eb` | 卡片边框、分割线 |
-| 浅边框 | `#f1f3f5` | 行分割、内部边框 |
-| 页面背景 | `#f3f4f8` | main 内容区背景 |
-| 卡片背景 | `#ffffff` | 所有白色卡片 |
+| 文字禁用 | `#9ca3af` | 禁用态、metadata   |
+| 边框颜色 | `#e5e7eb` | 卡片边框、分割线   |
+| 浅边框   | `#f1f3f5` | 行分割、内部边框   |
+| 页面背景 | `#f3f4f8` | main 内容区背景    |
+| 卡片背景 | `#ffffff` | 所有白色卡片       |
 
 ### 侧边栏专用色
 
-| 名称 | 值 | 用途 |
-|---|---|---|
-| 侧边栏背景 | `#111827` | el-aside 背景 |
-| 菜单项文字 | `#9ca3af` | 非激活菜单文字 |
-| 菜单项 hover | `rgba(255,255,255,0.06)` | 悬停背景 |
-| 激活菜单背景 | `rgba(99,102,241,0.14)` | 当前选中菜单 |
-| 激活菜单文字 | `#a5b4fc` | 当前选中菜单文字 |
-| 激活左边框 | `3px solid #6366f1` | 激活菜单指示条 |
-| 分割线 | `rgba(255,255,255,0.06)` | Logo/Footer 分割线 |
+| 名称         | 值                       | 用途               |
+| ------------ | ------------------------ | ------------------ |
+| 侧边栏背景   | `#111827`                | el-aside 背景      |
+| 菜单项文字   | `#9ca3af`                | 非激活菜单文字     |
+| 菜单项 hover | `rgba(255,255,255,0.06)` | 悬停背景           |
+| 激活菜单背景 | `rgba(99,102,241,0.14)`  | 当前选中菜单       |
+| 激活菜单文字 | `#a5b4fc`                | 当前选中菜单文字   |
+| 激活左边框   | `3px solid #6366f1`      | 激活菜单指示条     |
+| 分割线       | `rgba(255,255,255,0.06)` | Logo/Footer 分割线 |
 
 ---
 
@@ -71,14 +71,14 @@ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica N
 
 ### 字号层级
 
-| 级别 | 字号 | 字重 | 用途 |
-|---|---|---|---|
-| 页面标题 | `20px` | `700` | `.page-title` |
-| 卡片标题 | `15px` | `600` | `.section-title` |
-| 正文 | `14px` | `400` | 普通内容、消息气泡 |
-| 辅助信息 | `13px` | `400/500` | 表单标签、info 行 |
-| 小字 | `12px` | `400` | 描述文字、stat-label |
-| 极小字 | `11px` | `400/700` | 时间戳、badge、图标标注 |
+| 级别     | 字号   | 字重      | 用途                    |
+| -------- | ------ | --------- | ----------------------- |
+| 页面标题 | `20px` | `700`     | `.page-title`           |
+| 卡片标题 | `15px` | `600`     | `.section-title`        |
+| 正文     | `14px` | `400`     | 普通内容、消息气泡      |
+| 辅助信息 | `13px` | `400/500` | 表单标签、info 行       |
+| 小字     | `12px` | `400`     | 描述文字、stat-label    |
+| 极小字   | `11px` | `400/700` | 时间戳、badge、图标标注 |
 
 ---
 
@@ -86,36 +86,36 @@ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica N
 
 基础单位：`4px`
 
-| 名称 | 值 | 场景 |
-|---|---|---|
-| xs | `4px` | 内联元素间距 |
-| sm | `8px` | 列表项内间距 |
-| md | `12–14px` | 气泡 padding、表单控件 |
-| lg | `16–20px` | 卡片 padding、消息间距 |
-| xl | `24px` | 页面 padding、section 间距 |
-| 2xl | `28px` | Dashboard section gap |
+| 名称 | 值        | 场景                       |
+| ---- | --------- | -------------------------- |
+| xs   | `4px`     | 内联元素间距               |
+| sm   | `8px`     | 列表项内间距               |
+| md   | `12–14px` | 气泡 padding、表单控件     |
+| lg   | `16–20px` | 卡片 padding、消息间距     |
+| xl   | `24px`    | 页面 padding、section 间距 |
+| 2xl  | `28px`    | Dashboard section gap      |
 
 ---
 
 ## 五、圆角系统
 
-| 名称 | 值 | 用途 |
-|---|---|---|
-| xs | `4px` | badge、tag |
-| sm | `6px` | 消息气泡内部元素 |
-| md | `8px` | 侧边栏 avatar、菜单 hover（未来）|
-| lg | `10px` | action card、info card |
-| xl | `12px` | stat card、消息气泡 |
-| pill | `999px` | file chip、badge |
+| 名称 | 值      | 用途                              |
+| ---- | ------- | --------------------------------- |
+| xs   | `4px`   | badge、tag                        |
+| sm   | `6px`   | 消息气泡内部元素                  |
+| md   | `8px`   | 侧边栏 avatar、菜单 hover（未来） |
+| lg   | `10px`  | action card、info card            |
+| xl   | `12px`  | stat card、消息气泡               |
+| pill | `999px` | file chip、badge                  |
 
 ---
 
 ## 六、阴影系统
 
 ```css
---shadow-sm:   0 1px 2px rgba(0, 0, 0, 0.05);
---shadow-md:   0 4px 12px rgba(0, 0, 0, 0.08);
---shadow-lg:   0 8px 24px rgba(0, 0, 0, 0.12);
+--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+--shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
 --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 0 1px rgba(0, 0, 0, 0.04);
 ```
 
@@ -176,6 +176,7 @@ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica N
 ```
 
 图标颜色系列：
+
 - `--primary` → `#6366f1` (indigo)
 - `--purple` → `#8b5cf6`
 - `--green` → `#10b981`
@@ -184,8 +185,7 @@ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica N
 
 ### 快捷入口卡（Action Card）
 
-使用 `el-card shadow="never"` + 自定义图标 + 标题 + 描述结构。
-hover 时：`border-color: #6366f1`，`box-shadow` 带品牌色光晕，`transform: translateY(-1px)`。
+使用 `el-card shadow="never"` + 自定义图标 + 标题 + 描述结构。hover 时：`border-color: #6366f1`，`box-shadow` 带品牌色光晕，`transform: translateY(-1px)`。
 
 ### 消息气泡（Message Bubble）
 
@@ -221,24 +221,36 @@ box-shadow: 0 2px 6px rgba(14, 165, 233, 0.3);
   font-size: 11px;
   font-weight: 600;
 }
-.badge--success { background: rgba(16,185,129,0.1); color: #059669; }
-.badge--warning { background: rgba(245,158,11,0.1); color: #d97706; }
-.badge--danger  { background: rgba(239,68,68,0.1);  color: #dc2626; }
-.badge--info    { background: rgba(99,102,241,0.1);  color: #4f46e5; }
+.badge--success {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+.badge--warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+}
+.badge--danger {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+.badge--info {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+}
 ```
 
 ---
 
 ## 九、交互规范
 
-| 状态 | 效果 |
-|---|---|
-| hover（卡片） | `box-shadow` 升级，无背景色突变 |
-| hover（列表项） | `background: #f3f4f8`，边框显现 |
-| 激活（菜单） | 左侧 3px indigo 边框 + 浅紫背景 |
+| 状态               | 效果                                               |
+| ------------------ | -------------------------------------------------- |
+| hover（卡片）      | `box-shadow` 升级，无背景色突变                    |
+| hover（列表项）    | `background: #f3f4f8`，边框显现                    |
+| 激活（菜单）       | 左侧 3px indigo 边框 + 浅紫背景                    |
 | hover（按钮-text） | `background: rgba(99,102,241,0.06)`，文字变 indigo |
-| hover（主按钮） | `translateY(-1px)` + 加深阴影 |
-| 过渡时长 | 默认 `0.18s ease`，卡片 hover `0.2s ease` |
+| hover（主按钮）    | `translateY(-1px)` + 加深阴影                      |
+| 过渡时长           | 默认 `0.18s ease`，卡片 hover `0.2s ease`          |
 
 ---
 
@@ -260,8 +272,7 @@ box-shadow: 0 2px 6px rgba(14, 165, 233, 0.3);
 
 ## 十一、Element Plus 覆盖规范
 
-本项目在深色侧边栏中通过 `:deep()` 覆盖了 Element Plus 的 `el-menu` 样式。
-新增对 Element Plus 组件的覆盖时：
+本项目在深色侧边栏中通过 `:deep()` 覆盖了 Element Plus 的 `el-menu` 样式。新增对 Element Plus 组件的覆盖时：
 
 1. 优先使用 CSS 变量（Element Plus 的 `--el-*` token）
 2. 必须使用 `.layout-aside :deep(...)` 或组件根元素 `:deep(...)` 前缀，避免全局污染

@@ -10,10 +10,11 @@ import type {
   VueFlowStore
 } from '@vue-flow/core'
 import { ContentWrap } from '@/components/ContentWrap'
-import { orchestrationApi } from '@/api/frontend-api'
+import { orchestrationApi, workflowApi } from '@/api/frontend-api'
 import Canvas from './components/Canvas.vue'
 import NodePanel from './components/NodePanel.vue'
 import Toolbar from './components/Toolbar.vue'
+import AppMetaBar from './components/AppMetaBar.vue'
 import StartInspector from './components/inspectors/StartInspector.vue'
 import LlmInspector from './components/inspectors/LlmInspector.vue'
 import IfElseInspector from './components/inspectors/IfElseInspector.vue'
@@ -38,6 +39,7 @@ const router = useRouter()
 const route = useRoute()
 const props = defineProps<{
   editId?: number
+  workflowMode?: boolean
 }>()
 const flowStore = ref<VueFlowStore>()
 
@@ -55,17 +57,27 @@ const { nodes, edges, viewport, addNode, updateNodeData, setGraphFromFlow, setVi
 const { errors, warnings, validateNow } = useValidation(appMeta, nodes, edges)
 
 const isEditMode = computed(() => Number.isFinite(props.editId))
+const isWorkflowMode = computed(() => props.workflowMode === true)
 const saving = ref(false)
 const version = ref<number | undefined>(undefined)
+const bindingCount = ref(0)
 const inspectorVisible = ref(false)
 const editingNodeId = ref('')
 const pageTitle = computed(() =>
-  isEditMode.value ? `编辑智能体：${appMeta.value.name || ''}` : '从空白编排创建智能体'
+  isWorkflowMode.value
+    ? isEditMode.value
+      ? `编辑工作流：${appMeta.value.name || ''}`
+      : '创建工作流'
+    : isEditMode.value
+      ? `编辑智能体：${appMeta.value.name || ''}`
+      : '从空白编排创建智能体'
 )
 const pageMessage = computed(() =>
-  isEditMode.value
-    ? '编辑已保存的画布流程，点击保存后仅更新前端快照'
-    : '拖拽节点、连线配置后保存前端快照'
+  isWorkflowMode.value
+    ? '工作流可被多个 Chatflow 应用绑定，保存后需要相关应用重新发布才会生效'
+    : isEditMode.value
+      ? '编辑已保存的画布流程，点击保存后仅更新前端快照'
+      : '拖拽节点、连线配置后保存前端快照'
 )
 
 const editingNode = computed(() => nodes.value.find((node) => node.id === editingNodeId.value))
@@ -461,6 +473,7 @@ function resolveReturnPath(): string | null {
   const trimmed = from.trim()
   if (!trimmed.startsWith('/')) return null
   if (trimmed.startsWith('/agents/orchestrator/create')) return null
+  if (trimmed.startsWith('/workflows/editor')) return null
   return trimmed
 }
 
@@ -531,7 +544,9 @@ function updateVersionFromResponse(response: any) {
 }
 
 async function loadEditCanvas(editId: number) {
-  const response = (await orchestrationApi.getCanvasDraft(editId)) as any
+  const response = isWorkflowMode.value
+    ? ((await workflowApi.getCanvas(editId)) as any)
+    : ((await orchestrationApi.getCanvasDraft(editId)) as any)
   const snapshot = (response?.snapshot || response) as any
   if (
     !snapshot?.flow ||
@@ -557,15 +572,27 @@ async function loadEditCanvas(editId: number) {
     rememberAsInitial: true
   })
   version.value = Number.isFinite(Number(response?.version)) ? Number(response.version) : undefined
+  bindingCount.value = Number.isFinite(Number(response?.bindingCount))
+    ? Number(response.bindingCount)
+    : 0
+  if (isWorkflowMode.value && bindingCount.value > 1) {
+    ElMessage.warning(
+      `该工作流已关联 ${bindingCount.value} 个应用，修改后相关应用需要重新发布才会生效`
+    )
+  }
 }
 
 async function handleConflict(editId: number) {
   try {
-    await ElMessageBox.confirm('智能体已被他人修改，是否重新加载远端版本？', '版本冲突', {
-      type: 'warning',
-      confirmButtonText: '重新加载远端版本',
-      cancelButtonText: '保留当前草稿'
-    })
+    await ElMessageBox.confirm(
+      `${isWorkflowMode.value ? '工作流' : '智能体'}已被他人修改，是否重新加载远端版本？`,
+      '版本冲突',
+      {
+        type: 'warning',
+        confirmButtonText: '重新加载远端版本',
+        cancelButtonText: '保留当前草稿'
+      }
+    )
     await loadEditCanvas(editId)
     ElMessage.success('已加载远端最新版本')
   } catch {
@@ -610,25 +637,56 @@ async function handleSave() {
 
   saving.value = true
   try {
-    const response =
-      isEditMode.value && props.editId
+    if (isWorkflowMode.value && bindingCount.value > 1) {
+      await ElMessageBox.confirm(
+        `该工作流已关联 ${bindingCount.value} 个应用，保存后相关应用需要重新发布才会生效。确认继续保存？`,
+        '保存工作流确认',
+        {
+          type: 'warning',
+          confirmButtonText: '继续保存',
+          cancelButtonText: '取消'
+        }
+      )
+    }
+
+    const response = isWorkflowMode.value
+      ? isEditMode.value && props.editId
+        ? await workflowApi.updateCanvas(props.editId, {
+            ...payload,
+            version: version.value
+          })
+        : await workflowApi.createCanvas(payload)
+      : isEditMode.value && props.editId
         ? await orchestrationApi.updateCanvasDraft(props.editId, {
             ...payload,
             version: version.value
           })
         : await orchestrationApi.saveCanvasDraft(payload)
     updateVersionFromResponse(response)
+    bindingCount.value = Number.isFinite(Number((response as any)?.bindingCount))
+      ? Number((response as any).bindingCount)
+      : bindingCount.value
     const savedId = Number(response?.id)
     if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
       const returnPath = resolveReturnPath()
-      await router.replace({
-        path: '/agents/orchestrator/create',
-        query: {
-          mode: 'blank',
-          edit: String(savedId),
-          ...(returnPath ? { from: returnPath } : {})
-        }
-      })
+      if (isWorkflowMode.value) {
+        await router.replace({
+          path: '/workflows/editor',
+          query: {
+            edit: String(savedId),
+            ...(returnPath ? { from: returnPath } : {})
+          }
+        })
+      } else {
+        await router.replace({
+          path: '/agents/orchestrator/create',
+          query: {
+            mode: 'blank',
+            edit: String(savedId),
+            ...(returnPath ? { from: returnPath } : {})
+          }
+        })
+      }
     }
     ElMessage.success('保存成功')
   } catch (error: unknown) {
@@ -667,6 +725,8 @@ onMounted(async () => {
 
       <!-- 右侧编排主面板 -->
       <main class="main-panel">
+        <AppMetaBar v-model="appMeta" :name-label="isWorkflowMode ? '工作流名称' : '应用名称'" />
+
         <!-- 核心操作工具栏 -->
         <Toolbar
           :saving="saving"
@@ -854,7 +914,6 @@ onMounted(async () => {
 .canvas-container {
   position: relative;
   width: 100%;
-  height: 100%;
   min-height: 0;
   overflow: hidden;
   background: #f8fafc;

@@ -60,6 +60,12 @@ const staticRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/app/AgentPlaceholder.vue'),
     meta: { hidden: true, requiresAuth: true, title: 'Agent 智能体开发中' }
   },
+  {
+    path: '/workflows/editor',
+    name: 'WorkflowEditor',
+    component: () => import('@/views/app/WorkflowEditor.vue'),
+    meta: { hidden: true, requiresAuth: true, title: '工作流编辑' }
+  },
 
   // ─────────────────────────────────────
   // 向后兼容：旧 /apps/* 路径自动重定向到 /agents/*
