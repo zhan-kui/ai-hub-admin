@@ -283,6 +283,7 @@ export interface WorkflowVO {
   workflowName: string
   description?: string
   icon?: string
+  iconImage?: string
   iconBackground?: string
   version: number
   bindingCount: number

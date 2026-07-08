@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElLoading, ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { Connection, Delete, EditPen, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowBindingAppVO, type WorkflowVO } from '@/api/frontend-api'
 import WorkflowEditConfirmDialog from './components/WorkflowEditConfirmDialog.vue'
+import IconUploader from './components/IconUploader.vue'
+import { DEFAULT_ICON_BG, DEFAULT_VIEWPORT } from './orchestrator/canvas/constants'
+import { createStartNode } from './orchestrator/canvas/utils'
 
 const router = useRouter()
 const route = useRoute()
@@ -15,6 +18,14 @@ const keyword = ref('')
 const pageNum = ref(1)
 const total = ref(0)
 const workflows = ref<WorkflowVO[]>([])
+const createVisible = ref(false)
+const creating = ref(false)
+const createFormRef = ref<FormInstance>()
+const createForm = reactive({
+  workflowName: '',
+  description: '',
+  iconImage: ''
+})
 
 const bindingDialogVisible = ref(false)
 const bindingApps = ref<WorkflowBindingAppVO[]>([])
@@ -26,6 +37,9 @@ const pendingEditWorkflow = ref<WorkflowVO | null>(null)
 
 const activeCount = computed(() => workflows.value.filter((item) => item.bindingCount > 0).length)
 const unboundCount = computed(() => workflows.value.length - activeCount.value)
+const createRules: FormRules = {
+  workflowName: [{ required: true, message: '请输入工作流名称', trigger: 'blur' }]
+}
 
 function formatDate(value?: string): string {
   if (!value) return '-'
@@ -66,11 +80,76 @@ function handlePageChange(nextPage: number) {
   void loadWorkflows()
 }
 
+function resetCreateForm() {
+  createForm.workflowName = ''
+  createForm.description = ''
+  createForm.iconImage = ''
+}
+
 function goCreate() {
-  router.push({
-    path: '/workflows/editor',
-    query: { from: route.fullPath }
-  })
+  resetCreateForm()
+  createVisible.value = true
+}
+
+function workflowInitial(name?: string): string {
+  const text = String(name || '').trim()
+  return text ? text.charAt(0).toUpperCase() : 'W'
+}
+
+function avatarColor(row: Pick<WorkflowVO, 'workflowName' | 'id'>): string {
+  const colors = ['#2563eb', '#0f766e', '#7c3aed', '#0891b2', '#db2777', '#d97706']
+  const text = `${row.workflowName || ''}${row.id || ''}`
+  let hash = 0
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0
+  }
+  return colors[hash % colors.length]
+}
+
+function buildInitialWorkflowPayload() {
+  return {
+    appMeta: {
+      name: createForm.workflowName.trim(),
+      description: createForm.description.trim(),
+      icon: workflowInitial(createForm.workflowName),
+      iconImage: createForm.iconImage,
+      iconBackground: DEFAULT_ICON_BG
+    },
+    flow: {
+      nodes: [createStartNode()],
+      edges: [],
+      viewport: { ...DEFAULT_VIEWPORT }
+    }
+  }
+}
+
+async function submitCreate() {
+  if (!createFormRef.value) return
+  await createFormRef.value.validate()
+  creating.value = true
+  let pageLoading: ReturnType<typeof ElLoading.service> | undefined
+  const loadingTimer = window.setTimeout(() => {
+    pageLoading = ElLoading.service({
+      lock: true,
+      text: '正在进入流程编排...',
+      background: 'rgba(15, 23, 42, 0.28)'
+    })
+  }, 300)
+  try {
+    const result = await workflowApi.createCanvas(buildInitialWorkflowPayload())
+    ElMessage.success('工作流创建成功')
+    createVisible.value = false
+    await router.push({
+      path: '/workflows/editor',
+      query: { edit: String(result.id), from: route.fullPath }
+    })
+  } catch (error: any) {
+    ElMessage.error(error?.message || '工作流创建失败')
+  } finally {
+    window.clearTimeout(loadingTimer)
+    pageLoading?.close()
+    creating.value = false
+  }
 }
 
 async function goEdit(row: WorkflowVO) {
@@ -210,7 +289,15 @@ onMounted(() => {
           <el-table-column label="工作流" min-width="260">
             <template #default="{ row }">
               <div class="workflow-name-cell">
-                <span class="workflow-mark">{{ row.icon || 'W' }}</span>
+                <img
+                  v-if="row.iconImage"
+                  class="workflow-mark image"
+                  :src="row.iconImage"
+                  alt="workflow"
+                />
+                <span v-else class="workflow-mark" :style="{ backgroundColor: avatarColor(row) }">
+                  {{ workflowInitial(row.workflowName) }}
+                </span>
                 <div>
                   <strong>{{ row.workflowName }}</strong>
                   <p>{{ row.description || '暂无描述' }}</p>
@@ -289,6 +376,41 @@ onMounted(() => {
         <el-button type="primary" :loading="bindingLoading" @click="saveBindings"
           >保存关联</el-button
         >
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="createVisible"
+      title="创建工作流"
+      width="620px"
+      destroy-on-close
+      align-center
+    >
+      <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-position="top">
+        <div class="create-form-grid">
+          <div class="avatar-field">
+            <IconUploader v-model="createForm.iconImage" :size="92" />
+            <span>工作流头像</span>
+          </div>
+          <div class="create-fields">
+            <el-form-item label="工作流名称" prop="workflowName">
+              <el-input v-model="createForm.workflowName" maxlength="80" show-word-limit />
+            </el-form-item>
+            <el-form-item label="描述">
+              <el-input
+                v-model="createForm.description"
+                type="textarea"
+                maxlength="500"
+                :rows="3"
+                show-word-limit
+              />
+            </el-form-item>
+          </div>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="createVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creating" @click="submitCreate">创建并编排</el-button>
       </template>
     </el-dialog>
 
@@ -420,6 +542,10 @@ onMounted(() => {
   flex: 0 0 auto;
 }
 
+.workflow-mark.image {
+  object-fit: cover;
+}
+
 .workflow-name-cell strong {
   display: block;
   color: #172033;
@@ -480,6 +606,25 @@ onMounted(() => {
   color: #d97706;
 }
 
+.create-form-grid {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 22px;
+}
+
+.avatar-field {
+  display: flex;
+  font-size: 13px;
+  color: #64748b;
+  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.create-fields {
+  min-width: 0;
+}
+
 @media (width <= 900px) {
   .workflow-page {
     padding: 16px;
@@ -498,6 +643,10 @@ onMounted(() => {
 
   .search-input {
     max-width: none;
+  }
+
+  .create-form-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

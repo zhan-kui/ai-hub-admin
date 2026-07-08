@@ -14,7 +14,6 @@ import { orchestrationApi, workflowApi } from '@/api/frontend-api'
 import Canvas from './components/Canvas.vue'
 import NodePanel from './components/NodePanel.vue'
 import Toolbar from './components/Toolbar.vue'
-import AppMetaBar from './components/AppMetaBar.vue'
 import StartInspector from './components/inspectors/StartInspector.vue'
 import LlmInspector from './components/inspectors/LlmInspector.vue'
 import IfElseInspector from './components/inspectors/IfElseInspector.vue'
@@ -61,20 +60,19 @@ const isWorkflowMode = computed(() => props.workflowMode === true)
 const saving = ref(false)
 const version = ref<number | undefined>(undefined)
 const bindingCount = ref(0)
+const lastSavedSnapshot = ref('')
 const inspectorVisible = ref(false)
 const editingNodeId = ref('')
 const pageTitle = computed(() =>
   isWorkflowMode.value
-    ? isEditMode.value
-      ? `编辑工作流：${appMeta.value.name || ''}`
-      : '创建工作流'
+    ? ''
     : isEditMode.value
       ? `编辑智能体：${appMeta.value.name || ''}`
       : '从空白编排创建智能体'
 )
 const pageMessage = computed(() =>
   isWorkflowMode.value
-    ? '工作流可被多个 Chatflow 应用绑定，保存后需要相关应用重新发布才会生效'
+    ? ''
     : isEditMode.value
       ? '编辑已保存的画布流程，点击保存后仅更新前端快照'
       : '拖拽节点、连线配置后保存前端快照'
@@ -462,7 +460,27 @@ function handleFitView() {
   void applyFlowViewport(initialViewport.value)
 }
 
-function handleCancel() {
+async function handleCancel() {
+  if (
+    isWorkflowMode.value &&
+    lastSavedSnapshot.value &&
+    lastSavedSnapshot.value !== snapshotSignature()
+  ) {
+    try {
+      await ElMessageBox.confirm('当前流程编排有未保存修改，是否保存后返回？', '返回确认', {
+        type: 'warning',
+        confirmButtonText: '保存并返回',
+        cancelButtonText: '不保存退出',
+        distinguishCancelAndClose: true
+      })
+      await handleSave({ navigateBackAfterSave: true })
+    } catch (error) {
+      if (error === 'cancel') {
+        navigateBack()
+      }
+    }
+    return
+  }
   navigateBack()
 }
 
@@ -525,6 +543,14 @@ function buildSubmitPayload() {
   })
 }
 
+function snapshotSignature() {
+  return JSON.stringify(buildSubmitPayload())
+}
+
+function rememberSavedSnapshot() {
+  lastSavedSnapshot.value = snapshotSignature()
+}
+
 function getRequestStatus(error: unknown): number | undefined {
   return (error as any)?.response?.status
 }
@@ -575,6 +601,7 @@ async function loadEditCanvas(editId: number) {
   bindingCount.value = Number.isFinite(Number(response?.bindingCount))
     ? Number(response.bindingCount)
     : 0
+  rememberSavedSnapshot()
   if (isWorkflowMode.value && bindingCount.value > 1) {
     ElMessage.warning(
       `该工作流已关联 ${bindingCount.value} 个应用，修改后相关应用需要重新发布才会生效`
@@ -613,7 +640,7 @@ function handleValidate() {
   ElMessage.success('流程校验通过')
 }
 
-async function handleSave() {
+async function handleSave(options?: { navigateBackAfterSave?: boolean }) {
   const result = validateNow()
   if (!result.valid) {
     ElMessage.error(result.errors[0] || '流程校验未通过')
@@ -666,6 +693,7 @@ async function handleSave() {
     bindingCount.value = Number.isFinite(Number((response as any)?.bindingCount))
       ? Number((response as any).bindingCount)
       : bindingCount.value
+    rememberSavedSnapshot()
     const savedId = Number(response?.id)
     if (!isEditMode.value && Number.isFinite(savedId) && savedId > 0) {
       const returnPath = resolveReturnPath()
@@ -689,6 +717,9 @@ async function handleSave() {
       }
     }
     ElMessage.success('保存成功')
+    if (options?.navigateBackAfterSave) {
+      navigateBack()
+    }
   } catch (error: unknown) {
     const status = getRequestStatus(error)
     if (status === 409 && props.editId) {
@@ -710,7 +741,9 @@ onMounted(async () => {
       navigateBack()
       return
     }
+    return
   }
+  rememberSavedSnapshot()
 })
 </script>
 
@@ -725,13 +758,12 @@ onMounted(async () => {
 
       <!-- 右侧编排主面板 -->
       <main class="main-panel">
-        <AppMetaBar v-model="appMeta" :name-label="isWorkflowMode ? '工作流名称' : '应用名称'" />
-
         <!-- 核心操作工具栏 -->
         <Toolbar
           :saving="saving"
           :selected-count="selectedCount"
           :error-count="errors.length"
+          :workflow-mode="isWorkflowMode"
           @fit="handleFitView"
           @validate="handleValidate"
           @delete-selected="handleDeleteSelected"
@@ -853,8 +885,8 @@ onMounted(async () => {
 /* 适配中大屏幕响应式布局 */
 @media (width <= 1280px) {
   .layout {
-    height: auto;
-    min-height: auto;
+    min-height: 0;
+    flex: 1;
     flex-direction: column;
   }
 
@@ -863,8 +895,14 @@ onMounted(async () => {
     flex: none;
   }
 
+  .main-panel {
+    height: auto;
+    flex: 1;
+  }
+
   .canvas-container {
-    height: 500px; /* 小屏幕状态画布降级为固定高度 */
+    min-height: 420px;
+    flex: 1;
   }
 
   .floating-alert {
@@ -875,7 +913,29 @@ onMounted(async () => {
 }
 
 :global(.workflow-content-wrap .el-card__body) {
+  display: flex;
+  min-height: 0;
   padding: 16px !important;
+  flex: 1;
+  flex-direction: column;
+}
+
+:global(.workflow-content-wrap),
+:global(.workflow-content-wrap > .el-card),
+:global(.workflow-content-wrap .el-card__body > div) {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+:global(.workflow-content-wrap) {
+  height: calc(100vh - 1px);
+  overflow: hidden;
+}
+
+:global(.workflow-content-wrap .el-card__body) {
+  overflow: hidden;
 }
 
 /* 1. 主框架弹性排版 (防高度坍塌) */
@@ -883,8 +943,8 @@ onMounted(async () => {
   display: flex;
   gap: 16px;
   width: 100%;
-  height: calc(100vh - 180px); /* 动态占满屏幕，减去头部面包屑及导航条高 */
-  min-height: 580px; /* 强制设置底线高度，绝不允许发生灰色塌陷 */
+  min-height: 0;
+  flex: 1;
 }
 
 /* 左侧节点栏：精致白卡片 */
