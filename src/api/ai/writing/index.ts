@@ -68,3 +68,38 @@ export async function duplicateDoc(id: DocId) {
   )
   return unwrapWritingResponse(response.data)
 }
+
+export async function importDocx(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await apiClient.post<R<Record<string, unknown>>>(
+    `${DOC_API_BASE}/import`,
+    form,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    }
+  )
+  return unwrapWritingResponse(response.data)
+}
+
+export async function exportDocx(id: DocId) {
+  const response = await apiClient.get<Blob>(`${DOC_API_BASE}/export/${id}`, {
+    responseType: 'blob'
+  })
+  return {
+    blob: response.data,
+    fileName: resolveDownloadFileName(response.headers['content-disposition'])
+  }
+}
+
+function resolveDownloadFileName(contentDisposition?: string): string {
+  if (!contentDisposition) return 'AI写作文档.docx'
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+  const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
+  return filenameMatch?.[1] || 'AI写作文档.docx'
+}

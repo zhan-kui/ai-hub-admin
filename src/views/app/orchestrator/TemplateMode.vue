@@ -920,8 +920,6 @@ onMounted(async () => {
 </template>
 
 <style scoped lang="less">
-
-
 /* 响应式适配 */
 @media (width <= 1120px) {
   .assistant-workspace {

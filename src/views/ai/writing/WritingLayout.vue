@@ -109,6 +109,24 @@
         <div class="writing-page__header-top">
           <input v-model="docTitle" class="writing-page__title-input" placeholder="无标题文档" />
           <div class="writing-page__header-actions">
+            <input
+              ref="importInputRef"
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              class="writing-page__file-input"
+              @change="handleImportWordChange"
+            />
+            <el-button :icon="Upload" :loading="importingDoc" @click="triggerImportWord">
+              导入 Word
+            </el-button>
+            <el-button
+              :icon="Download"
+              :loading="exportingDoc"
+              :disabled="isEditorEmpty && !currentDocId"
+              @click="handleExportWord"
+            >
+              导出 Word
+            </el-button>
             <el-button :icon="Delete" :disabled="isEditorEmpty" @click="handleClear">
               清空
             </el-button>
@@ -200,6 +218,7 @@ import {
 import {
   Calendar,
   Delete,
+  Download,
   Document,
   EditPen,
   Expand,
@@ -208,7 +227,8 @@ import {
   MoreFilled,
   Plus,
   Promotion,
-  Search
+  Search,
+  Upload
 } from '@element-plus/icons-vue'
 import {
   SlateEditor,
@@ -224,8 +244,10 @@ import { useTextSelection } from './composables/useTextSelection'
 import {
   deleteDoc,
   duplicateDoc,
+  exportDocx,
   getDocDetail,
   getDocList,
+  importDocx,
   renameDoc,
   saveDoc
 } from '@/api/ai/writing'
@@ -282,6 +304,9 @@ const sidebarCollapsed = ref(false)
 const searchKeyword = ref('')
 const switchingDocLoading = ref(false)
 const savingInProgress = ref(false)
+const importingDoc = ref(false)
+const exportingDoc = ref(false)
+const importInputRef = ref<HTMLInputElement | null>(null)
 const docList = ref<DocItem[]>([])
 
 const getErrorMessage = (error: unknown, fallback: string) => {
@@ -712,6 +737,97 @@ const refreshSaveStatusByDiff = () => {
 }
 
 const shouldPromptUnsaved = computed(() => saveStatus.value === 'unsaved')
+
+const resolveImportTitle = (fileName: string) => fileName.replace(/\.docx$/i, '') || '导入文档'
+
+const triggerImportWord = () => {
+  const openFilePicker = () => importInputRef.value?.click()
+  if (shouldPromptUnsaved.value) {
+    ElMessageBox.confirm('当前文档未保存，导入后会切换到新文档，是否继续导入？', '提示', {
+      confirmButtonText: '导入',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+      .then(openFilePicker)
+      .catch(() => {})
+    return
+  }
+  openFilePicker()
+}
+
+const handleImportWordChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || importingDoc.value) return
+
+  if (!file.name.toLowerCase().endsWith('.docx')) {
+    ElMessage.warning('仅支持导入 .docx 格式的 Word 文档')
+    return
+  }
+
+  importingDoc.value = true
+  try {
+    const result = await importDocx(file)
+    const importedId = extractDocId(result)
+    await refreshDocList()
+
+    if (importedId !== '') {
+      const imported = docList.value.find((doc) => String(doc.id) === String(importedId))
+      await doSwitch(
+        imported || {
+          id: importedId,
+          title: resolveImportTitle(file.name),
+          updateTime: new Date().toISOString(),
+          wordCount: 0
+        }
+      )
+    }
+    ElMessage.success('Word 文档导入成功')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, 'Word 文档导入失败'))
+  } finally {
+    importingDoc.value = false
+  }
+}
+
+const downloadBlob = (blob: Blob, fileName: string) => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName || 'AI写作文档.docx'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+const handleExportWord = async () => {
+  if (exportingDoc.value) return
+  exportingDoc.value = true
+  try {
+    if (saveStatus.value === 'unsaved' || !currentDocId.value) {
+      const saved = await handleSave(true)
+      if (!saved) {
+        ElMessage.warning('请先填写标题并保存后再导出')
+        return
+      }
+    }
+
+    if (!currentDocId.value) {
+      ElMessage.warning('请先保存文档后再导出')
+      return
+    }
+
+    const result = await exportDocx(currentDocId.value)
+    downloadBlob(result.blob, result.fileName)
+    ElMessage.success('Word 文档导出成功')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error, 'Word 文档导出失败'))
+  } finally {
+    exportingDoc.value = false
+  }
+}
 
 const handleClear = () => {
   if (isEditorEmpty.value) return
@@ -1441,6 +1557,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.writing-page__file-input {
+  display: none;
 }
 
 .writing-page__header-actions :deep(.el-button) {
