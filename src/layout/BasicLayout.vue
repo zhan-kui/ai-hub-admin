@@ -39,9 +39,28 @@ const menus = computed(() => {
   return tree.length > 0 ? tree : fallbackMenus
 })
 
-const visibleMenus = computed(() =>
-  menus.value.filter((menu) => menu.menuType !== 'BUTTON' && menu.visible !== false)
-)
+function isProfileMenu(menu: MenuVO) {
+  const path = (menu.path || '').replace(/^\/+|\/+$/g, '').toLowerCase()
+  const component = (menu.component || '').replace(/^\/+|\.vue$/g, '').toLowerCase()
+  return (
+    menu.menuName === '个人中心' ||
+    path === 'profile' ||
+    path === 'system/profile' ||
+    component === 'user/profile' ||
+    component === 'user/profile/index'
+  )
+}
+
+function filterVisibleMenus(menuList: MenuVO[]): MenuVO[] {
+  return menuList
+    .filter((menu) => menu.menuType !== 'BUTTON' && menu.visible !== false && !isProfileMenu(menu))
+    .map((menu) => ({
+      ...menu,
+      children: filterVisibleMenus(menu.children || [])
+    }))
+}
+
+const visibleMenus = computed(() => filterVisibleMenus(menus.value))
 
 const activeMenu = computed(() => route.path)
 const displayName = computed(() => userStore.getDisplayName)
@@ -155,22 +174,28 @@ async function handleLogout() {
               :class="{ 'is-open': userMenuOpen }"
               aria-label="打开用户菜单"
             >
-              <div class="user-avatar">
-                <span class="avatar-text">{{ userInitial }}</span>
+              <div class="user-identity">
+                <div class="user-avatar">
+                  <span class="avatar-text">{{ userInitial }}</span>
+                </div>
+                <div class="user-summary">
+                  <div class="user-info">
+                    <div class="user-name">{{ displayName }}</div>
+                    <div class="user-role">超级管理员</div>
+                  </div>
+                </div>
               </div>
-              <div class="user-info">
-                <div class="user-name">{{ displayName }}</div>
-                <div class="user-role">管理员</div>
-              </div>
-              <svg
-                class="user-chevron"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+              <span class="user-action" aria-hidden="true">
+                <svg
+                  class="user-chevron"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </span>
             </button>
           </template>
 
@@ -855,6 +880,7 @@ async function handleLogout() {
 }
 
 .user-profile {
+  display: flex;
   width: 100%;
   min-height: 50px;
   padding: 8px 9px;
@@ -864,6 +890,9 @@ async function handleLogout() {
   transform: none;
   box-shadow: none;
   appearance: none;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
 }
 
 .user-profile:hover,
@@ -888,8 +917,30 @@ async function handleLogout() {
   box-shadow: none;
 }
 
+.user-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.user-summary {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+}
+
+.user-info {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
 .user-name {
+  overflow: hidden;
   color: var(--text-main);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .user-role,
@@ -897,7 +948,29 @@ async function handleLogout() {
   color: var(--text-muted);
 }
 
+.user-action {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  color: var(--text-muted);
+  border-radius: 9px;
+  place-items: center;
+  flex-shrink: 0;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.user-profile:hover .user-action,
+.user-profile.is-open .user-action {
+  color: var(--primary);
+  background: #eef4ff;
+}
+
 .user-chevron {
+  width: 14px;
+  height: 14px;
   transition:
     color 0.18s ease,
     transform 0.18s ease;

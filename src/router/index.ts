@@ -151,6 +151,15 @@ const staticRoutes: RouteRecordRaw[] = [
           hidden: true,
           activeMenu: '/knowledge'
         }
+      },
+      {
+        path: 'profile',
+        name: 'UserProfile',
+        component: () => import('@/views/user/Profile.vue'),
+        meta: {
+          title: '个人中心',
+          hidden: true
+        }
       }
     ]
   },

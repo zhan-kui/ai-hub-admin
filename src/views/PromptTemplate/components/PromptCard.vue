@@ -7,10 +7,16 @@ const props = defineProps<{ template: PromptTemplate }>()
 
 const emit = defineEmits<{
   (event: 'open', template: PromptTemplate): void
+  (event: 'favorite', template: PromptTemplate): void
   (event: 'copy', template: PromptTemplate): void
   (event: 'edit', template: PromptTemplate): void
   (event: 'remove', template: PromptTemplate): void
 }>()
+
+function handleFavorite(event: MouseEvent) {
+  event.stopPropagation()
+  emit('favorite', props.template)
+}
 
 function handleMoreCommand(command: string | number | object) {
   if (command === 'copy') {
@@ -34,6 +40,18 @@ function handleMoreCommand(command: string | number | object) {
     @click="emit('open', template)"
     @keyup.enter="emit('open', template)"
   >
+    <button
+      type="button"
+      class="favorite-btn"
+      :class="{ 'is-active': template.favorited }"
+      :title="template.favorited ? '取消收藏' : '收藏提示词'"
+      :aria-label="template.favorited ? '取消收藏提示词' : '收藏提示词'"
+      @click="handleFavorite"
+      @keyup.enter.stop
+    >
+      <Icon :icon="template.favorited ? 'tabler:star-filled' : 'tabler:star'" />
+    </button>
+
     <div class="card-head">
       <span class="c-ico">
         <Icon :icon="resolvePromptIcon(template.icon, template.category)" />
@@ -88,7 +106,7 @@ function handleMoreCommand(command: string | number | object) {
   position: relative;
   display: flex;
   min-height: 200px;
-  padding: 15px;
+  padding: 15px 44px 15px 15px;
   cursor: pointer;
   background: @panel;
   border: 1px solid @border;
@@ -104,6 +122,43 @@ function handleMoreCommand(command: string | number | object) {
     outline: none;
     transform: translateY(-1px);
     box-shadow: @shadow-card-hover;
+  }
+}
+
+.favorite-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 16px;
+  color: @text-muted;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid @border;
+  border-radius: 9px;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &:hover {
+    color: #d97706;
+    background: #fffbeb;
+    border-color: #fde68a;
+  }
+
+  &.is-active {
+    color: #d97706;
+    background: #fffbeb;
+    border-color: #facc15;
+    box-shadow: 0 6px 14px rgb(217 119 6 / 10%);
   }
 }
 

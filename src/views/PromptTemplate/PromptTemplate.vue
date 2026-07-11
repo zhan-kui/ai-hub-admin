@@ -29,7 +29,8 @@ const editingTemplate = ref<PromptTemplateType | null>(null)
 const keyword = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
-const { list, total, loading, query, load, selectFilter, search, changePage } = usePromptList()
+const { list, total, loading, query, load, selectFilter, search, changePage, toggleFavorite } =
+  usePromptList()
 const showPagination = computed(() => total.value > query.pageSize)
 const favoriteCount = computed(() => list.value.filter((template) => template.favorited).length)
 
@@ -152,6 +153,7 @@ onBeforeUnmount(() => {
               :key="template.id"
               :template="template"
               @open="openPreview"
+              @favorite="toggleFavorite"
               @copy="copyContent"
               @edit="openEdit"
               @remove="removeTemplate"

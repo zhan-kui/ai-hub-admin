@@ -64,8 +64,10 @@ export function usePromptList(initialPageSize = 12) {
     try {
       if (template.favorited) {
         await promptTemplateApi.favorite(template.id)
+        ElMessage.success('已收藏')
       } else {
         await promptTemplateApi.unfavorite(template.id)
+        ElMessage.success('已取消收藏')
       }
       if (query.scope === 'fav' && !template.favorited) {
         await load()
