@@ -267,7 +267,7 @@ export interface AppListParams {
   pageSize?: number
   keyword?: string
   appType?: string
-  publishStatus?: AppPublishStatus | ''
+  publishStatus?: AppPublishStatus | 'UNPUBLISHED' | ''
   enabled?: boolean
 }
 
@@ -479,12 +479,14 @@ export interface CreateKnowledgeDocumentByFileRequest {
 export interface GrantRequest {
   userId: number
   resourceType: ResourceTypeEnumValue
-  resourceIds: number[]
+  resourceIds?: number[]
+  resourceKeys?: string[]
 }
 
 export interface UserResourceAuthorizations {
   app: number[] | null
-  knowledge: number[] | null
+  knowledge: string[] | null
+  knowledgeKeys?: string[] | null
 }
 
 export interface ChatRequest {

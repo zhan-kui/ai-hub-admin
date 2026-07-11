@@ -3,13 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import { RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { ContentWrap } from '@/components/ContentWrap'
+import { knowledgeApi } from '@/api/knowledge'
+import type { DatasetVO } from '@/api/knowledge/types'
 import {
   appApi,
-  knowledgeApi,
   resourceAuthApi,
   userApi,
   type AppConfigVO,
-  type KnowledgeBaseVO,
   type UserInfoVO
 } from '@/api/frontend-api'
 
@@ -24,10 +24,10 @@ const users = ref<UserRow[]>([])
 const selectedUserId = ref<number | null>(null)
 
 const apps = ref<AppConfigVO[]>([])
-const knowledgeBases = ref<KnowledgeBaseVO[]>([])
+const knowledgeBases = ref<DatasetVO[]>([])
 
 const selectedAppIds = ref<number[]>([])
-const selectedKnowledgeIds = ref<number[]>([])
+const selectedKnowledgeKeys = ref<string[]>([])
 
 function pickArray(payload: any): any[] {
   if (Array.isArray(payload)) return payload
@@ -47,6 +47,11 @@ function pickArray(payload: any): any[] {
 function toNumberArray(value: any): number[] {
   if (!Array.isArray(value)) return []
   return value.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+}
+
+function toStringArray(value: any): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item ?? '').trim()).filter((item) => item.length > 0)
 }
 
 async function loadUsers() {
@@ -70,9 +75,12 @@ async function loadUsers() {
 
 async function loadResources() {
   try {
-    const [appRes, kbRes] = await Promise.all([appApi.list(), knowledgeApi.list()])
+    const [appRes, kbRes] = await Promise.all([
+      appApi.list(),
+      knowledgeApi.list({ page: 1, limit: 500, status: 'active' })
+    ])
     apps.value = pickArray(appRes) as AppConfigVO[]
-    knowledgeBases.value = pickArray(kbRes) as KnowledgeBaseVO[]
+    knowledgeBases.value = pickArray(kbRes) as DatasetVO[]
   } catch (error: any) {
     ElMessage.error(error?.message || '资源列表加载失败')
   }
@@ -84,7 +92,9 @@ async function loadUserAuthorizations() {
   try {
     const res = await resourceAuthApi.getUserAuthorizations(selectedUserId.value)
     selectedAppIds.value = toNumberArray((res as any).app ?? (res as any).APP)
-    selectedKnowledgeIds.value = toNumberArray((res as any).knowledge ?? (res as any).KNOWLEDGE)
+    selectedKnowledgeKeys.value = toStringArray(
+      (res as any).knowledgeKeys ?? (res as any).knowledge ?? (res as any).KNOWLEDGE
+    )
   } catch (error: any) {
     ElMessage.error(error?.message || '用户授权加载失败')
   } finally {
@@ -111,11 +121,11 @@ async function saveAuthorizations() {
     }
 
     await resourceAuthApi.revoke(selectedUserId.value, 'KNOWLEDGE')
-    if (selectedKnowledgeIds.value.length > 0) {
+    if (selectedKnowledgeKeys.value.length > 0) {
       await resourceAuthApi.grant({
         userId: selectedUserId.value,
         resourceType: 'KNOWLEDGE',
-        resourceIds: selectedKnowledgeIds.value
+        resourceKeys: selectedKnowledgeKeys.value
       })
     }
 
@@ -210,11 +220,17 @@ onMounted(async () => {
               </el-tab-pane>
 
               <el-tab-pane label="知识库授权">
-                <el-checkbox-group v-model="selectedKnowledgeIds" class="resource-grid">
-                  <el-checkbox v-for="item in knowledgeBases" :key="item.id" :label="item.id">
+                <el-checkbox-group v-model="selectedKnowledgeKeys" class="resource-grid">
+                  <el-checkbox
+                    v-for="item in knowledgeBases"
+                    :key="item.id"
+                    :label="String(item.id)"
+                  >
                     <div class="resource-item">
-                      <div class="resource-name">{{ item.kbName || item.name || item.id }}</div>
-                      <div class="resource-sub">{{ item.kbCode || item.description || '-' }}</div>
+                      <div class="resource-name">{{ item.name || item.id }}</div>
+                      <div class="resource-sub">{{
+                        item.description || item.visibilityName || '-'
+                      }}</div>
                     </div>
                   </el-checkbox>
                 </el-checkbox-group>

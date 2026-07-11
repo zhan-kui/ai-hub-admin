@@ -6,7 +6,7 @@ import type { MenuVO } from '@/api/frontend-api'
 import { usePermissionStore } from '@/store/modules/permission'
 import { useUserStore } from '@/store/modules/user'
 import { resetRouter } from '@/router'
-import SidebarMenuItem from './components/SidebarMenuItem.vue'
+import SidebarMenuItem from '@/layout/components/SidebarMenuItem.vue'
 
 const route = useRoute()
 const router = useRouter()

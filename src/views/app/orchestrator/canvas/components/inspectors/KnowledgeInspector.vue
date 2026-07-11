@@ -52,12 +52,6 @@ function datasetMeta(dataset: DatasetVO): string {
   return `${documents} 个文档 · ${dataset.visibilityName || visibilityText(dataset.visibility)}`
 }
 
-function techniqueText(value?: string): string {
-  if (value === 'high_quality') return '高质量'
-  if (value === 'economy') return '经济'
-  return '知识库'
-}
-
 function visibilityText(value?: string): string {
   if (value === 'private') return '私有'
   if (value === 'team') return '团队'
@@ -119,6 +113,7 @@ onMounted(() => {
         <el-select
           v-model="formData.datasetIds"
           class="dataset-select"
+          popper-class="knowledge-dataset-dropdown"
           multiple
           filterable
           clearable
@@ -135,13 +130,8 @@ onMounted(() => {
             :value="dataset.id"
           >
             <div class="dataset-option">
-              <div class="dataset-option-main">
-                <strong>{{ dataset.name }}</strong>
-                <span>{{ datasetMeta(dataset) }}</span>
-              </div>
-              <em>
-                {{ dataset.indexingTechniqueName || techniqueText(dataset.indexingTechnique) }}
-              </em>
+              <strong>{{ dataset.name }}</strong>
+              <span>{{ datasetMeta(dataset) }}</span>
             </div>
           </el-option>
         </el-select>
@@ -209,29 +199,24 @@ onMounted(() => {
 .dataset-option {
   display: flex;
   width: 100%;
-  height: 48px;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.dataset-option-main {
-  display: flex;
   min-width: 0;
   flex-direction: column;
+  justify-content: center;
+  padding: 4px 0;
+  line-height: 1.3;
 }
 
-.dataset-option-main strong {
+.dataset-option strong {
   overflow: hidden;
+  font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-primary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dataset-option-main span {
+.dataset-option span {
+  margin-top: 2px;
   overflow: hidden;
   font-size: 12px;
   color: var(--el-text-color-secondary);
@@ -239,15 +224,12 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.dataset-option em {
-  padding: 2px 8px;
-  font-size: 12px;
-  font-style: normal;
-  line-height: 20px;
-  color: #0f766e;
-  background: #d9f3ec;
-  border-radius: 999px;
-  flex: 0 0 auto;
+:global(.knowledge-dataset-dropdown .el-select-dropdown__item) {
+  height: auto;
+  min-height: 48px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  line-height: normal;
 }
 
 .dataset-summary {

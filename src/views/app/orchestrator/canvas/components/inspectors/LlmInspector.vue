@@ -134,10 +134,17 @@ onMounted(() => {
       <el-input v-model="formData.title" maxlength="40" />
     </el-form-item>
 
-    <el-form-item required>
+    <el-form-item required class="system-prompt-item">
       <template #label>
         <div class="prompt-label">
           <span>系统提示词</span>
+          <button type="button" class="import-prompt-btn" @click="importVisible = true">
+            <span class="import-icon"><Icon icon="tabler:sparkles" /></span>
+            <span>
+              <strong>引入提示词</strong>
+              <em>模板库</em>
+            </span>
+          </button>
         </div>
       </template>
       <div class="system-prompt-wrap">
@@ -151,13 +158,6 @@ onMounted(() => {
           aria-label="系统提示词"
           @update:model-value="(value) => (formData.systemPrompt = value)"
         />
-        <button type="button" class="import-prompt-btn" @click="importVisible = true">
-          <span class="import-icon"><Icon icon="tabler:sparkles" /></span>
-          <span>
-            <strong>引入提示词</strong>
-            <em>模板库</em>
-          </span>
-        </button>
       </div>
       <div class="form-tip">提示：输入 <code>/</code> 可插入变量。系统提示词不支持文件变量。</div>
     </el-form-item>
@@ -256,29 +256,32 @@ onMounted(() => {
 }
 
 .prompt-label {
-  display: flex;
+  display: grid;
   width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
+}
+
+.prompt-label > span {
+  min-width: 0;
+  font-weight: 600;
+}
+
+.system-prompt-item :deep(.el-form-item__label) {
+  display: block;
+  width: 100%;
+  padding-right: 0;
 }
 
 .system-prompt-wrap {
-  position: relative;
   width: 100%;
-
-  :deep(.vp-textarea),
-  :deep(.vp-highlight-layer) {
-    padding-top: 42px;
-  }
 }
 
 .import-prompt-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 3;
   display: inline-flex;
   height: 30px;
+  flex: 0 0 auto;
   padding: 3px 10px 3px 5px;
   color: #1d4ed8;
   cursor: pointer;
@@ -292,6 +295,7 @@ onMounted(() => {
     inset 0 1px 0 rgb(255 255 255 / 80%);
   align-items: center;
   gap: 6px;
+  justify-self: end;
   transition:
     transform 0.16s ease,
     box-shadow 0.16s ease;

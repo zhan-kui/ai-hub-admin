@@ -25,7 +25,7 @@ import {
 
 type AppRow = AppConfigVO & Record<string, any>
 type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
-type PublishStatusFilter = '' | 'DRAFT' | 'PUBLISHED' | 'SAVED'
+type PublishStatusFilter = '' | 'PUBLISHED' | 'UNPUBLISHED'
 type BasicDialogMode = 'create' | 'edit'
 type CreateFlowMode = 'template' | 'blank'
 type AppBasicForm = Omit<UpdateAppBasicRequest, 'appName' | 'iconImage'> & {
@@ -143,10 +143,10 @@ const pendingEditWorkflowId = ref<number | null>(null)
 const pendingEditWorkflowName = ref('')
 
 const statusMap: Record<string, string> = {
-  DRAFT: '草稿',
+  DRAFT: '未发布',
   SAVED: '未发布',
   PUBLISHED: '已发布',
-  PUBLISH_FAILED: '发布失败'
+  PUBLISH_FAILED: '未发布'
 }
 
 function normalizeAppTypeKey(value?: string): AppTypeFilter | string {
@@ -218,9 +218,7 @@ function getPublishStatusText(status?: string): string {
 
 function getPublishStatusTagType(status?: string): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'PUBLISHED') return 'success'
-  if (status === 'SAVED' || status === 'DRAFT') return 'warning'
-  if (status === 'PUBLISH_FAILED') return 'danger'
-  return 'info'
+  return 'warning'
 }
 
 function normalizeEnabled(value: unknown): boolean {
