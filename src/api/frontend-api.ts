@@ -1398,6 +1398,24 @@ export const systemApi = {
   }
 }
 
+export interface DashboardOverviewVO {
+  appCount: number
+  publishedAppCount: number
+  knowledgeCount: number
+  writingDocCount: number
+  conversationCount: number
+  messageCount: number
+  todayRequestCount: number
+  todayTokenCount: number
+  todayCost: number
+}
+
+export const dashboardApi = {
+  overview(config?: AxiosRequestConfig) {
+    return unwrap<DashboardOverviewVO>(apiClient.get('/dashboard/overview', config))
+  }
+}
+
 // === 流程编排相关 ===
 export type {
   CreateFromTemplateRequest,

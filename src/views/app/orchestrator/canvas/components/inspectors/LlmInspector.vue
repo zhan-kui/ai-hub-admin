@@ -173,7 +173,7 @@ onMounted(() => {
         @update:model-value="(value) => (formData.userPromptTemplate = value)"
       />
       <div class="form-tip">
-        说明：Dify 的 user prompt 仅支持 <code>sys.query</code> 和 <code>sys.files</code>
+        说明：用户提示词仅支持 <code>sys.query</code> 和 <code>sys.files</code>
         引用，自定义文本与其他变量在此处不会生效。
       </div>
     </el-form-item>

@@ -244,7 +244,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ContentWrap title="用户管理">
+  <ContentWrap
+    class="system-management-page"
+    title="用户管理"
+    message="管理平台账号、角色与启用状态"
+  >
     <div class="toolbar">
       <el-form inline>
         <el-form-item label="关键词">

@@ -11,6 +11,14 @@ interface PermissionState {
   dynamicRouteNames: string[]
 }
 
+function normalizeCustomerMenu(menu: MenuVO): MenuVO {
+  return {
+    ...menu,
+    menuName: menu.menuName.replace(/Dify/gi, 'AI Hub').replace(/应用/g, '智能体'),
+    children: (menu.children || []).map(normalizeCustomerMenu)
+  }
+}
+
 export const usePermissionStore = defineStore('permission', {
   state: (): PermissionState => ({
     menuTree: [],
@@ -35,7 +43,7 @@ export const usePermissionStore = defineStore('permission', {
         menuApi.permissions(platform)
       ])
 
-      this.menuTree = Array.isArray(menuTree) ? menuTree : []
+      this.menuTree = Array.isArray(menuTree) ? menuTree.map(normalizeCustomerMenu) : []
       this.routes = buildAsyncRoutes(this.menuTree)
       this.isRoutesLoaded = true
 

@@ -112,7 +112,7 @@ onMounted(async () => {
           <div class="gateway-spinner"></div>
         </div>
         <div class="gateway-title">正在进入 AI Hub</div>
-        <div class="gateway-subtitle">同步权限、菜单与应用配置</div>
+        <div class="gateway-subtitle">同步权限、菜单与智能体配置</div>
       </div>
     </Transition>
 
@@ -135,11 +135,11 @@ onMounted(async () => {
 
         <div class="brand-kicker">ENTERPRISE AI PLATFORM</div>
         <h1 class="brand-headline">
-          构建你的 AI 应用<br />
+          构建你的 AI 智能体<br />
           <span>就在此处。</span>
         </h1>
         <p class="brand-desc">
-          一站式企业 AI 应用平台，连接模型、数据与业务流程，让团队更高效地构建、管理和交付智能应用。
+          一站式企业 AI 智能体平台，连接模型、数据与业务流程，让团队更高效地构建、管理和交付智能体。
         </p>
 
         <div class="capability-grid">
@@ -151,7 +151,7 @@ onMounted(async () => {
             </div>
             <div>
               <div class="capability-title">统一接入</div>
-              <div class="capability-desc">集中管理模型、应用与业务能力</div>
+              <div class="capability-desc">集中管理模型、智能体与业务能力</div>
             </div>
           </div>
 
@@ -178,7 +178,7 @@ onMounted(async () => {
             </div>
             <div>
               <div class="capability-title">持续演进</div>
-              <div class="capability-desc">从原型验证到生产应用，支持长期迭代</div>
+              <div class="capability-desc">从原型验证到生产服务，支持长期迭代</div>
             </div>
           </div>
         </div>
@@ -186,7 +186,7 @@ onMounted(async () => {
 
       <div class="brand-footer">
         <span>© 2026 AI Hub</span>
-        <span>企业级 AI 应用控制台</span>
+        <span>企业级 AI 智能体控制台</span>
       </div>
     </aside>
 
@@ -207,7 +207,7 @@ onMounted(async () => {
           <div class="form-header">
             <div class="form-kicker">WELCOME BACK</div>
             <h2 class="form-title">登录控制台</h2>
-            <p class="form-hint">继续构建、管理和交付企业智能应用。</p>
+            <p class="form-hint">继续构建、管理和交付企业智能体。</p>
           </div>
 
           <el-form
@@ -454,6 +454,18 @@ onMounted(async () => {
   border-right: 1px solid var(--border);
   flex-direction: column;
   justify-content: space-between;
+}
+
+.brand-side::after {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgb(248 251 255 / 92%) 0%, rgb(248 251 255 / 42%) 45%, transparent 100%),
+    url('@/assets/images/ai-hub-login-visual.png') center / cover no-repeat;
+  content: '';
+  opacity: 0.72;
+  inset: 0;
 }
 
 .brand-bg-grid {

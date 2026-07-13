@@ -149,7 +149,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ContentWrap title="资源授权管理">
+  <ContentWrap
+    class="system-management-page"
+    title="资源授权管理"
+    message="按用户精细分配智能体与知识库访问权限"
+  >
     <div class="layout">
       <section class="user-panel">
         <div class="panel-title">用户列表</div>
@@ -207,7 +211,7 @@ onMounted(async () => {
         <el-skeleton :loading="authLoading" animated :rows="6">
           <template #default>
             <el-tabs class="auth-tabs">
-              <el-tab-pane label="应用授权">
+              <el-tab-pane label="智能体授权">
                 <el-checkbox-group v-model="selectedAppIds" class="resource-grid">
                   <el-checkbox v-for="item in apps" :key="item.id" :label="item.id">
                     <div class="resource-item">
@@ -216,7 +220,11 @@ onMounted(async () => {
                     </div>
                   </el-checkbox>
                 </el-checkbox-group>
-                <el-empty v-if="apps.length === 0" description="暂无可授权应用" :image-size="72" />
+                <el-empty
+                  v-if="apps.length === 0"
+                  description="暂无可授权智能体"
+                  :image-size="72"
+                />
               </el-tab-pane>
 
               <el-tab-pane label="知识库授权">

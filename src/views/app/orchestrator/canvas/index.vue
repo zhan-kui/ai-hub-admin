@@ -604,7 +604,7 @@ async function loadEditCanvas(editId: number) {
   rememberSavedSnapshot()
   if (isWorkflowMode.value && bindingCount.value > 1) {
     ElMessage.warning(
-      `该工作流已关联 ${bindingCount.value} 个应用，修改后相关应用需要重新发布才会生效`
+      `该工作流已关联 ${bindingCount.value} 个智能体，修改后相关智能体需要重新发布才会生效`
     )
   }
 }
@@ -666,7 +666,7 @@ async function handleSave(options?: { navigateBackAfterSave?: boolean }) {
   try {
     if (isWorkflowMode.value && bindingCount.value > 1) {
       await ElMessageBox.confirm(
-        `该工作流已关联 ${bindingCount.value} 个应用，保存后相关应用需要重新发布才会生效。确认继续保存？`,
+        `该工作流已关联 ${bindingCount.value} 个智能体，保存后相关智能体需要重新发布才会生效。确认继续保存？`,
         '保存工作流确认',
         {
           type: 'warning',

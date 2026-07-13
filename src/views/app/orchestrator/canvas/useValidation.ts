@@ -55,7 +55,7 @@ function validateFlow(
   const nodeMap = new Map<string, CanvasGraphNode>()
 
   if (!appMeta.name?.trim()) {
-    errors.push('应用名称不能为空')
+    errors.push('智能体名称不能为空')
   }
 
   if (!nodes.length) {

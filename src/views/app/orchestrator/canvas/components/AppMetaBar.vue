@@ -8,7 +8,7 @@ withDefaults(
     nameLabel?: string
   }>(),
   {
-    nameLabel: '应用名称'
+    nameLabel: '智能体名称'
   }
 )
 </script>

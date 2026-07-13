@@ -75,7 +75,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <ContentWrap title="系统监控" message="监控 API 服务运行状态">
+  <ContentWrap class="system-management-page" title="系统监控" message="监控 API 服务运行状态">
     <div class="toolbar">
       <el-space>
         <el-switch v-model="autoRefresh" active-text="自动刷新" @change="setupTimer" />

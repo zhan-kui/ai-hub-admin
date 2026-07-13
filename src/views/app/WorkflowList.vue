@@ -193,7 +193,7 @@ async function openBindingDialog(row: WorkflowVO) {
       .filter((app) => Number(app.workflowId) === Number(row.id))
       .map((app) => Number(app.id))
   } catch (error: any) {
-    ElMessage.error(error?.message || '可绑定应用加载失败')
+    ElMessage.error(error?.message || '可绑定智能体加载失败')
   } finally {
     bindingLoading.value = false
   }
@@ -206,11 +206,11 @@ async function saveBindings() {
     await workflowApi.updateBindings(Number(editingWorkflow.value.id), {
       appIds: selectedAppIds.value
     })
-    ElMessage.success('关联应用已更新')
+    ElMessage.success('关联智能体已更新')
     bindingDialogVisible.value = false
     await loadWorkflows()
   } catch (error: any) {
-    ElMessage.error(error?.message || '关联应用更新失败')
+    ElMessage.error(error?.message || '关联智能体更新失败')
   } finally {
     bindingLoading.value = false
   }
@@ -248,7 +248,7 @@ onMounted(() => {
         <div>
           <div class="eyebrow">WORKFLOWS · {{ total }}</div>
           <h1>工作流</h1>
-          <p>集中维护可复用 Chatflow 流程，绑定应用后由应用发布时生成 Dify 配置。</p>
+          <p>集中维护可复用对话流程，绑定智能体后由平台在发布时生成运行配置。</p>
         </div>
         <div class="metric-strip">
           <div class="metric-item">
@@ -310,7 +310,7 @@ onMounted(() => {
               <el-tag effect="plain">v{{ row.version || 0 }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="关联应用" width="120">
+          <el-table-column label="关联智能体" width="120">
             <template #default="{ row }">
               <el-tag :type="row.bindingCount > 0 ? 'success' : 'info'" effect="light">
                 {{ row.bindingCount || 0 }} 个
@@ -324,7 +324,7 @@ onMounted(() => {
             <template #default="{ row }">
               <el-button link type="primary" :icon="EditPen" @click="goEdit(row)">编辑</el-button>
               <el-button link type="primary" :icon="Connection" @click="openBindingDialog(row)">
-                关联应用
+                关联智能体
               </el-button>
               <el-button link type="danger" :icon="Delete" @click="removeWorkflow(row)">
                 删除
@@ -348,14 +348,14 @@ onMounted(() => {
 
     <el-dialog
       v-model="bindingDialogVisible"
-      title="关联 Chatflow 应用"
+      title="关联对话流智能体"
       width="720px"
       destroy-on-close
       align-center
     >
       <div v-loading="bindingLoading" class="binding-dialog-body">
         <p class="binding-hint">
-          一个 Chatflow 应用只能绑定一个工作流；已绑定其他工作流的应用被选中后会改绑到当前工作流。
+          一个对话流智能体只能绑定一个工作流；已绑定其他工作流的智能体被选中后会改绑到当前工作流。
         </p>
         <el-checkbox-group v-model="selectedAppIds" class="binding-list">
           <label v-for="app in bindingApps" :key="app.id" class="binding-row">

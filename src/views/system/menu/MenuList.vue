@@ -238,7 +238,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <ContentWrap title="菜单管理">
+  <ContentWrap
+    class="system-management-page"
+    title="菜单管理"
+    message="维护导航层级、页面组件与权限标识"
+  >
     <div class="toolbar">
       <el-form inline>
         <el-form-item label="关键词">

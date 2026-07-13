@@ -14,7 +14,7 @@ const appMeta = defineModel<AppMeta>({ required: true })
         </el-form-item>
       </el-col>
       <el-col :span="8">
-        <el-form-item label="应用名" required>
+        <el-form-item label="智能体名称" required>
           <el-input v-model="appMeta.name" maxlength="64" show-word-limit clearable />
         </el-form-item>
       </el-col>

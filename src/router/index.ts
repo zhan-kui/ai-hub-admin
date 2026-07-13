@@ -26,10 +26,10 @@ const staticRoutes: RouteRecordRaw[] = [
   // ─────────────────────────────────────
   // 全屏布局页 (不走 BasicLayout)
   // ─────────────────────────────────────
-  // 多智能体协作 - 全屏聊天 (菜单 id=23, 配合 sys_menu 的 visible 控制入口)
+  // 多智能体协作暂未开放，菜单入口先展示占位页。
   {
     path: '/chat',
-    component: () => import('@/views/ai/chat/ChatLayout.vue'),
+    component: () => import('@/views/common/RoutePlaceholder.vue'),
     meta: { hidden: true, requiresAuth: true }
   },
   // 智能体内聊天（独立全屏页）
@@ -100,6 +100,26 @@ const staticRoutes: RouteRecordRaw[] = [
           title: '概览首页',
           icon: 'House',
           permission: 'dashboard:view'
+        }
+      },
+      {
+        path: 'agents',
+        name: 'AgentManagement',
+        component: () => import('@/views/app/AppList.vue'),
+        meta: {
+          title: '智能体管理',
+          hidden: true,
+          activeMenu: '/agents'
+        }
+      },
+      {
+        path: 'ai/writing',
+        name: 'AiWriting',
+        component: () => import('@/views/ai/writing/WritingLayout.vue'),
+        meta: {
+          title: 'AI 写作',
+          hidden: true,
+          activeMenu: '/ai/writing'
         }
       },
       {

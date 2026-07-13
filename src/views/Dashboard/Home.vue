@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { dashboardApi, type DashboardOverviewVO } from '@/api/frontend-api'
+
 interface MetricCard {
   key: string
   label: string
@@ -14,6 +19,7 @@ interface ModuleCard {
   metrics: Array<{ label: string; value: string }>
   action: string
   icon: string
+  path: string
 }
 
 interface WorkbenchItem {
@@ -21,45 +27,63 @@ interface WorkbenchItem {
   description: string
   meta: string
   icon: string
+  path: string
+  routeName?: string
 }
 
-const coreMetrics: MetricCard[] = [
+const router = useRouter()
+const loading = ref(false)
+const overview = ref<DashboardOverviewVO>({
+  appCount: 0,
+  publishedAppCount: 0,
+  knowledgeCount: 0,
+  writingDocCount: 0,
+  conversationCount: 0,
+  messageCount: 0,
+  todayRequestCount: 0,
+  todayTokenCount: 0,
+  todayCost: 0
+})
+
+const formatNumber = (value: number) => new Intl.NumberFormat('zh-CN').format(value || 0)
+
+const coreMetrics = computed<MetricCard[]>(() => [
   {
     key: 'apps',
-    label: 'AI 应用',
-    value: '—',
-    helper: '统计已创建应用与发布状态',
+    label: 'AI 智能体',
+    value: formatNumber(overview.value.appCount),
+    helper: '统计已创建智能体与发布状态',
     accent: 'blue',
     icon: 'app'
   },
   {
     key: 'published',
-    label: '已发布应用',
-    value: '—',
-    helper: '可被用户访问的应用数量',
+    label: '已发布智能体',
+    value: formatNumber(overview.value.publishedAppCount),
+    helper: '可被用户访问的智能体数量',
     accent: 'green',
     icon: 'publish'
   },
   {
     key: 'knowledge',
     label: '知识库',
-    value: '—',
+    value: formatNumber(overview.value.knowledgeCount),
     helper: '已创建知识库总数',
     accent: 'cyan',
     icon: 'database'
   },
   {
     key: 'documents',
-    label: '知识文档',
-    value: '—',
-    helper: '知识库内文档与索引内容',
+    label: '消息总量',
+    value: formatNumber(overview.value.messageCount),
+    helper: '平台累计保存的对话消息',
     accent: 'violet',
     icon: 'doc'
   },
   {
     key: 'writing',
     label: '写作文档',
-    value: '—',
+    value: formatNumber(overview.value.writingDocCount),
     helper: 'AI 写作中保存的文档',
     accent: 'amber',
     icon: 'pen'
@@ -67,102 +91,156 @@ const coreMetrics: MetricCard[] = [
   {
     key: 'chat',
     label: '对话会话',
-    value: '—',
-    helper: '用户与应用产生的会话数',
+    value: formatNumber(overview.value.conversationCount),
+    helper: '用户与智能体产生的会话数',
     accent: 'slate',
     icon: 'chat'
   }
-]
+])
 
-const moduleCards: ModuleCard[] = [
+const moduleCards = computed<ModuleCard[]>(() => [
   {
-    title: '应用中心',
-    description: '管理智能体应用、发布状态和编排入口。',
+    title: '智能体中心',
+    description: '管理智能体、发布状态和编排入口。',
     icon: 'app',
-    action: '进入应用管理',
+    path: '/agents',
+    action: '进入智能体管理',
     metrics: [
-      { label: '应用总数', value: '—' },
-      { label: '已发布', value: '—' },
-      { label: '草稿', value: '—' }
+      { label: '智能体总数', value: formatNumber(overview.value.appCount) },
+      { label: '已发布', value: formatNumber(overview.value.publishedAppCount) },
+      {
+        label: '待发布',
+        value: formatNumber(Math.max(0, overview.value.appCount - overview.value.publishedAppCount))
+      }
     ]
   },
   {
     title: '知识库',
     description: '维护企业知识库、文档、分段和检索能力。',
     icon: 'database',
+    path: '/knowledge',
     action: '进入知识库',
     metrics: [
-      { label: '知识库', value: '—' },
-      { label: '文档', value: '—' },
-      { label: '词数', value: '—' }
+      { label: '知识库', value: formatNumber(overview.value.knowledgeCount) },
+      { label: '状态', value: '实时' },
+      { label: '索引', value: '已接入' }
     ]
   },
   {
     title: 'AI 写作',
     description: '沉淀写作内容，支持续写、润色和文档管理。',
     icon: 'pen',
+    path: '/ai/writing',
     action: '进入写作',
     metrics: [
-      { label: '文档', value: '—' },
-      { label: '本周更新', value: '—' },
-      { label: '字数', value: '—' }
+      { label: '文档', value: formatNumber(overview.value.writingDocCount) },
+      { label: '能力', value: '生成' },
+      { label: '保存', value: '自动' }
     ]
   },
   {
     title: 'AI 对话',
-    description: '基于已发布应用进行对话、上传文件和语音输入。',
+    description: '基于已发布智能体进行对话、上传文件和语音输入。',
     icon: 'chat',
+    path: '/chat',
     action: '进入对话',
     metrics: [
-      { label: '会话', value: '—' },
-      { label: '消息', value: '—' },
-      { label: '文件', value: '—' }
+      { label: '会话', value: formatNumber(overview.value.conversationCount) },
+      { label: '消息', value: formatNumber(overview.value.messageCount) },
+      { label: '今日请求', value: formatNumber(overview.value.todayRequestCount) }
     ]
   }
-]
+])
 
-const operationMetrics = [
-  { label: '今日请求量', value: '—', helper: '来自对话与写作调用', percent: 0 },
-  { label: '今日 Token', value: '—', helper: '模型输入输出消耗', percent: 0 },
-  { label: '活跃用户', value: '—', helper: '当天有交互的用户', percent: 0 },
-  { label: '失败请求', value: '—', helper: '接口异常或模型失败', percent: 0 }
-]
+const operationMetrics = computed(() => [
+  {
+    label: '今日请求量',
+    value: formatNumber(overview.value.todayRequestCount),
+    helper: '已落库的对话调用',
+    percent: Math.min(100, overview.value.todayRequestCount)
+  },
+  {
+    label: '今日 Token',
+    value: formatNumber(overview.value.todayTokenCount),
+    helper: '平台模型调用 Token 消耗',
+    percent: Math.min(100, overview.value.todayTokenCount / 1000)
+  },
+  {
+    label: '今日费用',
+    value: `¥${Number(overview.value.todayCost || 0).toFixed(4)}`,
+    helper: '模型调用累计费用',
+    percent: Math.min(100, Number(overview.value.todayCost || 0) * 10)
+  },
+  {
+    label: '消息总量',
+    value: formatNumber(overview.value.messageCount),
+    helper: '平台历史消息记录',
+    percent: Math.min(100, overview.value.messageCount / 10)
+  }
+])
 
 const workbenchItems: WorkbenchItem[] = [
   {
-    title: '创建 AI 应用',
-    description: '从模板或空白编排创建智能体。',
-    meta: '应用管理',
-    icon: 'plus'
+    title: '管理智能体',
+    description: '查看、创建和维护平台智能体。',
+    meta: '智能体管理',
+    icon: 'plus',
+    path: '/agents',
+    routeName: 'AgentManagement'
   },
   {
     title: '新建知识库',
     description: '按流程配置知识库并接入文档。',
     meta: '知识库',
-    icon: 'database'
+    icon: 'database',
+    path: '/knowledge'
   },
   {
     title: '上传知识文档',
     description: '为知识库补充可检索的业务资料。',
     meta: '文档管理',
-    icon: 'upload'
+    icon: 'upload',
+    path: '/knowledge'
   },
   {
     title: '开始写作',
     description: '使用 AI 续写、润色企业内容。',
     meta: 'AI 写作',
-    icon: 'pen'
+    icon: 'pen',
+    path: '/ai/writing',
+    routeName: 'AiWriting'
   }
 ]
+
+async function loadOverview() {
+  loading.value = true
+  try {
+    overview.value = await dashboardApi.overview()
+  } catch (error: any) {
+    ElMessage.error(error?.message || '首页数据加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+function navigate(path: string) {
+  void router.push(path)
+}
+
+function navigateWorkbench(item: WorkbenchItem) {
+  void router.push(item.routeName ? { name: item.routeName } : item.path)
+}
+
+onMounted(loadOverview)
 </script>
 
 <template>
-  <div class="dashboard-page">
+  <div v-loading="loading" class="dashboard-page">
     <section class="dashboard-hero">
       <div class="hero-copy">
         <div class="eyebrow">AI HUB OVERVIEW</div>
         <h1>工作台总览</h1>
-        <p>围绕 AI 应用、知识库、智能写作和对话能力，集中查看业务数据与常用入口。</p>
+        <p>围绕 AI 智能体、知识库、智能写作和对话能力，集中查看业务数据与常用入口。</p>
       </div>
     </section>
 
@@ -252,7 +330,15 @@ const workbenchItems: WorkbenchItem[] = [
         </div>
 
         <div class="module-grid">
-          <article v-for="item in moduleCards" :key="item.title" class="module-card">
+          <article
+            v-for="item in moduleCards"
+            :key="item.title"
+            class="module-card"
+            role="button"
+            tabindex="0"
+            @click="navigate(item.path)"
+            @keyup.enter="navigate(item.path)"
+          >
             <div class="module-head">
               <span class="module-icon" :class="`icon-${item.icon}`">
                 <svg
@@ -308,12 +394,12 @@ const workbenchItems: WorkbenchItem[] = [
                 <strong>{{ metric.value }}</strong>
               </div>
             </div>
-            <div class="module-action">
+            <button class="module-action" type="button" @click.stop="navigate(item.path)">
               <span>{{ item.action }}</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 12h14M13 5l7 7-7 7" />
               </svg>
-            </div>
+            </button>
           </article>
         </div>
       </div>
@@ -352,7 +438,15 @@ const workbenchItems: WorkbenchItem[] = [
       </div>
 
       <div class="workbench-grid">
-        <article v-for="item in workbenchItems" :key="item.title" class="workbench-card">
+        <article
+          v-for="item in workbenchItems"
+          :key="item.title"
+          class="workbench-card"
+          role="button"
+          tabindex="0"
+          @click="navigateWorkbench(item)"
+          @keyup.enter="navigateWorkbench(item)"
+        >
           <div class="workbench-icon" :class="`icon-${item.icon}`">
             <svg
               v-if="item.icon === 'plus'"
@@ -681,6 +775,7 @@ const workbenchItems: WorkbenchItem[] = [
 
 .module-card {
   padding: 16px;
+  cursor: pointer;
   transition: all 0.18s ease;
 }
 
@@ -740,11 +835,17 @@ const workbenchItems: WorkbenchItem[] = [
 
 .module-action {
   display: flex;
+  width: 100%;
   padding-top: 12px;
   font-size: 13px;
   font-weight: 650;
   color: var(--primary);
+  cursor: pointer;
+  background: transparent;
   border-top: 1px solid var(--border);
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
   align-items: center;
   justify-content: space-between;
 }

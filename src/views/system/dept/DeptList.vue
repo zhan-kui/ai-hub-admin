@@ -208,7 +208,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ContentWrap title="部门管理">
+  <ContentWrap class="system-management-page" title="部门管理" message="维护组织架构与部门默认角色">
     <div class="toolbar">
       <el-form inline>
         <el-form-item label="关键词">

@@ -662,7 +662,7 @@ async function publishApp(row: AppRow) {
   }
   try {
     await ElMessageBox.confirm(
-      `确认发布智能体【${row.appName}】吗？\n发布后会将当前保存流程转换为 Dify 智能体并生效。`,
+      `确认发布智能体【${row.appName}】吗？\n发布后会将当前保存流程部署为可用智能体并生效。`,
       row.publishStatus === 'PUBLISHED' ? '重新发布确认' : '发布确认',
       {
         type: 'warning',
@@ -1057,7 +1057,7 @@ onMounted(() => {
   >
     <div v-loading="workflowBindLoading" class="workflow-bind-body">
       <p class="workflow-bind-hint">
-        Chatflow 应用发布时会读取绑定工作流生成 Dify 配置；工作流变更后需要重新发布应用。
+        对话流智能体发布时会读取绑定工作流生成运行配置；工作流变更后需要重新发布智能体。
       </p>
       <el-select
         v-model="selectedWorkflowId"

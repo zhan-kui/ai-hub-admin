@@ -119,7 +119,23 @@ onMounted(() => {
 </script>
 
 <template>
-  <ContentWrap title="个人中心" message="维护个人资料与账号密码">
+  <ContentWrap
+    class="system-management-page profile-page"
+    title="个人中心"
+    message="维护个人资料与账号密码"
+  >
+    <div class="profile-hero">
+      <el-avatar :size="72" :src="profileForm.avatar">
+        {{ (profileForm.nickname || profileForm.username || 'U').slice(0, 1).toUpperCase() }}
+      </el-avatar>
+      <div>
+        <div class="profile-name">{{
+          profileForm.nickname || profileForm.username || '平台用户'
+        }}</div>
+        <div class="profile-account">@{{ profileForm.username || '-' }} · AI Hub 账号</div>
+      </div>
+      <el-tag type="success" effect="light" round>账号正常</el-tag>
+    </div>
     <el-row :gutter="16">
       <el-col :xs="24" :lg="14">
         <el-card shadow="never" class="panel-card" v-loading="profileLoading">
@@ -191,10 +207,39 @@ onMounted(() => {
 <style scoped lang="less">
 .panel-card {
   min-height: 440px;
+  border: 1px solid #e7edf6;
+  border-radius: 16px;
 }
 
 .panel-title {
   font-size: 15px;
   font-weight: 600;
+}
+
+.profile-hero {
+  display: flex;
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  background: linear-gradient(120deg, #eff6ff, #f8fbff 58%, #eefcff);
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  align-items: center;
+  gap: 16px;
+}
+
+.profile-name {
+  margin-bottom: 6px;
+  font-size: 20px;
+  font-weight: 750;
+  color: #172033;
+}
+
+.profile-account {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.profile-hero .el-tag {
+  margin-left: auto;
 }
 </style>

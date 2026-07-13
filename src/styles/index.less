@@ -5,3 +5,58 @@
 .el-popup-parent--hidden {
   width: 100% !important;
 }
+
+// 系统管理统一视觉：让列表、筛选和弹窗保持同一套轻量企业后台风格。
+.system-management-page.el-card {
+  overflow: hidden;
+  background: rgb(255 255 255 / 96%);
+  border: 1px solid #e5ebf4;
+  border-radius: 18px;
+  box-shadow: 0 10px 32px rgb(15 23 42 / 5%);
+}
+
+.system-management-page > .el-card__header {
+  padding: 20px 24px;
+  background: linear-gradient(100deg, #f8fbff 0%, #fff 62%, #f3f8ff 100%);
+  border-bottom-color: #e8eef7;
+}
+
+.system-management-page > .el-card__body {
+  padding: 22px 24px 26px;
+}
+
+.system-management-page .toolbar {
+  padding: 14px 16px;
+  background: #f8fafc;
+  border: 1px solid #e7edf5;
+  border-radius: 14px;
+}
+
+.system-management-page .el-table {
+  --el-table-header-bg-color: #f5f8fc;
+  --el-table-row-hover-bg-color: #f3f7ff;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.system-management-page .el-table th.el-table__cell {
+  height: 48px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.system-management-page .el-button:not(.is-link) {
+  border-radius: 9px;
+}
+
+.system-management-page .el-input__wrapper,
+.system-management-page .el-select__wrapper,
+.system-management-page .el-textarea__inner {
+  border-radius: 9px;
+}
+
+@media (width <= 768px) {
+  .system-management-page > .el-card__body {
+    padding: 14px;
+  }
+}

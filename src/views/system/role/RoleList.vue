@@ -231,7 +231,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <ContentWrap title="角色管理">
+  <ContentWrap class="system-management-page" title="角色管理" message="配置角色权限与可用状态">
     <div class="toolbar">
       <el-form inline>
         <el-form-item label="关键词">
