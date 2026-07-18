@@ -76,6 +76,9 @@ importers:
       mitt:
         specifier: ^3.0.1
         version: 3.0.1
+      monaco-editor:
+        specifier: 0.52.2
+        version: 0.52.2
       nprogress:
         specifier: ^0.2.0
         version: 0.2.0
@@ -6424,6 +6427,12 @@ packages:
   mockjs@1.1.0:
     resolution: { integrity: sha1-5qDDeOkZBtuv8gkRzAJzs8fXWwY= }
     hasBin: true
+
+  monaco-editor@0.52.2:
+    resolution:
+      {
+        integrity: sha512-GEQWEZmfkOGLdd3XK8ryrfWz3AIP8YymVXiPHEdewrUq7mh0qrKrfHLNCXcbB6sTnMLnOZ3ztSiKcciFUkIJwQ==
+      }
 
   mrmime@2.0.0:
     resolution:
@@ -13165,6 +13174,8 @@ snapshots:
   mockjs@1.1.0:
     dependencies:
       commander: 13.0.0
+
+  monaco-editor@0.52.2: {}
 
   mrmime@2.0.0: {}
 

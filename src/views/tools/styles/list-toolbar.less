@@ -1,0 +1,85 @@
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+  box-sizing: border-box;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+}
+
+.list-toolbar__filters {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+
+  :deep(.el-form-item) {
+    margin: 0;
+  }
+}
+
+.list-toolbar__keyword {
+  flex: 0 1 280px;
+  width: 280px;
+}
+
+.list-toolbar__select {
+  width: 140px;
+}
+
+.list-toolbar__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+
+  :deep(.el-button + .el-button) {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .list-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .list-toolbar__filters {
+    width: 100%;
+  }
+
+  .list-toolbar__actions {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .list-toolbar {
+    padding: 12px;
+  }
+
+  .list-toolbar__filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .list-toolbar__keyword,
+  .list-toolbar__select,
+  .list-toolbar__submit {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .list-toolbar__submit :deep(.el-button) {
+    width: 100%;
+  }
+}
