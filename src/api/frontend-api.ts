@@ -268,6 +268,7 @@ export interface AppListParams {
   keyword?: string
   appType?: string
   publishStatus?: AppPublishStatus | 'UNPUBLISHED' | ''
+  systemAgent?: boolean
   enabled?: boolean
 }
 

@@ -51,7 +51,7 @@ const staticRoutes: RouteRecordRaw[] = [
   {
     path: '/agents/:agentId/chat-plus',
     name: 'AgentCapabilityChat',
-    component: () => import('@/views/app/AppChat.vue'),
+    component: () => import('@/views/app/ChatPageClaudeStyle.vue'),
     meta: { hidden: true, requiresAuth: true, title: '统一能力对话', toolChain: true }
   },
   {

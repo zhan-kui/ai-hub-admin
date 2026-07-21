@@ -18,7 +18,6 @@ type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
 
 const router = useRouter()
 const route = useRoute()
-const capabilityEntry = computed(() => route.meta.permission === 'assistant:general')
 
 const loading = ref(false)
 const keyword = ref('') // 输入框内容
@@ -207,7 +206,7 @@ async function loadApps() {
 
 function enterChat(row: AppRow) {
   router.push({
-    path: `/agents/${row.id}/${capabilityEntry.value ? 'chat-plus' : 'chat'}`,
+    path: `/agents/${row.id}/chat`,
     query: { from: route.fullPath }
   })
 }
