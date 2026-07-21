@@ -18,21 +18,28 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import {
   appApi,
+  capabilityOptionsApi,
   chatApi,
   conversationApi,
   fileApi,
   type AppConfigVO,
   type AppStarterPrompt,
-  type ChatFilePayload
+  type CapabilitySkillOption,
+  type CapabilityToolOption,
+  type ChatFilePayload,
+  type ChatRequest
 } from '@/api/frontend-api'
 import {
   useChatStore,
   type ChatMessage,
   type ChatMessageFileReference,
+  type ToolCallItem,
+  type ToolSource,
   type UploadedFile
 } from '@/store/modules/chat'
 import { useUserStore } from '@/store/modules/user'
 import { createDefaultStarterPrompts, normalizeStarterPrompts } from './starter-prompts'
+import ToolCallChain from '@/components/Chat/ToolCallChain.vue'
 
 interface ConversationItem {
   id: string
@@ -69,6 +76,7 @@ const chatStore = useChatStore()
 const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
+const enhanced = computed(() => route.meta.toolChain === true)
 
 function resolveRouteAppId(): number {
   const routeId = route.params.agentId ?? route.params.appId
@@ -91,6 +99,14 @@ const uploadLoading = ref(false)
 const audioRecognizing = ref(false)
 const isRecording = ref(false)
 const stopLoading = ref(false)
+const capabilityLoading = ref(false)
+const webMode = ref(false)
+const capabilityToolOptions = ref<CapabilityToolOption[]>([])
+const capabilitySkillOptions = ref<CapabilitySkillOption[]>([])
+const selectedToolCodes = ref<string[]>([])
+const selectedSkillCodes = ref<string[]>([])
+const webToolCodes = ref<string[]>([])
+const webAvailable = computed(() => webToolCodes.value.length > 0)
 
 const streamController = ref<AbortController | null>(null)
 const activeAssistantMessageId = ref<string | null>(null)
@@ -116,6 +132,7 @@ interface StreamingDraft {
   createdAt: string
   // 用于渲染思维链面板的展开态
   thoughtOpen: boolean
+  toolCalls?: ToolCallItem[]
 }
 const streamingDraft = ref<StreamingDraft | null>(null)
 // 草稿内容的 rendered HTML，用 shallowRef 避免深度响应
@@ -178,6 +195,24 @@ const promptSuggestions = computed<AppStarterPrompt[]>(() => {
   }
   return normalizeStarterPrompts(currentApp.value.starterPrompts)
 })
+
+async function loadCapabilityOptions() {
+  if (!enhanced.value) return
+  capabilityLoading.value = true
+  try {
+    const options = await capabilityOptionsApi.list()
+    capabilityToolOptions.value = (options.tools || []).filter((item) => !item.web)
+    capabilitySkillOptions.value = options.skills || []
+    webToolCodes.value = options.webToolCodes || []
+    selectedToolCodes.value = capabilityToolOptions.value.map((item) => item.toolCode)
+    selectedSkillCodes.value = capabilitySkillOptions.value.map((item) => item.skillCode)
+    webMode.value = false
+  } catch (error) {
+    ElMessage.error(extractErrorMessage(error) || '加载能力选项失败')
+  } finally {
+    capabilityLoading.value = false
+  }
+}
 
 const currentConversation = computed(() =>
   conversations.value.find((item) => item.id === currentConversationId.value)
@@ -588,6 +623,61 @@ function parseMessageRole(rawRole: string | null): ChatMessage['role'] {
   return 'assistant'
 }
 
+function normalizeToolSources(value: unknown): ToolSource[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const sources: ToolSource[] = []
+  value.forEach((item) => {
+    const record = toRecord(item)
+    const url = record ? extractStringByKeys(record, ['url']) : null
+    if (!record || !url) return
+    const position = Number(record.position)
+    sources.push({
+      title: extractStringByKeys(record, ['title']) || url,
+      url,
+      snippet: extractStringByKeys(record, ['snippet']) || undefined,
+      position: Number.isFinite(position) ? position : undefined
+    })
+  })
+  return sources.length ? sources : undefined
+}
+
+function normalizeToolCalls(value: unknown): ToolCallItem[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items: ToolCallItem[] = []
+  value.forEach((item) => {
+    const record = toRecord(item)
+    if (!record) return
+    const callId = extractStringByKeys(record, ['callId', 'call_id'])
+    const toolCode = extractStringByKeys(record, ['toolCode', 'tool_code'])
+    if (!callId || !toolCode) return
+    const rawStatus = extractStringByKeys(record, ['status'])
+    const status: ToolCallItem['status'] =
+      rawStatus === 'calling' ? 'calling' : rawStatus === 'success' ? 'success' : 'error'
+    const durationMs = Number(record.durationMs ?? record.duration_ms)
+    const seq = Number(record.seq)
+    const errorRecord = toRecord(record.error)
+    items.push({
+      callId,
+      seq: Number.isFinite(seq) ? seq : undefined,
+      toolCode,
+      toolName: extractStringByKeys(record, ['toolName', 'tool_name']) || undefined,
+      providerType: extractStringByKeys(record, ['providerType', 'provider_type']) || undefined,
+      status,
+      arguments: record.arguments,
+      durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
+      sources: normalizeToolSources(record.sources),
+      error: errorRecord
+        ? {
+            code: extractStringByKeys(errorRecord, ['code']) || 'TOOL_EXECUTION_ERROR',
+            message: extractStringByKeys(errorRecord, ['message']) || '工具调用失败',
+            retryable: errorRecord.retryable === true
+          }
+        : undefined
+    })
+  })
+  return items.length ? items : undefined
+}
+
 function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   const record = toRecord(rawItem)
   if (!record) return []
@@ -602,6 +692,7 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   )
   const backendMessageId =
     extractStringByKeys(record, ['messageId', 'message_id', 'id']) || undefined
+  const toolCalls = normalizeToolCalls(record.toolCalls ?? record.tool_calls)
 
   if (query || answer) {
     const pairMessages: ChatMessage[] = []
@@ -624,7 +715,8 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
         content: answer || '',
         isThinking: false,
         createdAt,
-        backendMessageId
+        backendMessageId,
+        toolCalls
       })
     }
     return pairMessages
@@ -653,7 +745,8 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
       content,
       isThinking: false,
       createdAt,
-      backendMessageId: role === 'assistant' ? backendMessageId : undefined
+      backendMessageId: role === 'assistant' ? backendMessageId : undefined,
+      toolCalls: role === 'assistant' ? toolCalls : undefined
     }
   ]
 }
@@ -663,7 +756,7 @@ function normalizeMessages(payload: unknown): ChatMessage[] {
   const source = list.length > 0 ? list : [payload]
   return source
     .flatMap((item, index) => parseMessageItem(item, index))
-    .filter((item) => Boolean(item.content || item.thought))
+    .filter((item) => Boolean(item.content || item.thought || item.toolCalls?.length))
 }
 
 function formatTime(time?: string): string {
@@ -759,7 +852,8 @@ function commitDraft(draft: StreamingDraft) {
       thought: draft.thought,
       content: draft.content,
       isThinking: false,
-      backendMessageId: draft.backendMessageId
+      backendMessageId: draft.backendMessageId,
+      toolCalls: draft.toolCalls
     }
   })
   chatStore.setMessages(next)
@@ -1247,6 +1341,11 @@ function resolveAgentListFallbackPath(): string {
 }
 
 function backToApps() {
+  const from = Array.isArray(route.query.from) ? route.query.from[0] : route.query.from
+  if (typeof from === 'string' && from.startsWith('/')) {
+    void router.push(from)
+    return
+  }
   const historyState = window.history.state as { back?: string | null } | null
   if (historyState?.back) {
     router.back()
@@ -1503,7 +1602,8 @@ async function handleSend() {
     content: '',
     isThinking: true,
     createdAt: new Date().toISOString(),
-    backendMessageId: undefined
+    backendMessageId: undefined,
+    toolCalls: enhanced.value ? [] : undefined
   })
   shouldStickToBottom.value = false
   void scrollToMessageStart(userMessageId, 'smooth')
@@ -1516,7 +1616,8 @@ async function handleSend() {
     isThinking: true,
     backendMessageId: undefined,
     createdAt: new Date().toISOString(),
-    thoughtOpen: false
+    thoughtOpen: false,
+    toolCalls: enhanced.value ? [] : undefined
   }
   draftThoughtHtml.value = ''
   draftContentHtml.value = ''
@@ -1540,112 +1641,170 @@ async function handleSend() {
   }
 
   try {
-    await chatApi.streamChat(
-      appId.value,
-      { query: question, conversationId: previousConversationId || undefined, inputs: {}, files },
-      {
-        signal: controller.signal,
-        handlers: {
-          onRawEvent: (event) => {
-            if (!streamingDraft.value) return
+    const streamPayload: ChatRequest = {
+      query: question,
+      conversationId: previousConversationId || undefined,
+      inputs: {},
+      files
+    }
+    if (enhanced.value) {
+      streamPayload.mode = webMode.value ? 'web' : 'tool'
+      streamPayload.selectedToolCodes = webMode.value ? [] : [...selectedToolCodes.value]
+      streamPayload.selectedSkillCodes = webMode.value ? [] : [...selectedSkillCodes.value]
+    }
+    await chatApi.streamChat(appId.value, streamPayload, {
+      signal: controller.signal,
+      handlers: {
+        onRawEvent: (event) => {
+          if (!streamingDraft.value) return
 
-            if (event.event === 'message') {
-              const payload = normalizeStreamPayload(event.data)
-              updateStreamMeta(payload)
-              const backendMessageId = extractBackendMessageId(payload)
-              const chunkType = extractChunkType(payload)
+          if (event.event === 'message') {
+            const payload = normalizeStreamPayload(event.data)
+            updateStreamMeta(payload)
+            const backendMessageId = extractBackendMessageId(payload)
+            const chunkType = extractChunkType(payload)
 
-              if (chunkType === 'thought_start' || chunkType === 'thought') {
-                const delta = extractThoughtText(payload)
-                patchDraft({
-                  thought: streamingDraft.value.thought + delta,
-                  isThinking: true,
-                  backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
-                })
-              } else if (chunkType === 'thought_end') {
-                const delta = extractThoughtText(payload)
-                patchDraft({
-                  thought: streamingDraft.value.thought + delta,
-                  isThinking: false,
-                  backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
-                })
-              } else if (chunkType === 'text') {
-                const textDelta = extractContentText(payload)
-                const parts = splitThinkTaggedDelta(textDelta, streamThinkState)
+            if (chunkType === 'thought_start' || chunkType === 'thought') {
+              const delta = extractThoughtText(payload)
+              patchDraft({
+                thought: streamingDraft.value.thought + delta,
+                isThinking: true,
+                backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+              })
+            } else if (chunkType === 'thought_end') {
+              const delta = extractThoughtText(payload)
+              patchDraft({
+                thought: streamingDraft.value.thought + delta,
+                isThinking: false,
+                backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+              })
+            } else if (chunkType === 'text') {
+              const textDelta = extractContentText(payload)
+              const parts = splitThinkTaggedDelta(textDelta, streamThinkState)
+              patchDraft({
+                thought: streamingDraft.value.thought + parts.thought,
+                content: streamingDraft.value.content + parts.content,
+                isThinking: streamThinkState.inThink,
+                backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+              })
+            } else {
+              const fallbackText = extractContentText(payload)
+              if (fallbackText) {
+                const parts = splitThinkTaggedDelta(fallbackText, streamThinkState)
                 patchDraft({
                   thought: streamingDraft.value.thought + parts.thought,
                   content: streamingDraft.value.content + parts.content,
                   isThinking: streamThinkState.inThink,
                   backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
                 })
-              } else {
-                const fallbackText = extractContentText(payload)
-                if (fallbackText) {
-                  const parts = splitThinkTaggedDelta(fallbackText, streamThinkState)
-                  patchDraft({
-                    thought: streamingDraft.value.thought + parts.thought,
-                    content: streamingDraft.value.content + parts.content,
-                    isThinking: streamThinkState.inThink,
-                    backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
-                  })
-                }
               }
-            } else if (event.event === 'message_replace') {
-              const payload = normalizeStreamPayload(event.data)
-              updateStreamMeta(payload)
-              const backendMessageId = extractBackendMessageId(payload)
-              const content = extractContentText(payload)
-              streamThinkState.inThink = false
-              streamThinkState.carry = ''
-              const parts = splitThinkTaggedText(content)
-              patchDraft({
-                content: toDisplayText(parts.content) || content,
-                thought: mergeThoughtText(
-                  streamingDraft.value.thought,
-                  toDisplayText(parts.thought)
-                ),
-                isThinking: false,
-                backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
-              })
-            } else if (event.event === 'message_end') {
-              const payload = normalizeStreamPayload(event.data)
-              updateStreamMeta(payload)
-              const backendMessageId = extractBackendMessageId(payload)
-              const finalText = extractContentText(payload)
-              const finalParts = splitThinkTaggedText(finalText)
-              const carryParts = flushThinkStreamCarry(streamThinkState)
-              const nextThought = mergeThoughtText(
-                toDisplayText(finalParts.thought),
-                toDisplayText(carryParts.thought)
-              )
-              const nextContent =
-                (toDisplayText(finalParts.content) || '') +
-                (toDisplayText(carryParts.content) || '')
-              patchDraft({
-                thought: mergeThoughtText(streamingDraft.value.thought, nextThought),
-                content: streamingDraft.value.content || nextContent || finalText,
-                isThinking: false,
-                backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
-              })
-            } else if (event.event === 'error') {
-              const payload = normalizeStreamPayload(event.data)
-              const errMsg = extractErrorMessage(payload)
-              patchDraft({
-                content: streamingDraft.value.content || `请求失败：${errMsg}`,
-                isThinking: false
-              })
             }
-          },
-          onError: (error) => {
-            if (!streamingDraft.value) return
-            const errMsg = extractErrorMessage(error)
-            if (!streamingDraft.value.content && !streamingDraft.value.thought) {
-              patchDraft({ content: `请求失败：${errMsg}`, isThinking: false })
+          } else if (event.event === 'message_replace') {
+            const payload = normalizeStreamPayload(event.data)
+            updateStreamMeta(payload)
+            const backendMessageId = extractBackendMessageId(payload)
+            const content = extractContentText(payload)
+            streamThinkState.inThink = false
+            streamThinkState.carry = ''
+            const parts = splitThinkTaggedText(content)
+            patchDraft({
+              content: toDisplayText(parts.content) || content,
+              thought: mergeThoughtText(streamingDraft.value.thought, toDisplayText(parts.thought)),
+              isThinking: false,
+              backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+            })
+          } else if (event.event === 'message_end') {
+            const payload = normalizeStreamPayload(event.data)
+            updateStreamMeta(payload)
+            const backendMessageId = extractBackendMessageId(payload)
+            const finalText = extractContentText(payload)
+            const finalParts = splitThinkTaggedText(finalText)
+            const carryParts = flushThinkStreamCarry(streamThinkState)
+            const nextThought = mergeThoughtText(
+              toDisplayText(finalParts.thought),
+              toDisplayText(carryParts.thought)
+            )
+            const nextContent =
+              (toDisplayText(finalParts.content) || '') + (toDisplayText(carryParts.content) || '')
+            patchDraft({
+              thought: mergeThoughtText(streamingDraft.value.thought, nextThought),
+              content: streamingDraft.value.content || nextContent || finalText,
+              isThinking: false,
+              backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
+            })
+          } else if (event.event === 'tool_call' && enhanced.value) {
+            const payload = normalizeStreamPayload(event.data)
+            const callId = extractStringByKeys(payload, ['callId', 'call_id'])
+            const toolCode = extractStringByKeys(payload, ['toolCode', 'tool_code'])
+            if (!callId || !toolCode) return
+            const seq = Number(payload.seq)
+            const current = streamingDraft.value.toolCalls || []
+            const index = current.findIndex((item) => item.callId === callId)
+            const nextItem: ToolCallItem = {
+              callId,
+              seq: Number.isFinite(seq) ? seq : undefined,
+              toolCode,
+              toolName: extractStringByKeys(payload, ['toolName', 'tool_name']) || toolCode,
+              providerType:
+                extractStringByKeys(payload, ['providerType', 'provider_type']) || undefined,
+              status: 'calling',
+              arguments: payload.arguments
             }
+            const next = [...current]
+            if (index >= 0) next[index] = { ...next[index], ...nextItem }
+            else next.push(nextItem)
+            patchDraft({ toolCalls: next })
+          } else if (event.event === 'tool_result' && enhanced.value) {
+            const payload = normalizeStreamPayload(event.data)
+            const callId = extractStringByKeys(payload, ['callId', 'call_id'])
+            const toolCode = extractStringByKeys(payload, ['toolCode', 'tool_code'])
+            if (!callId || !toolCode) return
+            const success = payload.success === true || payload.success === 'true'
+            const durationMs = Number(payload.durationMs ?? payload.duration_ms)
+            const seq = Number(payload.seq)
+            const errorRecord = toRecord(payload.error)
+            const resultPatch: ToolCallItem = {
+              callId,
+              seq: Number.isFinite(seq) ? seq : undefined,
+              toolCode,
+              toolName: extractStringByKeys(payload, ['toolName', 'tool_name']) || toolCode,
+              providerType:
+                extractStringByKeys(payload, ['providerType', 'provider_type']) || undefined,
+              status: success ? 'success' : 'error',
+              durationMs: Number.isFinite(durationMs) ? durationMs : undefined,
+              sources: normalizeToolSources(payload.sources),
+              error: errorRecord
+                ? {
+                    code: extractStringByKeys(errorRecord, ['code']) || 'TOOL_EXECUTION_ERROR',
+                    message: extractStringByKeys(errorRecord, ['message']) || '工具调用失败',
+                    retryable: errorRecord.retryable === true
+                  }
+                : undefined
+            }
+            const current = streamingDraft.value.toolCalls || []
+            const index = current.findIndex((item) => item.callId === callId)
+            const next = [...current]
+            if (index >= 0) next[index] = { ...next[index], ...resultPatch }
+            else next.push(resultPatch)
+            patchDraft({ toolCalls: next })
+          } else if (event.event === 'error') {
+            const payload = normalizeStreamPayload(event.data)
+            const errMsg = extractErrorMessage(payload)
+            patchDraft({
+              content: streamingDraft.value.content || `请求失败：${errMsg}`,
+              isThinking: false
+            })
+          }
+        },
+        onError: (error) => {
+          if (!streamingDraft.value) return
+          const errMsg = extractErrorMessage(error)
+          if (!streamingDraft.value.content && !streamingDraft.value.thought) {
+            patchDraft({ content: `请求失败：${errMsg}`, isThinking: false })
           }
         }
       }
-    )
+    })
     sendSucceeded = true
 
     const latestConversationId = chatStore.getCurrentConversationId
@@ -1732,6 +1891,7 @@ onMounted(async () => {
     return
   }
   chatStore.setCurrentAppId(appId.value)
+  await loadCapabilityOptions()
   await loadConversations()
   requestStickBottom('auto')
 })
@@ -1977,7 +2137,8 @@ onBeforeUnmount(() => {
                           message.role === 'assistant' &&
                           message.isThinking &&
                           !message.content &&
-                          !message.thought
+                          !message.thought &&
+                          !message.toolCalls?.length
                         )
                       "
                       class="msg-row"
@@ -2043,6 +2204,11 @@ onBeforeUnmount(() => {
                                 v-html="renderMarkdown(message.thought || '')"
                               ></div>
                             </details>
+
+                            <ToolCallChain
+                              v-if="enhanced && message.toolCalls?.length"
+                              :items="message.toolCalls"
+                            />
 
                             <div
                               v-if="message.content"
@@ -2194,6 +2360,11 @@ onBeforeUnmount(() => {
                           <div class="thought-body" v-html="draftThoughtHtml"></div>
                         </details>
 
+                        <ToolCallChain
+                          v-if="enhanced && streamingDraft.toolCalls?.length"
+                          :items="streamingDraft.toolCalls"
+                        />
+
                         <!-- 正文（思维链结束前不显示，避免空块闪烁） -->
                         <div
                           v-if="streamingDraft.content"
@@ -2234,6 +2405,55 @@ onBeforeUnmount(() => {
             accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.webp,.bmp,.mp3,.wav,.m4a,.mp4"
             @change="handleFileInputChange"
           />
+
+          <div v-if="enhanced" v-loading="capabilityLoading" class="capability-panel">
+            <div class="capability-mode">
+              <div>
+                <strong>能力配置</strong>
+                <span>{{ webMode ? '仅使用联网工具' : '使用已勾选的 Skill 与工具' }}</span>
+              </div>
+              <el-switch
+                v-model="webMode"
+                :disabled="!webAvailable || capabilityLoading"
+                active-text="联网"
+                inactive-text="工具"
+              />
+            </div>
+            <div class="capability-selectors" :class="{ disabled: webMode }">
+              <el-select
+                v-model="selectedSkillCodes"
+                multiple
+                filterable
+                collapse-tags
+                :max-collapse-tags="2"
+                :disabled="webMode"
+                placeholder="选择 Skill"
+              >
+                <el-option
+                  v-for="skill in capabilitySkillOptions"
+                  :key="skill.skillCode"
+                  :label="skill.displayName"
+                  :value="skill.skillCode"
+                />
+              </el-select>
+              <el-select
+                v-model="selectedToolCodes"
+                multiple
+                filterable
+                collapse-tags
+                :max-collapse-tags="2"
+                :disabled="webMode"
+                placeholder="选择工具"
+              >
+                <el-option
+                  v-for="tool in capabilityToolOptions"
+                  :key="tool.toolCode"
+                  :label="tool.toolName"
+                  :value="tool.toolCode"
+                />
+              </el-select>
+            </div>
+          </div>
 
           <div class="input-box">
             <!-- 已上传文件 -->
@@ -3418,6 +3638,53 @@ onBeforeUnmount(() => {
   background: var(--white);
   border-top: 1px solid var(--slate-200);
   flex-shrink: 0;
+}
+
+.capability-panel {
+  max-width: 880px;
+  padding: 10px 12px;
+  margin: 0 auto 10px;
+  background: #f8fafc;
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-lg);
+}
+
+.capability-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.capability-mode > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.capability-mode strong {
+  font-size: 13px;
+  color: var(--slate-800);
+}
+
+.capability-mode span {
+  font-size: 12px;
+  color: var(--slate-400);
+}
+
+.capability-selectors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 9px;
+}
+
+.capability-selectors :deep(.el-select) {
+  width: 100%;
+}
+
+.capability-selectors.disabled {
+  opacity: 0.55;
 }
 
 .hidden-input {

@@ -494,6 +494,30 @@ export interface ChatRequest {
   conversationId?: string
   inputs?: Record<string, any>
   files?: ChatFilePayload[]
+  mode?: 'web' | 'tool'
+  selectedToolCodes?: string[]
+  selectedSkillCodes?: string[]
+}
+
+export interface CapabilityToolOption {
+  toolCode: string
+  toolName: string
+  description?: string
+  providerType: 'MCP' | 'HTTP' | 'LOCAL'
+  web: boolean
+}
+
+export interface CapabilitySkillOption {
+  skillCode: string
+  displayName: string
+  description?: string
+  boundToolCodes: string[]
+}
+
+export interface CapabilityOptions {
+  tools: CapabilityToolOption[]
+  skills: CapabilitySkillOption[]
+  webToolCodes: string[]
 }
 
 export type ChatFileType = 'document' | 'image' | 'audio' | 'video' | 'custom'
@@ -523,6 +547,8 @@ export interface StreamChatHandlers {
   onThinkingDelta?: (data: any) => void
   onMessageEnd?: (data: any) => void
   onMessageReplace?: (data: any) => void
+  onToolCall?: (data: any) => void
+  onToolResult?: (data: any) => void
   onPing?: (data: any) => void
   onError?: (error: any) => void
   onRawEvent?: (event: SseEventPayload) => void
@@ -1042,6 +1068,12 @@ export const chatApi = {
           case 'message_replace':
             options.handlers?.onMessageReplace?.(event.data)
             break
+          case 'tool_call':
+            options.handlers?.onToolCall?.(event.data)
+            break
+          case 'tool_result':
+            options.handlers?.onToolResult?.(event.data)
+            break
           case 'ping':
             options.handlers?.onPing?.(event.data)
             break
@@ -1054,6 +1086,12 @@ export const chatApi = {
       },
       options.handlers?.onClose
     )
+  }
+}
+
+export const capabilityOptionsApi = {
+  list(config?: AxiosRequestConfig) {
+    return unwrap<CapabilityOptions>(apiClient.get('/api/capability-options', config))
   }
 }
 

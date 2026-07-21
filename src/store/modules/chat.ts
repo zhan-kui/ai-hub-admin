@@ -23,6 +23,32 @@ export interface ChatMessageFileReference {
   transferMethod?: UploadedFileTransferMethod
 }
 
+export interface ToolSource {
+  title: string
+  url: string
+  snippet?: string
+  position?: number
+}
+
+export interface ToolCallError {
+  code: string
+  message: string
+  retryable?: boolean
+}
+
+export interface ToolCallItem {
+  callId: string
+  seq?: number
+  toolCode: string
+  toolName?: string
+  providerType?: string
+  status: 'calling' | 'success' | 'error'
+  arguments?: unknown
+  durationMs?: number
+  sources?: ToolSource[]
+  error?: ToolCallError
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -32,6 +58,7 @@ export interface ChatMessage {
   createdAt?: string
   fileReferences?: ChatMessageFileReference[]
   backendMessageId?: string
+  toolCalls?: ToolCallItem[]
 }
 
 interface ChatState {

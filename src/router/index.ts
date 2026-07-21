@@ -46,7 +46,13 @@ const staticRoutes: RouteRecordRaw[] = [
     path: '/agents/:agentId/chat',
     name: 'AgentRunChat',
     component: () => import('@/views/app/AppChat.vue'),
-    meta: { hidden: true, requiresAuth: true, title: '智能体对话' }
+    meta: { hidden: true, requiresAuth: true, title: '智能体对话', toolChain: false }
+  },
+  {
+    path: '/agents/:agentId/chat-plus',
+    name: 'AgentCapabilityChat',
+    component: () => import('@/views/app/AppChat.vue'),
+    meta: { hidden: true, requiresAuth: true, title: '统一能力对话', toolChain: true }
   },
   {
     path: '/agents/orchestrator/create',

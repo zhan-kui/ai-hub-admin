@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
   ChatDotRound,
@@ -17,6 +17,8 @@ type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
 // 后端 /apps/list 暂未提供 appType 入参，分类仍在前端按 appType 过滤
 
 const router = useRouter()
+const route = useRoute()
+const capabilityEntry = computed(() => route.meta.permission === 'assistant:general')
 
 const loading = ref(false)
 const keyword = ref('') // 输入框内容
@@ -204,7 +206,10 @@ async function loadApps() {
 }
 
 function enterChat(row: AppRow) {
-  router.push(`/agents/${row.id}/chat`)
+  router.push({
+    path: `/agents/${row.id}/${capabilityEntry.value ? 'chat-plus' : 'chat'}`,
+    query: { from: route.fullPath }
+  })
 }
 
 function handleSearch() {
