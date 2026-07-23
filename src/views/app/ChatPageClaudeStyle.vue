@@ -4242,8 +4242,6 @@ watch(
 </style>
 
 <style scoped>
-
-
 /* ---------------- 响应式 ---------------- */
 @media (width <= 820px) {
   .cc-root .cc-sidebar {
@@ -4627,7 +4625,6 @@ watch(
 
 .cc-root .cc-hero__accent {
   background: linear-gradient(135deg, var(--sky-dark), #22d3ee);
-  background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
