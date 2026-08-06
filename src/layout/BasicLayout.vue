@@ -10,6 +10,7 @@ import SidebarMenuItem from './components/SidebarMenuItem.vue'
 
 const route = useRoute()
 const router = useRouter()
+const GENERAL_ASSISTANT_PATH = '/assistant/general-assistant'
 const userStore = useUserStore()
 const permissionStore = usePermissionStore()
 const pageSwitching = ref(false)
@@ -90,12 +91,25 @@ function finishPageSwitch() {
 }
 
 function handleMenuSelect(index: string) {
-  if (!index || index === route.path || /^https?:\/\//.test(index)) return
+  if (!index) return
+  if (index.replace(/\/+$/, '') === GENERAL_ASSISTANT_PATH) {
+    window.open(router.resolve(index).href, '_blank')
+    return
+  }
+  if (/^https?:\/\//.test(index)) {
+    window.open(index, '_blank')
+    return
+  }
+  if (index === route.path) return
   pageSwitching.value = true
   window.clearTimeout(pageSwitchTimer)
   pageSwitchTimer = window.setTimeout(() => {
     pageSwitching.value = false
   }, 4200)
+  router.push(index).catch(() => {
+    window.clearTimeout(pageSwitchTimer)
+    pageSwitching.value = false
+  })
 }
 
 watch(
@@ -143,7 +157,6 @@ async function handleLogout() {
       <el-scrollbar class="sidebar-scroll">
         <el-menu
           :default-active="activeMenu"
-          router
           unique-opened
           class="sidebar-menu"
           @select="handleMenuSelect"

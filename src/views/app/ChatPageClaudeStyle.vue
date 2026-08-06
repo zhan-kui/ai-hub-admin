@@ -45,7 +45,7 @@ interface ThoughtContentParts {
   content: string
 }
 interface ThinkStreamState {
-  inThink: boolean
+  thinkDepth: number
   carry: string
 }
 
@@ -389,83 +389,115 @@ function extractThought(record: Record<string, unknown>): string {
 }
 
 function mergeThoughtText(...parts: Array<string | null | undefined>): string {
-  const list = parts.map((item) => String(item || '').trim()).filter((item) => item.length > 0)
+  const list = parts
+    .map((item) => sanitizeThinkTags(String(item || '')).trim())
+    .filter((item) => item.length > 0)
   return list.join('\n\n')
+}
+
+function hasVisibleAnswerContent(content: string): boolean {
+  return content.trim().length > 0
+}
+
+function sanitizeThinkTags(text: string): string {
+  return text.replace(/<\/?think\s*>/gi, '')
 }
 
 function splitThinkTaggedText(raw: string): ThoughtContentParts {
   if (!raw) return { thought: '', content: '' }
   const thoughtParts: string[] = []
-  const contentParts: string[] = []
-  const thinkRegex = /<think>([\s\S]*?)<\/think>/gi
+  let currentThought = ''
+  let content = ''
+  let thinkDepth = 0
+  const thinkTagRegex = /<\/?think\s*>/gi
   let cursor = 0
-  let matched = false
   let match: RegExpExecArray | null = null
-  while ((match = thinkRegex.exec(raw)) !== null) {
-    matched = true
-    contentParts.push(raw.slice(cursor, match.index))
-    thoughtParts.push(match[1] || '')
-    cursor = thinkRegex.lastIndex
+  while ((match = thinkTagRegex.exec(raw)) !== null) {
+    const text = raw.slice(cursor, match.index)
+    if (thinkDepth > 0) currentThought += text
+    else content += text
+
+    const isClosingTag = /^<\//.test(match[0])
+    if (isClosingTag) {
+      if (thinkDepth > 0) {
+        thinkDepth -= 1
+        if (thinkDepth === 0) {
+          thoughtParts.push(currentThought)
+          currentThought = ''
+        }
+      }
+    } else {
+      thinkDepth += 1
+    }
+    cursor = thinkTagRegex.lastIndex
   }
-  if (!matched) return { thought: '', content: raw }
-  contentParts.push(raw.slice(cursor))
-  return { thought: thoughtParts.join('\n\n'), content: contentParts.join('') }
+
+  const tail = raw.slice(cursor)
+  if (thinkDepth > 0) {
+    currentThought += tail
+    thoughtParts.push(currentThought)
+  } else {
+    content += tail
+  }
+  return {
+    thought: sanitizeThinkTags(thoughtParts.join('\n\n')),
+    content: sanitizeThinkTags(content)
+  }
 }
 
 function trailingPartialTagLength(text: string, tag: string): number {
+  const lowerText = text.toLowerCase()
+  const lowerTag = tag.toLowerCase()
   const max = Math.min(tag.length - 1, text.length)
   for (let length = max; length > 0; length -= 1) {
-    if (tag.startsWith(text.slice(-length))) return length
+    if (lowerTag.startsWith(lowerText.slice(-length))) return length
   }
   return 0
 }
 
 function splitThinkTaggedDelta(delta: string, state: ThinkStreamState): ThoughtContentParts {
   if (!delta) return { thought: '', content: '' }
-  const openTag = '<think>'
-  const closeTag = '</think>'
   const source = `${state.carry}${delta}`
-  const lowerSource = source.toLowerCase()
+  const partialTagLength = Math.max(
+    trailingPartialTagLength(source, '<think>'),
+    trailingPartialTagLength(source, '</think>')
+  )
+  const completeSource = partialTagLength > 0 ? source.slice(0, -partialTagLength) : source
+  state.carry = partialTagLength > 0 ? source.slice(-partialTagLength) : ''
+
+  const thinkTagRegex = /<\/?think\s*>/gi
   let cursor = 0
   let thought = ''
   let content = ''
-  state.carry = ''
-  while (cursor < source.length) {
-    if (state.inThink) {
-      const closeIndex = lowerSource.indexOf(closeTag, cursor)
-      if (closeIndex < 0) {
-        const tailLength = trailingPartialTagLength(source.slice(cursor), closeTag)
-        const end = tailLength > 0 ? source.length - tailLength : source.length
-        thought += source.slice(cursor, end)
-        state.carry = source.slice(end)
-        break
-      }
-      thought += source.slice(cursor, closeIndex)
-      state.inThink = false
-      cursor = closeIndex + closeTag.length
-      continue
+  let match: RegExpExecArray | null = null
+  while ((match = thinkTagRegex.exec(completeSource)) !== null) {
+    const text = completeSource.slice(cursor, match.index)
+    if (state.thinkDepth > 0) thought += text
+    else content += text
+
+    const isClosingTag = /^<\//.test(match[0])
+    if (isClosingTag) {
+      if (state.thinkDepth > 0) state.thinkDepth -= 1
+    } else {
+      state.thinkDepth += 1
     }
-    const openIndex = lowerSource.indexOf(openTag, cursor)
-    if (openIndex < 0) {
-      const tailLength = trailingPartialTagLength(source.slice(cursor), openTag)
-      const end = tailLength > 0 ? source.length - tailLength : source.length
-      content += source.slice(cursor, end)
-      state.carry = source.slice(end)
-      break
-    }
-    content += source.slice(cursor, openIndex)
-    state.inThink = true
-    cursor = openIndex + openTag.length
+    cursor = thinkTagRegex.lastIndex
   }
-  return { thought, content }
+
+  const tail = completeSource.slice(cursor)
+  if (state.thinkDepth > 0) thought += tail
+  else content += tail
+  return { thought: sanitizeThinkTags(thought), content: sanitizeThinkTags(content) }
 }
 
 function flushThinkStreamCarry(state: ThinkStreamState): ThoughtContentParts {
   if (!state.carry) return { thought: '', content: '' }
-  const part = state.inThink
-    ? { thought: state.carry, content: '' }
-    : { thought: '', content: state.carry }
+  const part =
+    state.thinkDepth > 0
+      ? { thought: state.carry, content: '' }
+      : { thought: '', content: state.carry }
   state.carry = ''
+  state.thinkDepth = 0
   return part
 }
 
@@ -704,7 +736,7 @@ function parseMessageItem(rawItem: unknown, index: number): ChatMessage[] {
   const recordThought = extractThought(record)
   const answerRaw = extractRawStringByKeys(record, ['answer']) || ''
   const answerParts = splitThinkTaggedText(answerRaw)
-  const answer = toDisplayText(answerParts.content) || toDisplayText(record.answer)
+  const answer = toDisplayText(answerParts.content) || ''
   const thoughtText = mergeThoughtText(recordThought, toDisplayText(answerParts.thought))
   const createdAt = normalizeTimeValue(
     record.createdAt ?? record.created_at ?? record.updatedAt ?? record.updated_at
@@ -868,8 +900,8 @@ function commitDraft(draft: StreamingDraft) {
     if (item.id !== draft.id) return item
     return {
       ...item,
-      thought: draft.thought,
-      content: draft.content,
+      thought: sanitizeThinkTags(draft.thought),
+      content: sanitizeThinkTags(draft.content),
       isThinking: false,
       backendMessageId: draft.backendMessageId,
       toolCalls: draft.toolCalls
@@ -1629,7 +1661,7 @@ async function handleSend() {
   chatStore.setTaskId(null)
   inputValue.value = ''
   let sendSucceeded = false
-  const streamThinkState: ThinkStreamState = { inThink: false, carry: '' }
+  const streamThinkState: ThinkStreamState = { thinkDepth: 0, carry: '' }
 
   // 内联辅助：直接修改草稿对象（普通对象赋值，不触发 Vue 深度响应）
   // 然后调 scheduleDraftRender 用 RAF 批量刷新 HTML
@@ -1664,36 +1696,38 @@ async function handleSend() {
             const chunkType = extractChunkType(payload)
 
             if (chunkType === 'thought_start' || chunkType === 'thought') {
-              const delta = extractThoughtText(payload)
+              const delta = sanitizeThinkTags(extractThoughtText(payload))
               patchDraft({
                 thought: streamingDraft.value.thought + delta,
-                isThinking: true,
+                isThinking: !hasVisibleAnswerContent(streamingDraft.value.content),
                 backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
               })
             } else if (chunkType === 'thought_end') {
-              const delta = extractThoughtText(payload)
+              const delta = sanitizeThinkTags(extractThoughtText(payload))
               patchDraft({
                 thought: streamingDraft.value.thought + delta,
-                isThinking: false,
+                isThinking: !hasVisibleAnswerContent(streamingDraft.value.content),
                 backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
               })
             } else if (chunkType === 'text') {
               const textDelta = extractContentText(payload)
               const parts = splitThinkTaggedDelta(textDelta, streamThinkState)
+              const nextContent = streamingDraft.value.content + parts.content
               patchDraft({
                 thought: streamingDraft.value.thought + parts.thought,
-                content: streamingDraft.value.content + parts.content,
-                isThinking: streamThinkState.inThink,
+                content: nextContent,
+                isThinking: !hasVisibleAnswerContent(nextContent),
                 backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
               })
             } else {
               const fallbackText = extractContentText(payload)
               if (fallbackText) {
                 const parts = splitThinkTaggedDelta(fallbackText, streamThinkState)
+                const nextContent = streamingDraft.value.content + parts.content
                 patchDraft({
                   thought: streamingDraft.value.thought + parts.thought,
-                  content: streamingDraft.value.content + parts.content,
-                  isThinking: streamThinkState.inThink,
+                  content: nextContent,
+                  isThinking: !hasVisibleAnswerContent(nextContent),
                   backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
                 })
               }
@@ -1703,13 +1737,14 @@ async function handleSend() {
             updateStreamMeta(payload)
             const backendMessageId = extractBackendMessageId(payload)
             const content = extractContentText(payload)
-            streamThinkState.inThink = false
+            streamThinkState.thinkDepth = 0
             streamThinkState.carry = ''
             const parts = splitThinkTaggedText(content)
+            const nextContent = toDisplayText(parts.content) || ''
             patchDraft({
-              content: toDisplayText(parts.content) || content,
+              content: nextContent,
               thought: mergeThoughtText(streamingDraft.value.thought, toDisplayText(parts.thought)),
-              isThinking: false,
+              isThinking: !hasVisibleAnswerContent(nextContent),
               backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
             })
           } else if (event.event === 'message_end') {
@@ -1727,7 +1762,7 @@ async function handleSend() {
               (toDisplayText(finalParts.content) || '') + (toDisplayText(carryParts.content) || '')
             patchDraft({
               thought: mergeThoughtText(streamingDraft.value.thought, nextThought),
-              content: streamingDraft.value.content || nextContent || finalText,
+              content: streamingDraft.value.content || nextContent,
               isThinking: false,
               backendMessageId: backendMessageId || streamingDraft.value.backendMessageId
             })
@@ -2453,13 +2488,16 @@ watch(
 
                         <!-- 正文（思维链结束前不显示，避免空块闪烁） -->
                         <div
-                          v-if="streamingDraft.content"
+                          v-if="hasVisibleAnswerContent(streamingDraft.content)"
                           class="ai-content"
                           v-html="draftContentHtml"
                         ></div>
 
                         <!-- 纯等待状态（还没有任何内容） -->
-                        <div v-if="!streamingDraft.content && isGenerating" class="draft-waiting">
+                        <div
+                          v-if="!hasVisibleAnswerContent(streamingDraft.content) && isGenerating"
+                          class="draft-waiting"
+                        >
                           <span></span><span></span><span></span>
                         </div>
                       </div>
