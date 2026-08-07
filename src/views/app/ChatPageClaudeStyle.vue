@@ -2139,6 +2139,7 @@ watch(
     <!-- ============================ 侧边栏 ============================ -->
     <aside class="cc-sidebar">
       <div class="cc-sidebar__top">
+        <span class="cc-brand" v-show="!sidebarCollapsed">AI Hub</span>
         <button
           class="cc-iconbtn"
           title="收起 / 展开"
@@ -2151,7 +2152,6 @@ watch(
             />
           </svg>
         </button>
-        <span class="cc-brand" v-show="!sidebarCollapsed">AI Hub</span>
       </div>
 
       <button class="cc-newchat" @click="handleNewConversation">
@@ -4381,8 +4381,12 @@ watch(
 .cc-root .cc-sidebar__top {
   display: flex;
   align-items: center;
-  gap: 8px;
   padding: 4px 6px 10px;
+}
+
+.cc-root .cc-sidebar__top .cc-iconbtn {
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .cc-root .cc-brand {

@@ -21,6 +21,8 @@ const permissionStore = usePermissionStore()
 const loading = ref(false)
 const loginTransition = ref(false)
 const captchaRaw = ref('')
+const captchaLoading = ref(true)
+const captchaLoadFailed = ref(false)
 const formRef = ref<FormInstance>()
 
 const LOGIN_TRANSITION_DELAY = 600
@@ -28,7 +30,7 @@ const DEFAULT_HOME_PATH = '/dashboard/home'
 
 const form = reactive<LoginForm>({
   username: 'admin',
-  password: 'admin123',
+  password: 'Gmcc@admin123',
   captchaCode: '',
   captchaId: ''
 })
@@ -47,10 +49,21 @@ const captchaImage = computed(() => {
 })
 
 async function refreshCaptcha() {
-  const data = await authApi.getCaptchaImage()
-  form.captchaId = data.captchaId
+  captchaLoading.value = true
+  captchaLoadFailed.value = false
   form.captchaCode = ''
-  captchaRaw.value = data.imageBase64
+  try {
+    const data = await authApi.getCaptchaImage()
+    form.captchaId = data.captchaId
+    captchaRaw.value = data.imageBase64
+  } catch (error: any) {
+    form.captchaId = ''
+    captchaRaw.value = ''
+    captchaLoadFailed.value = true
+    ElMessage.error(error?.message || '验证码加载失败，请重试')
+  } finally {
+    captchaLoading.value = false
+  }
 }
 
 function delay(ms: number) {
@@ -233,19 +246,35 @@ onMounted(async () => {
 
             <el-form-item label="验证码" prop="captchaCode">
               <div class="captcha-row">
-                <el-input v-model="form.captchaCode" placeholder="请输入验证码" />
+                <el-input
+                  v-model="form.captchaCode"
+                  placeholder="请输入验证码"
+                  :disabled="captchaLoading || !form.captchaId"
+                />
                 <button
                   type="button"
                   class="captcha-box"
-                  title="点击刷新验证码"
+                  :disabled="captchaLoading"
+                  :title="captchaLoadFailed ? '重新加载验证码' : '点击刷新验证码'"
+                  :aria-busy="captchaLoading"
                   @click="refreshCaptcha"
                 >
-                  <img :src="captchaImage" alt="captcha" />
+                  <img v-if="captchaImage && !captchaLoading" :src="captchaImage" alt="验证码" />
+                  <span v-else class="captcha-status" role="status" aria-live="polite">
+                    <span v-if="!captchaLoadFailed" class="captcha-spinner"></span>
+                    <span>{{ captchaLoadFailed ? '重新加载' : '加载中' }}</span>
+                  </span>
                 </button>
               </div>
             </el-form-item>
 
-            <el-button type="primary" class="login-btn" :loading="loading" @click="submit">
+            <el-button
+              type="primary"
+              class="login-btn"
+              :loading="loading"
+              :disabled="captchaLoading || !form.captchaId"
+              @click="submit"
+            >
               登录 AI Hub
             </el-button>
           </el-form>
@@ -822,11 +851,36 @@ onMounted(async () => {
   box-shadow: 0 8px 18px rgb(37 99 235 / 10%);
 }
 
+.captcha-box:disabled {
+  cursor: wait;
+  transform: none;
+  box-shadow: none;
+}
+
 .captcha-box img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: fill;
+}
+
+.captcha-status {
+  display: flex;
+  height: 100%;
+  font-size: 12px;
+  color: var(--text-secondary);
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.captcha-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #cbd7ea;
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 /* 登录按钮 */

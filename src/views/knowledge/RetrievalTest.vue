@@ -99,7 +99,6 @@ onMounted(loadDatasets)
             <h3>{{ selectedDataset.name }}</h3>
             <p>{{ selectedDataset.description || '暂无知识库描述' }}</p>
             <div class="selected-stats">
-              <span>{{ selectedDataset.documentCount || 0 }} 篇文档</span>
               <span>Top K {{ selectedDataset.topK || 3 }}</span>
             </div>
           </div>

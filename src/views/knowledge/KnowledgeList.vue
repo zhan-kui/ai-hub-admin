@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { MoreFilled, Plus, Search } from '@element-plus/icons-vue'
 import { knowledgeApi } from '@/api/knowledge'
 import type { DatasetVO, IndexingTechnique } from '@/api/knowledge/types'
-import { avatarColor, compactNumber, datasetInitial } from './utils'
+import { avatarColor, datasetInitial } from './utils'
 import CreateDatasetDialog from './components/CreateDatasetDialog.vue'
 
 type FilterType = '' | IndexingTechnique
@@ -26,10 +26,6 @@ const query = reactive({
 const highQualityCount = computed(
   () => list.value.filter((item) => item.indexingTechnique === 'high_quality').length
 )
-const documentTotal = computed(() =>
-  list.value.reduce((sum, item) => sum + Number(item.documentCount || 0), 0)
-)
-
 async function load() {
   loading.value = true
   try {
@@ -130,10 +126,6 @@ onMounted(load)
             <span>高质量</span>
             <strong>{{ highQualityCount }}</strong>
           </div>
-          <div class="metric-card">
-            <span>当前页文档</span>
-            <strong>{{ documentTotal }}</strong>
-          </div>
         </div>
       </div>
 
@@ -214,9 +206,6 @@ onMounted(load)
             </div>
 
             <div class="card-footer">
-              <span
-                >{{ row.documentCount || 0 }} 篇文档 · {{ compactNumber(row.wordCount) }} 字</span
-              >
               <el-dropdown
                 trigger="click"
                 @command="(command) => handleMore(command as string, row)"
@@ -340,7 +329,7 @@ onMounted(load)
 
 .hero-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(90px, 1fr));
+  grid-template-columns: repeat(2, minmax(90px, 1fr));
   gap: 10px;
 }
 
@@ -601,7 +590,7 @@ onMounted(load)
   color: var(--text-tertiary);
   border-top: 1px solid var(--border-soft);
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
 }
 
