@@ -202,6 +202,12 @@ export interface AppStarterPrompt {
   iconKey: PromptIconKey
 }
 
+export interface AgentRuntimeConfig {
+  accessMode: 'capability' | 'web'
+  skillCodes: string[]
+  mcpServerCodes: string[]
+}
+
 export interface CreateAppBasicRequest {
   appName: string
   appType: 'chat' | 'workflow' | 'agent'
@@ -228,6 +234,7 @@ export interface AppConfigVO {
   sort?: number
   enabled?: boolean
   starterPrompts?: AppStarterPrompt[]
+  agentRuntimeConfig?: AgentRuntimeConfig
 
   sourceType?: 'canvas' | 'template'
   templateCode?: string
@@ -515,9 +522,17 @@ export interface CapabilitySkillOption {
   boundToolCodes: string[]
 }
 
+export interface CapabilityMcpServerOption {
+  serverCode: string
+  serverName: string
+  description?: string
+  toolCodes: string[]
+}
+
 export interface CapabilityOptions {
   tools: CapabilityToolOption[]
   skills: CapabilitySkillOption[]
+  mcpServers: CapabilityMcpServerOption[]
   webToolCodes: string[]
 }
 

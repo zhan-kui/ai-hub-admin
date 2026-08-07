@@ -69,6 +69,8 @@ export interface TemplateMeta {
   iconBackground: string
   /** Dify 应用模式,如 advanced-chat / workflow / chat */
   mode: string
+  /** AI Hub 应用类型 */
+  appType?: 'chat' | 'agent' | 'workflow'
   /** 节点拓扑 */
   nodes: TemplateNode[]
   /** 节点连线 */

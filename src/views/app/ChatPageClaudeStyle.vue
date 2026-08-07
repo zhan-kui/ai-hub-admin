@@ -16,6 +16,7 @@ import {
   type AppConfigVO,
   type AppStarterPrompt,
   type CapabilitySkillOption,
+  type CapabilityMcpServerOption,
   type CapabilityToolOption,
   type ChatFilePayload,
   type ChatRequest
@@ -99,10 +100,16 @@ const capabilityLoading = ref(false)
 const webMode = ref(false)
 const capabilityToolOptions = ref<CapabilityToolOption[]>([])
 const capabilitySkillOptions = ref<CapabilitySkillOption[]>([])
+const capabilityMcpServerOptions = ref<CapabilityMcpServerOption[]>([])
 const selectedToolCodes = ref<string[]>([])
 const selectedSkillCodes = ref<string[]>([])
 const webToolCodes = ref<string[]>([])
 const webAvailable = computed(() => webToolCodes.value.length > 0)
+const fixedAgentConfig = computed(() =>
+  currentApp.value?.appType === 'agent' ? currentApp.value.agentRuntimeConfig || null : null
+)
+const isFixedAgent = computed(() => Boolean(fixedAgentConfig.value))
+const fixedMcpServerCount = computed(() => fixedAgentConfig.value?.mcpServerCodes?.length || 0)
 
 const streamController = ref<AbortController | null>(null)
 const activeAssistantMessageId = ref<string | null>(null)
@@ -195,14 +202,28 @@ const promptSuggestions = computed<AppStarterPrompt[]>(() => {
 async function loadCapabilityOptions() {
   if (!enhanced.value) return
   capabilityLoading.value = true
+  if (fixedAgentConfig.value) {
+    selectedSkillCodes.value = [...(fixedAgentConfig.value.skillCodes || [])]
+    webMode.value = fixedAgentConfig.value.accessMode === 'web'
+  }
   try {
     const options = await capabilityOptionsApi.list()
     capabilityToolOptions.value = (options.tools || []).filter((item) => !item.web)
     capabilitySkillOptions.value = options.skills || []
+    capabilityMcpServerOptions.value = options.mcpServers || []
     webToolCodes.value = options.webToolCodes || []
-    selectedToolCodes.value = capabilityToolOptions.value.map((item) => item.toolCode)
-    selectedSkillCodes.value = capabilitySkillOptions.value.map((item) => item.skillCode)
-    webMode.value = false
+    if (fixedAgentConfig.value) {
+      const selectedServers = new Set(fixedAgentConfig.value.mcpServerCodes || [])
+      selectedToolCodes.value = capabilityMcpServerOptions.value
+        .filter((item) => selectedServers.has(item.serverCode))
+        .flatMap((item) => item.toolCodes || [])
+      selectedSkillCodes.value = [...(fixedAgentConfig.value.skillCodes || [])]
+      webMode.value = fixedAgentConfig.value.accessMode === 'web'
+    } else {
+      selectedToolCodes.value = capabilityToolOptions.value.map((item) => item.toolCode)
+      selectedSkillCodes.value = capabilitySkillOptions.value.map((item) => item.skillCode)
+      webMode.value = false
+    }
   } catch (error) {
     ElMessage.error(extractErrorMessage(error) || '加载能力选项失败')
   } finally {
@@ -1210,6 +1231,7 @@ function removeUploadedFile(fileId: string) {
 }
 
 function triggerFileSelect() {
+  if (isFixedAgent.value) return
   if (!appId.value) {
     ElMessage.warning('请先选择智能体')
     return
@@ -1218,6 +1240,7 @@ function triggerFileSelect() {
 }
 
 async function handleFileInputChange(event: Event) {
+  if (isFixedAgent.value) return
   const target = event.target as HTMLInputElement
   const files = Array.from(target.files || [])
   target.value = ''
@@ -1372,6 +1395,18 @@ function resetChatState() {
   conversations.value = []
   inputValue.value = ''
   chatStore.resetConversationState()
+}
+
+function resolveAppAvatar(app?: AppConfigVO | null): string {
+  if (!app) return ''
+  return app.iconImage || app.icon || ''
+}
+
+function resolveAppAvatarText(app?: AppConfigVO | null): string {
+  const first = String(app?.appName || '')
+    .trim()
+    .charAt(0)
+  return (first || 'A').toUpperCase()
 }
 
 function resolveAgentListFallbackPath(): string {
@@ -1925,6 +1960,9 @@ onMounted(async () => {
     backToApps()
     return
   }
+  if (isFixedAgent.value) {
+    chatStore.setUploadedFiles([])
+  }
   chatStore.setCurrentAppId(appId.value)
   await loadCapabilityOptions()
   await loadConversations()
@@ -2026,7 +2064,9 @@ function scheduleCapabilityPickerClose(picker: CapabilityPicker) {
 onBeforeUnmount(cancelCapabilityPickerClose)
 
 // 文件与能力二选一:上传了文件、或开启联网时,能力选择禁用
-const capsDisabled = computed(() => uploadedFiles.value.length > 0 || webMode.value)
+const capsDisabled = computed(
+  () => isFixedAgent.value || uploadedFiles.value.length > 0 || webMode.value
+)
 watch(capsDisabled, (disabled) => {
   if (disabled) closeCapabilityPickers()
 })
@@ -2088,6 +2128,7 @@ function selectAllSkills() {
     .filter((code) => selected.has(code))
 }
 function clearSkills() {
+  if (isFixedAgent.value) return
   selectedSkillCodes.value = []
 }
 function clearFilteredSkills() {
@@ -2104,6 +2145,7 @@ function selectAllTools() {
     .filter((code) => selected.has(code))
 }
 function clearTools() {
+  if (isFixedAgent.value) return
   selectedToolCodes.value = []
 }
 function clearFilteredTools() {
@@ -2200,10 +2242,20 @@ watch(
         </template>
       </el-scrollbar>
 
-      <div class="cc-sidebar__foot" v-show="!sidebarCollapsed">
-        <div class="cc-user">
-          <div class="cc-user__avatar">{{ (displayName || 'U').charAt(0).toUpperCase() }}</div>
-          <span class="cc-user__name">{{ displayName || '用户' }}</span>
+      <div v-show="!sidebarCollapsed && !generalAssistantEntry" class="cc-sidebar__foot">
+        <div class="cc-sidebar-agent">
+          <div class="cc-sidebar-agent__avatar">
+            <img
+              v-if="resolveAppAvatar(currentApp)"
+              :src="resolveAppAvatar(currentApp)"
+              class="cc-sidebar-agent__avatar-img"
+              alt="智能体头像"
+            />
+            <span v-else class="cc-sidebar-agent__avatar-fallback">
+              {{ resolveAppAvatarText(currentApp) }}
+            </span>
+          </div>
+          <span class="cc-sidebar-agent__name">{{ currentApp?.appName || '智能体聊天' }}</span>
         </div>
       </div>
     </aside>
@@ -2552,9 +2604,10 @@ watch(
 
               <template v-else-if="enhanced && !webMode">
                 <span
-                  v-if="selectedToolCodes.length"
+                  v-if="selectedToolCodes.length || (isFixedAgent && fixedMcpServerCount)"
                   class="cx-pill cx-pill--cap"
-                  title="点击清空工具"
+                  :class="{ 'is-readonly': isFixedAgent }"
+                  :title="isFixedAgent ? '由 Agent 发布配置固定' : '点击清空工具'"
                   @click="clearTools"
                 >
                   <svg viewBox="0 0 24 24" width="13" height="13">
@@ -2563,12 +2616,17 @@ watch(
                       d="M21.7 6.3a1 1 0 0 0-1.6-.3l-2.5 2.5-2.1-2.1 2.5-2.5a1 1 0 0 0-.4-1.6 5 5 0 0 0-6.2 6.6l-8 8a1.5 1.5 0 0 0 2.2 2.2l8-8a5 5 0 0 0 6.6-6.2z"
                     />
                   </svg>
-                  工具 {{ selectedToolCodes.length }}<i class="cx-pill__x">×</i>
+                  {{
+                    isFixedAgent
+                      ? `MCP ${fixedMcpServerCount}`
+                      : `工具 ${selectedToolCodes.length}`
+                  }}<i v-if="!isFixedAgent" class="cx-pill__x">×</i>
                 </span>
                 <span
                   v-if="selectedSkillCodes.length"
                   class="cx-pill cx-pill--cap"
-                  title="点击清空技能"
+                  :class="{ 'is-readonly': isFixedAgent }"
+                  :title="isFixedAgent ? '由 Agent 发布配置固定' : '点击清空技能'"
                   @click="clearSkills"
                 >
                   <svg viewBox="0 0 24 24" width="13" height="13">
@@ -2577,7 +2635,20 @@ watch(
                       d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"
                     />
                   </svg>
-                  技能 {{ selectedSkillCodes.length }}<i class="cx-pill__x">×</i>
+                  技能 {{ selectedSkillCodes.length
+                  }}<i v-if="!isFixedAgent" class="cx-pill__x">×</i>
+                </span>
+                <span
+                  v-if="
+                    isFixedAgent &&
+                    !selectedToolCodes.length &&
+                    !selectedSkillCodes.length &&
+                    !fixedMcpServerCount
+                  "
+                  class="cx-pill cx-pill--cap is-readonly"
+                  title="该 Agent 未配置 Skill 或 MCP 服务"
+                >
+                  纯模型模式
                 </span>
               </template>
             </div>
@@ -2607,8 +2678,8 @@ watch(
                   type="button"
                   class="cx-btn cx-btn--pill cx-btn--direct"
                   :class="{ 'is-active': uploadedFiles.length > 0 }"
-                  :disabled="uploadLoading"
-                  title="上传文件"
+                  :disabled="uploadLoading || isFixedAgent"
+                  :title="isFixedAgent ? 'Agent 智能体暂不支持文件上传' : '上传文件'"
                   @click="triggerFileSelect"
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17">
@@ -2622,7 +2693,7 @@ watch(
 
                 <!-- 工具选择 -->
                 <el-popover
-                  v-if="enhanced"
+                  v-if="enhanced && !isFixedAgent"
                   v-model:visible="toolPickerVisible"
                   placement="top-start"
                   :width="260"
@@ -2732,7 +2803,7 @@ watch(
 
                 <!-- 技能选择 -->
                 <el-popover
-                  v-if="enhanced"
+                  v-if="enhanced && !isFixedAgent"
                   v-model:visible="skillPickerVisible"
                   placement="top-start"
                   :width="260"
@@ -2842,12 +2913,18 @@ watch(
 
                 <!-- 联网开关 -->
                 <button
-                  v-if="enhanced && webAvailable"
+                  v-if="enhanced && (webAvailable || (isFixedAgent && webMode))"
                   class="cx-btn cx-btn--pill"
                   :class="{ 'is-soft-on': webMode }"
-                  :disabled="uploadedFiles.length > 0"
-                  :title="uploadedFiles.length ? '已上传文件，联网功能不可用' : '联网搜索'"
-                  @click="webMode = !webMode"
+                  :disabled="isFixedAgent || uploadedFiles.length > 0"
+                  :title="
+                    isFixedAgent
+                      ? '联网状态由 Agent 发布配置固定'
+                      : uploadedFiles.length
+                        ? '已上传文件，联网功能不可用'
+                        : '联网搜索'
+                  "
+                  @click="!isFixedAgent && (webMode = !webMode)"
                 >
                   <svg viewBox="0 0 24 24" width="17" height="17">
                     <path
@@ -4541,35 +4618,50 @@ watch(
   border-top: 1px solid var(--slate-200);
 }
 
-.cc-root .cc-user {
+.cc-root .cc-sidebar-agent {
   display: flex;
+  min-width: 0;
   padding: 8px 6px;
-  cursor: pointer;
   border-radius: var(--radius-md);
   align-items: center;
   gap: 9px;
 }
 
-.cc-root .cc-user:hover {
-  background: var(--slate-50);
-}
-
-.cc-root .cc-user__avatar {
-  display: flex;
+.cc-root .cc-sidebar-agent__avatar {
   width: 28px;
   height: 28px;
-  font-size: 13px;
-  font-weight: 700;
-  color: #fff;
-  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
+  overflow: hidden;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cc-root .cc-sidebar-agent__avatar-img,
+.cc-root .cc-sidebar-agent__avatar-fallback {
+  width: 100%;
+  height: 100%;
+}
+
+.cc-root .cc-sidebar-agent__avatar-img {
+  display: block;
+  object-fit: cover;
+}
+
+.cc-root .cc-sidebar-agent__avatar-fallback {
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--white);
+  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
   align-items: center;
   justify-content: center;
 }
 
-.cc-root .cc-user__name {
+.cc-root .cc-sidebar-agent__name {
+  overflow: hidden;
   font-size: 13.5px;
   color: var(--slate-700);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------------- 主区域 / 顶栏 ---------------- */
@@ -4750,6 +4842,13 @@ watch(
 
 .cc-root .cx-pill--file {
   cursor: default;
+}
+
+.cc-root .cx-pill.is-readonly {
+  color: #475569;
+  cursor: default;
+  background: #f1f5f9;
+  border-color: #dbe3ee;
 }
 
 .cc-root .cx-pill__name {

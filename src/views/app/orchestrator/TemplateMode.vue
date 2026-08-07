@@ -14,6 +14,7 @@ import AppMetaForm from './components/AppMetaForm.vue'
 import FlowCanvas from './components/FlowCanvas.vue'
 import NodeConfigDrawer from './components/NodeConfigDrawer.vue'
 import TemplatePicker from './components/TemplatePicker.vue'
+import AgentTemplateConfig from './components/AgentTemplateConfig.vue'
 import { DEFAULT_ICON, DEFAULT_ICON_BG, MODEL_OPTIONS } from './constants'
 import type { AppMeta, TemplateMeta, TemplateNodeConfig, TemplatePayloadWithVersion } from './types'
 
@@ -39,6 +40,7 @@ const templateSelectionLocked = ref(false)
 const importPromptVisible = ref(false)
 const datasetLoading = ref(false)
 const modelLoading = ref(false)
+const agentConfigRef = ref<InstanceType<typeof AgentTemplateConfig>>()
 const datasets = ref<DatasetVO[]>([])
 const llmModels = ref<KnowledgeModelOption[]>([])
 
@@ -47,26 +49,36 @@ const selectedTemplate = computed<TemplateMeta | undefined>(() =>
 )
 const isEditMode = computed(() => Number.isFinite(props.editId))
 const isSimpleChatTemplate = computed(() => selectedTemplateCode.value === 'simple_chat')
+const isAgentChatflowTemplate = computed(() => selectedTemplateCode.value === 'agent_chatflow')
 const showTemplatePicker = computed(
-  () => (!isEditMode.value || !templateSelectionLocked.value) && !isSimpleChatTemplate.value
+  () =>
+    (!isEditMode.value || !templateSelectionLocked.value) &&
+    !isSimpleChatTemplate.value &&
+    !isAgentChatflowTemplate.value
 )
 const metaStepTitle = computed(() => (showTemplatePicker.value ? '智能体信息' : '智能体信息'))
 const flowStepTitle = computed(() => (showTemplatePicker.value ? '流程参数' : '流程参数'))
 const pageTitle = computed(() =>
-  isSimpleChatTemplate.value
+  isAgentChatflowTemplate.value
     ? isEditMode.value
-      ? '编辑聊天助手'
-      : '创建聊天助手'
-    : isEditMode.value
-      ? '编辑模板编排'
-      : '从模板创建智能体'
+      ? '编辑 Agent 智能体'
+      : '创建 Agent 智能体'
+    : isSimpleChatTemplate.value
+      ? isEditMode.value
+        ? '编辑聊天助手'
+        : '创建聊天助手'
+      : isEditMode.value
+        ? '编辑模板编排'
+        : '从模板创建智能体'
 )
 const pageMessage = computed(() =>
-  isSimpleChatTemplate.value
-    ? '配置提示词、知识库与模型，保存后即可在智能体管理中发布。'
-    : isEditMode.value
-      ? '编辑已保存的模板流程，首次无草稿时可先选择模板再保存。'
-      : '选择模板，填写参数后保存前端草稿。'
+  isAgentChatflowTemplate.value
+    ? '配置模型、推理参数与固定能力，保存后可在智能体管理中发布。'
+    : isSimpleChatTemplate.value
+      ? '配置提示词、知识库与模型，保存后即可在智能体管理中发布。'
+      : isEditMode.value
+        ? '编辑已保存的模板流程，首次无草稿时可先选择模板再保存。'
+        : '选择模板，填写参数后保存前端草稿。'
 )
 const llmOptions = computed(() => {
   const options = llmModels.value.map((item) => ({
@@ -214,6 +226,13 @@ function handleConfigUpdate(nextConfig: Record<string, any>) {
   nodeConfigs.value = {
     ...nodeConfigs.value,
     [drawerNodeId.value]: nextConfig
+  }
+}
+
+function handleAgentConfigUpdate(nextConfig: Record<string, any>) {
+  nodeConfigs.value = {
+    ...nodeConfigs.value,
+    agent: nextConfig
   }
 }
 
@@ -450,12 +469,24 @@ function buildPayload(): TemplatePayloadWithVersion | null {
     return null
   }
 
-  if (!isSimpleChatTemplate.value && isEmptyRequiredValue(appMeta.value.description)) {
+  if (isAgentChatflowTemplate.value && !agentConfigRef.value?.validate()) {
+    return null
+  }
+
+  if (
+    !isSimpleChatTemplate.value &&
+    !isAgentChatflowTemplate.value &&
+    isEmptyRequiredValue(appMeta.value.description)
+  ) {
     ElMessage.warning('请填写描述')
     return null
   }
 
-  if (!isSimpleChatTemplate.value && isEmptyRequiredValue(appMeta.value.icon)) {
+  if (
+    !isSimpleChatTemplate.value &&
+    !isAgentChatflowTemplate.value &&
+    isEmptyRequiredValue(appMeta.value.icon)
+  ) {
     ElMessage.warning('请填写图标')
     return null
   }
@@ -570,9 +601,16 @@ async function loadEditConfig(id: number) {
     version.value = Number.isFinite(Number(config?.version)) ? Number(config.version) : undefined
 
     if (!templateCode) {
+      const queryTemplate = Array.isArray(route.query.template)
+        ? route.query.template[0]
+        : route.query.template
+      const fallbackTemplate =
+        typeof queryTemplate === 'string' && queryTemplate.trim()
+          ? queryTemplate.trim()
+          : 'simple_chat'
       syncingTemplateConfig.value = true
-      selectedTemplateCode.value = 'simple_chat'
-      const template = await ensureTemplateExists('simple_chat')
+      selectedTemplateCode.value = fallbackTemplate
+      const template = await ensureTemplateExists(fallbackTemplate)
       if (template) {
         buildNodeConfigs(template)
       } else {
@@ -580,7 +618,7 @@ async function loadEditConfig(id: number) {
       }
       syncingTemplateConfig.value = false
       templateSelectionLocked.value = false
-      readonlyTemplateText.value = '基于模板：聊天助手'
+      readonlyTemplateText.value = `基于模板：${template?.name || fallbackTemplate}`
       return
     }
 
@@ -631,6 +669,13 @@ onMounted(async () => {
               icon: template.icon || DEFAULT_ICON,
               iconBackground: template.iconBackground || DEFAULT_ICON_BG
             })
+          } else if (template.code === 'agent_chatflow') {
+            applyAppMeta({
+              name: 'Agent 智能体',
+              description: template.description || '支持固定能力与联网模式的 Agent 智能体',
+              icon: template.icon || DEFAULT_ICON,
+              iconBackground: template.iconBackground || DEFAULT_ICON_BG
+            })
           }
         }
       }
@@ -655,7 +700,10 @@ onMounted(async () => {
         </div>
       </div>
       <div class="header-right">
-        <span v-if="isEditMode && readonlyTemplateText" class="readonly-badge">
+        <span
+          v-if="isEditMode && readonlyTemplateText && !isAgentChatflowTemplate"
+          class="readonly-badge"
+        >
           {{ readonlyTemplateText }}
         </span>
         <div class="header-actions">
@@ -851,6 +899,14 @@ onMounted(async () => {
         </div>
       </template>
 
+      <template v-else-if="selectedTemplate && isAgentChatflowTemplate">
+        <AgentTemplateConfig
+          ref="agentConfigRef"
+          :model-value="nodeConfigs.agent || {}"
+          @update:model-value="handleAgentConfigUpdate"
+        />
+      </template>
+
       <!-- 3. 高级工作流模板模式 -->
       <template v-else-if="selectedTemplate">
         <!-- 填写智能体元数据 -->
@@ -892,7 +948,7 @@ onMounted(async () => {
     </div>
 
     <!-- 高级模式底部粘性操作栏 -->
-    <div v-if="!isSimpleChatTemplate" class="bottom-action-sticky">
+    <div v-if="!isSimpleChatTemplate && !isAgentChatflowTemplate" class="bottom-action-sticky">
       <el-button plain size="large" @click="handleBack">取消</el-button>
       <el-button
         type="primary"

@@ -934,7 +934,7 @@ async function handleLogout() {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 5px;
+  gap: 10px;
 }
 
 .user-summary {

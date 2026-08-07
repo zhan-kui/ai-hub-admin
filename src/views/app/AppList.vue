@@ -27,7 +27,7 @@ type AppRow = AppConfigVO & Record<string, any>
 type AppTypeFilter = '' | 'chat' | 'agent' | 'workflow'
 type PublishStatusFilter = '' | 'PUBLISHED' | 'UNPUBLISHED'
 type BasicDialogMode = 'create' | 'edit'
-type CreateFlowMode = 'template' | 'blank'
+type CreateFlowMode = 'template' | 'agent' | 'blank'
 type AppBasicForm = Omit<UpdateAppBasicRequest, 'appName' | 'iconImage'> & {
   id?: number
   appName: string
@@ -85,7 +85,7 @@ interface AppTypeMeta {
   description: string
   badge: string
   icon: string
-  createMode: 'template' | 'blank' | 'placeholder'
+  createMode: CreateFlowMode
   aliases: string[]
 }
 
@@ -103,9 +103,9 @@ const appTypeMetaList: AppTypeMeta[] = [
     value: 'agent',
     label: 'Agent 智能体',
     description: '支持推理规划与自主工具调用的智能助手',
-    badge: '占位开发中',
+    badge: '固定能力',
     icon: 'agent',
-    createMode: 'placeholder',
+    createMode: 'agent',
     aliases: ['agent', 'agent 智能体']
   },
   {
@@ -284,6 +284,14 @@ function avatarText(row: AppRow): string {
   return first ? first.toUpperCase() : 'A'
 }
 
+function avatarImage(row: AppRow): string {
+  const uploadedImage = String(row.iconImage || '').trim()
+  if (uploadedImage) return uploadedImage
+
+  const icon = String(row.icon || '').trim()
+  return /^(?:data:image\/|blob:|https?:\/\/|\/|\.\.?\/)/i.test(icon) ? icon : ''
+}
+
 function avatarColor(row: AppRow): string {
   return hashColor(String(getAppTypeLabel(row.appType) || row.appCode || row.appName || 'app'))
 }
@@ -294,13 +302,6 @@ function openCreateDialog() {
 
 function onCreateCommand(command: AppTypeMeta['createMode']) {
   createDialogVisible.value = false
-  if (command === 'placeholder') {
-    router.push({
-      path: '/agents/placeholder',
-      query: { from: route.fullPath }
-    })
-    return
-  }
   openCreateBasicDialog(command)
 }
 
@@ -432,9 +433,15 @@ function toBasicPayload(): UpdateAppBasicRequest {
 }
 
 function toCreateBasicPayload(): CreateAppBasicRequest {
+  const appType =
+    pendingCreateMode.value === 'blank'
+      ? 'workflow'
+      : pendingCreateMode.value === 'agent'
+        ? 'agent'
+        : 'chat'
   return {
     appName: String(formData.appName || '').trim(),
-    appType: pendingCreateMode.value === 'blank' ? 'workflow' : 'chat',
+    appType,
     description: formData.description?.trim() || undefined,
     icon: formData.icon?.trim() || undefined,
     iconImage: formData.iconImage || '',
@@ -494,6 +501,7 @@ async function submitBasicForm() {
         query: {
           mode: 'template',
           edit: String(result.id),
+          template: pendingCreateMode.value === 'agent' ? 'agent_chatflow' : 'simple_chat',
           from: route.fullPath
         }
       })
@@ -523,7 +531,12 @@ function handleEditFlow(row: AppRow) {
   if (sourceType === 'template') {
     router.push({
       path: '/agents/orchestrator/create',
-      query: { mode: 'template', edit: String(row.id), from: route.fullPath }
+      query: {
+        mode: 'template',
+        edit: String(row.id),
+        ...(normalizeAppTypeKey(row.appType) === 'agent' ? { template: 'agent_chatflow' } : {}),
+        from: route.fullPath
+      }
     })
     return
   }
@@ -730,7 +743,8 @@ function handleMoreCommand(command: string, row: AppRow) {
 
 function handleCardClick(row: AppRow) {
   if (!isPublished(row)) return
-  router.push(`/agents/${row.id}/chat`)
+  const chatPath = normalizeAppTypeKey(row.appType) === 'agent' ? 'chat-plus' : 'chat'
+  router.push(`/agents/${row.id}/${chatPath}`)
 }
 
 function handleSearch() {
@@ -875,13 +889,13 @@ onMounted(() => {
           >
             <div class="card-top">
               <div
-                v-if="!row.iconImage && !row.icon"
+                v-if="!avatarImage(row)"
                 class="app-icon"
                 :style="{ backgroundColor: avatarColor(row) }"
               >
                 {{ avatarText(row) }}
               </div>
-              <img v-else class="app-icon img" :src="row.iconImage || row.icon" alt="icon" />
+              <img v-else class="app-icon img" :src="avatarImage(row)" alt="icon" />
 
               <div class="title-area">
                 <div class="app-name">{{ row.appName || '-' }}</div>
@@ -1010,11 +1024,7 @@ onMounted(() => {
         <span class="mode-badge">模板创建</span>
       </button>
 
-      <button
-        type="button"
-        class="create-mode-card agent-mode"
-        @click="onCreateCommand('placeholder')"
-      >
+      <button type="button" class="create-mode-card agent-mode" @click="onCreateCommand('agent')">
         <span class="mode-icon">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path
@@ -1027,7 +1037,7 @@ onMounted(() => {
           <strong>Agent 智能体</strong>
           <small>支持推理规划与自主工具调用的智能助手。</small>
         </span>
-        <span class="mode-badge">开发中</span>
+        <span class="mode-badge">固定能力</span>
       </button>
 
       <button type="button" class="create-mode-card blank-mode" @click="onCreateCommand('blank')">
