@@ -3801,7 +3801,7 @@ watch(
 }
 
 .thought-body {
-  padding: 10px 14px 12px;
+  padding: 10px 18px 12px 24px;
   margin: 0 10px 10px;
   font-size: 13px;
   line-height: 1.6;
@@ -3811,6 +3811,12 @@ watch(
   border-left: 2px solid var(--sky);
   border-radius: 6px;
   overflow-wrap: anywhere;
+}
+
+.thought-body :deep(ul),
+.thought-body :deep(ol) {
+  padding-left: 22px;
+  margin: 8px 0;
 }
 
 /* ── AI 内容 ── */

@@ -87,6 +87,7 @@ function resolveRouteAppId(): number {
 const appId = computed(() => resolveRouteAppId())
 const currentApp = ref<AppConfigVO | null>(null)
 const conversations = ref<ConversationItem[]>([])
+const sidebarCollapsed = ref(false)
 const inputValue = ref('')
 const feedbackByMessageId = ref<Record<string, FeedbackRating | undefined>>({})
 const suggestedByMessageId = ref<Record<string, string[]>>({})
@@ -214,9 +215,6 @@ async function loadCapabilityOptions() {
   }
 }
 
-const currentConversation = computed(() =>
-  conversations.value.find((item) => item.id === currentConversationId.value)
-)
 const showWelcome = computed(
   () =>
     !currentConversationId.value &&
@@ -1918,55 +1916,37 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="chat-page">
-    <!-- ═══ Header ═══ -->
-    <header class="chat-header">
-      <div class="header-left">
-        <el-button text class="back-btn" @click="backToApps">
-          <el-icon><ArrowLeft /></el-icon>
-          <span>返回</span>
-        </el-button>
-      </div>
-
-      <div class="header-center">
-        <div class="app-avatar-wrap">
-          <img
-            v-if="resolveAppAvatar(currentApp)"
-            :src="resolveAppAvatar(currentApp)"
-            class="app-avatar-img"
-            alt="avatar"
-          />
-          <div v-else class="app-avatar-fallback">
-            {{ resolveAppAvatarText(currentApp) }}
-          </div>
-        </div>
-        <div class="app-info">
-          <div class="app-name">{{ currentApp?.appName || '智能体聊天' }}</div>
-          <div v-if="currentApp?.description" class="app-desc">{{ currentApp.description }}</div>
-        </div>
-      </div>
-
-      <div class="header-right">
-        <!-- 保留右侧空间平衡布局 -->
-      </div>
-    </header>
-
+  <div class="chat-page" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <div class="chat-body">
       <!-- ═══ Sidebar ═══ -->
       <aside class="chat-sidebar">
         <div class="sidebar-header">
-          <span class="sidebar-title">对话记录</span>
-          <button class="new-chat-btn" @click="handleNewConversation">
-            <el-icon><Plus /></el-icon>
-            新对话
+          <span v-show="!sidebarCollapsed" class="sidebar-brand">AI Hub</span>
+          <button
+            class="sidebar-toggle"
+            :title="sidebarCollapsed ? '展开会话列表' : '收起会话列表'"
+            @click="sidebarCollapsed = !sidebarCollapsed"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <path
+                fill="currentColor"
+                d="M9 4v16H5.6C4.7 20 4 19.3 4 18.4V5.6C4 4.7 4.7 4 5.6 4H9zm2 0h7.4c.9 0 1.6.7 1.6 1.6v12.8c0 .9-.7 1.6-1.6 1.6H11V4z"
+              />
+            </svg>
           </button>
         </div>
 
-        <el-scrollbar class="sidebar-scroll">
+        <button class="new-chat-btn" @click="handleNewConversation">
+          <el-icon><Plus /></el-icon>
+          <span v-show="!sidebarCollapsed">开启新对话</span>
+        </button>
+
+        <el-scrollbar v-show="!sidebarCollapsed" class="sidebar-scroll">
           <div v-if="conversationLoading" class="sidebar-loading">
             <span>加载中...</span>
           </div>
           <template v-else>
+            <div v-if="conversations.length" class="sidebar-title">对话记录</div>
             <div
               v-for="conversation in conversations"
               :key="conversation.id"
@@ -2007,16 +1987,41 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </el-scrollbar>
+
+        <div v-show="!sidebarCollapsed" class="sidebar-footer">
+          <div class="sidebar-agent">
+            <div class="sidebar-agent-avatar">
+              <img
+                v-if="resolveAppAvatar(currentApp)"
+                :src="resolveAppAvatar(currentApp)"
+                class="sidebar-agent-avatar-img"
+                alt="智能体头像"
+              />
+              <span v-else class="sidebar-agent-avatar-fallback">
+                {{ resolveAppAvatarText(currentApp) }}
+              </span>
+            </div>
+            <span class="sidebar-agent-name">{{ currentApp?.appName || '智能体聊天' }}</span>
+          </div>
+        </div>
       </aside>
 
       <!-- ═══ Main ═══ -->
       <main class="chat-main">
-        <!-- 顶部会话标题栏 -->
         <div class="chat-topbar">
-          <div class="topbar-left">
-            <div class="topbar-title">{{ currentConversation?.name || '新对话' }}</div>
-            <div v-if="!currentConversationId" class="topbar-badge">NEW</div>
-          </div>
+          <button
+            class="sidebar-toggle topbar-menu"
+            title="展开会话列表"
+            @click="sidebarCollapsed = !sidebarCollapsed"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z" />
+            </svg>
+          </button>
+          <button class="back-btn" title="返回" aria-label="返回智能体广场" @click="backToApps">
+            <el-icon><ArrowLeft /></el-icon>
+          </button>
+          <div class="topbar-spacer"></div>
         </div>
 
         <!-- 消息区 -->
@@ -2543,9 +2548,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* ═══════════════════════════════
-   Welcome Screen
-═══════════════════════════════ */
+
 @keyframes fadeUp {
   from {
     opacity: 0;
@@ -2645,6 +2648,36 @@ onBeforeUnmount(() => {
   }
 }
 
+@media (width <= 820px) {
+  .chat-page .chat-sidebar {
+    position: absolute;
+    z-index: 30;
+    height: 100%;
+    box-shadow: 2px 0 16px rgb(15 23 42 / 12%);
+  }
+
+  .chat-page.sidebar-collapsed .chat-sidebar {
+    width: 260px;
+    transform: translateX(-100%);
+  }
+
+  .chat-page .topbar-menu {
+    display: inline-flex;
+  }
+}
+
+@media (width <= 540px) {
+  .input-panel {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .message-list {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}
+
 .chat-page {
   --sky: #0ea5e9;
   --sky-dark: #0284c7;
@@ -2674,104 +2707,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
-/* ═══════════════════════════════
-   Header
-═══════════════════════════════ */
-.chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 64px;
-  padding: 0 20px;
-  background: var(--white);
-  border-bottom: 1px solid var(--slate-200);
-  flex-shrink: 0;
-  gap: 16px;
-}
-
-.header-left,
-.header-right {
-  min-width: 120px;
-}
-
-.header-right {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.back-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px !important;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--slate-500) !important;
-  border-radius: var(--radius-md) !important;
-  transition: all 0.18s;
-}
-
-.back-btn:hover {
-  color: var(--sky) !important;
-  background: var(--sky-pale) !important;
-}
-
-.header-center {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  justify-content: center;
-  min-width: 0;
-}
-
-.app-avatar-wrap {
-  flex-shrink: 0;
-}
-
-.app-avatar-img,
-.app-avatar-fallback {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-}
-
-.app-avatar-img {
-  object-fit: cover;
-}
-
-.app-avatar-fallback {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--white);
-  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
-}
-
-.app-info {
-  min-width: 0;
-  text-align: center;
-}
-
-.app-name {
-  overflow: hidden;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--slate-900);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.app-desc {
-  max-width: 360px;
-  margin-top: 2px;
-  overflow: hidden;
-  font-size: 12px;
-  color: var(--slate-400);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.chat-page *,
+.chat-page *::before,
+.chat-page *::after {
+  box-sizing: border-box;
 }
 
 /* ═══════════════════════════════
@@ -2788,69 +2727,114 @@ onBeforeUnmount(() => {
 ═══════════════════════════════ */
 .chat-sidebar {
   display: flex;
-  flex-direction: column;
   width: 260px;
+  padding: 10px;
   background: var(--white);
   border-right: 1px solid var(--slate-200);
+  transition: width 0.2s ease;
   flex-shrink: 0;
+  flex-direction: column;
+}
+
+.chat-page.sidebar-collapsed .chat-sidebar {
+  width: 62px;
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--slate-200);
+  padding: 4px 6px 10px;
   flex-shrink: 0;
 }
 
+.sidebar-brand {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--slate-900);
+}
+
+.sidebar-toggle {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--slate-500);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  transition:
+    background 0.15s,
+    color 0.15s;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-header .sidebar-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle:hover {
+  color: var(--slate-700);
+  background: var(--slate-100);
+}
+
 .sidebar-title {
+  padding: 6px 8px;
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.08em;
   color: var(--slate-400);
-  text-transform: uppercase;
 }
 
 .new-chat-btn {
-  display: inline-flex;
-  padding: 5px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--sky);
+  display: flex;
+  width: 100%;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sky-dark);
   cursor: pointer;
   background: var(--sky-pale);
   border: 1px solid rgb(14 165 233 / 20%);
   border-radius: var(--radius-md);
-  transition: all 0.18s;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 .new-chat-btn:hover {
   background: var(--sky-light);
-  border-color: rgb(14 165 233 / 40%);
+  box-shadow: 0 2px 8px rgb(14 165 233 / 15%);
+}
+
+.chat-page.sidebar-collapsed .new-chat-btn {
+  justify-content: center;
+  padding: 9px 0;
 }
 
 .sidebar-scroll {
   flex: 1;
-  padding: 8px;
+  min-height: 0;
 }
 
 .sidebar-loading,
 .sidebar-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 32px 16px;
+  padding: 16px 8px;
   font-size: 13px;
   color: var(--slate-400);
+  text-align: center;
 }
 
 .sidebar-empty svg {
+  display: block;
   width: 32px;
   height: 32px;
+  margin: 0 auto 8px;
   opacity: 0.4;
 }
 
@@ -2932,6 +2916,57 @@ onBeforeUnmount(() => {
   background: #fee2e2;
 }
 
+.sidebar-footer {
+  padding-top: 8px;
+  border-top: 1px solid var(--slate-200);
+}
+
+.sidebar-agent {
+  display: flex;
+  min-width: 0;
+  padding: 8px 6px;
+  border-radius: var(--radius-md);
+  align-items: center;
+  gap: 9px;
+}
+
+.sidebar-agent-avatar {
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sidebar-agent-avatar-img,
+.sidebar-agent-avatar-fallback {
+  width: 100%;
+  height: 100%;
+}
+
+.sidebar-agent-avatar-img {
+  display: block;
+  object-fit: cover;
+}
+
+.sidebar-agent-avatar-fallback {
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--white);
+  background: linear-gradient(135deg, var(--sky-dark), var(--sky));
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-agent-name {
+  overflow: hidden;
+  font-size: 13.5px;
+  color: var(--slate-700);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ═══════════════════════════════
    Chat Main
 ═══════════════════════════════ */
@@ -2946,41 +2981,59 @@ onBeforeUnmount(() => {
 
 .chat-topbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 48px;
-  padding: 0 24px;
-  background: var(--white);
-  border-bottom: 1px solid var(--slate-200);
+  height: 56px;
+  padding: 10px 18px 4px;
+  background: var(--slate-50);
   flex-shrink: 0;
-}
-
-.topbar-left {
-  display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 8px;
 }
 
-.topbar-title {
-  overflow: hidden;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--slate-700);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.topbar-menu {
+  display: none;
 }
 
-.topbar-badge {
-  padding: 2px 7px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--sky);
-  white-space: nowrap;
-  background: var(--sky-pale);
-  border: 1px solid rgb(14 165 233 / 25%);
-  border-radius: 4px;
+.back-btn {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--slate-500);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  box-shadow: none;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.1s ease;
+  align-items: center;
+  justify-content: center;
+}
+
+.back-btn :deep(.el-icon) {
+  font-size: 18px;
+}
+
+.back-btn:hover {
+  color: var(--slate-900);
+  background: var(--white);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 8%);
+}
+
+.back-btn:focus-visible {
+  outline: 3px solid rgb(14 165 233 / 16%);
+  outline-offset: 2px;
+}
+
+.back-btn:active {
+  transform: scale(0.95);
+}
+
+.topbar-spacer {
+  flex: 1;
 }
 
 /* ═══════════════════════════════
@@ -3430,7 +3483,7 @@ onBeforeUnmount(() => {
 }
 
 .thought-body {
-  padding: 10px 14px 12px;
+  padding: 10px 18px 12px 24px;
   margin: 0 10px 10px;
   font-size: 13px;
   line-height: 1.6;
@@ -3440,6 +3493,12 @@ onBeforeUnmount(() => {
   border-left: 2px solid var(--sky);
   border-radius: 6px;
   overflow-wrap: anywhere;
+}
+
+.thought-body :deep(ul),
+.thought-body :deep(ol) {
+  padding-left: 22px;
+  margin: 8px 0;
 }
 
 /* ── AI 内容 ── */
@@ -3635,8 +3694,6 @@ onBeforeUnmount(() => {
 ═══════════════════════════════ */
 .input-panel {
   padding: 12px 24px 16px;
-  background: var(--white);
-  border-top: 1px solid var(--slate-200);
   flex-shrink: 0;
 }
 
@@ -3902,6 +3959,10 @@ onBeforeUnmount(() => {
 .draft-waiting span:nth-child(3) {
   animation-delay: 0.32s;
 }
+
+/* ═══════════════════════════════
+   Welcome Screen
+═══════════════════════════════ */
 
 /* ═══════════════════════════════
    基础变量
