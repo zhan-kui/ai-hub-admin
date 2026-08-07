@@ -45,6 +45,7 @@ export interface LlmNodeData extends BaseNodeData {
   }
   memory: {
     enabled?: boolean
+    windowEnabled?: boolean
     windowSize?: number
   }
 }
@@ -87,10 +88,6 @@ export interface IfElseNodeData extends BaseNodeData {
 export interface KnowledgeRetrievalNodeData extends BaseNodeData {
   nodeType: 'knowledge-retrieval'
   datasetIds: string[]
-  retrievalMode: 'multiple'
-  topK: number
-  rerankingEnable: boolean
-  rerankingMode: 'reranking_model'
 }
 
 export interface AnswerNodeData extends BaseNodeData {

@@ -229,31 +229,33 @@ function handleBlur() {
 
 <template>
   <div class="variable-picker">
-    <div ref="highlightRef" class="vp-highlight-layer" aria-hidden="true">
-      <template v-for="(seg, index) in segments" :key="index">
-        <span v-if="seg.type === 'text'" class="vp-text">{{ seg.raw }}</span>
-        <span v-else class="vp-chip" :title="seg.raw">
-          <span class="vp-chip-measure">{{ seg.raw }}</span>
-          <span class="vp-chip-label">{{ seg.label }}</span>
-        </span>
-      </template>
-      <span class="vp-tail">&#8203;</span>
-    </div>
+    <div class="vp-editor">
+      <div ref="highlightRef" class="vp-highlight-layer" aria-hidden="true">
+        <template v-for="(seg, index) in segments" :key="index">
+          <span v-if="seg.type === 'text'" class="vp-text">{{ seg.raw }}</span>
+          <span v-else class="vp-chip" :title="seg.raw">
+            <span class="vp-chip-raw">{{ seg.raw }}</span>
+            <span class="vp-chip-label">{{ seg.label }}</span>
+          </span>
+        </template>
+        <span class="vp-tail">&#8203;</span>
+      </div>
 
-    <textarea
-      ref="textareaRef"
-      class="vp-textarea"
-      :value="modelValue"
-      :rows="rows ?? 4"
-      :placeholder="placeholder"
-      :maxlength="maxlength"
-      :aria-label="ariaLabel"
-      spellcheck="false"
-      @input="handleInput"
-      @keydown="handleKeydown"
-      @blur="handleBlur"
-      @scroll="handleScroll"
-    ></textarea>
+      <textarea
+        ref="textareaRef"
+        class="vp-textarea"
+        :value="modelValue"
+        :rows="rows ?? 4"
+        :placeholder="placeholder"
+        :maxlength="maxlength"
+        :aria-label="ariaLabel"
+        spellcheck="false"
+        @input="handleInput"
+        @keydown="handleKeydown"
+        @blur="handleBlur"
+        @scroll="handleScroll"
+      ></textarea>
+    </div>
 
     <div v-if="showWordLimit && maxlength" class="vp-word-limit"
       >{{ currentLength }} / {{ maxlength }}</div
@@ -291,8 +293,16 @@ function handleBlur() {
 
 <style scoped lang="less">
 .variable-picker {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.vp-editor {
   position: relative;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .vp-textarea,
@@ -304,12 +314,12 @@ function handleBlur() {
   font-size: var(--el-input-font-size, 14px);
   line-height: 1.6;
   letter-spacing: 0;
-  tab-size: 2;
-  word-wrap: break-word;
+  word-break: break-word;
   white-space: pre-wrap;
   border-radius: var(--el-input-border-radius, 4px);
   box-sizing: border-box;
-  overflow-wrap: break-word;
+  tab-size: 2;
+  overflow-wrap: anywhere;
 }
 
 .vp-highlight-layer {
@@ -325,6 +335,7 @@ function handleBlur() {
 .vp-textarea {
   position: relative;
   z-index: 1;
+  display: block;
   color: transparent;
   caret-color: var(--el-text-color-primary);
   background: transparent;
@@ -349,33 +360,34 @@ function handleBlur() {
 }
 
 .vp-chip {
+  /* 原文负责占位和换行，显示名称只作为图层覆盖，避免改变 textarea 的文本坐标。 */
   position: relative;
-  display: inline-block;
   color: transparent;
-  white-space: nowrap;
-  vertical-align: baseline;
+  white-space: inherit;
   background: rgb(64 158 255 / 12%);
   border-radius: 4px;
   box-shadow: inset 0 0 0 1px rgb(64 158 255 / 35%);
+  box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
-.vp-chip-measure {
-  visibility: hidden;
+.vp-chip-raw {
+  color: transparent;
 }
 
 .vp-chip-label {
   position: absolute;
-  inset: 0 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  top: 50%;
+  right: 4px;
+  left: 4px;
   overflow: hidden;
   font-size: 12px;
-  line-height: inherit;
+  line-height: 1.4;
   color: var(--el-color-primary);
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transform: translateY(-50%);
 }
 
 .vp-word-limit {

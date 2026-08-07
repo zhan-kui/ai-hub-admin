@@ -43,11 +43,12 @@ export function restoreCanvasSnapshot(snapshot: CanvasSnapshotPayload): {
 }
 
 function cleanNode(node: Node) {
+  const data = cleanNodeData(clonePlain(node.data))
   return {
     id: node.id,
     type: node.type,
     position: clonePlain(node.position),
-    data: clonePlain(node.data),
+    data,
     width: node.width,
     height: node.height,
     selected: false,
@@ -55,6 +56,17 @@ function cleanNode(node: Node) {
     sourcePosition: node.sourcePosition,
     targetPosition: node.targetPosition
   }
+}
+
+function cleanNodeData(data: Record<string, any>) {
+  if (data?.nodeType === 'knowledge-retrieval') {
+    return {
+      nodeType: 'knowledge-retrieval',
+      title: data.title || '知识检索',
+      datasetIds: Array.isArray(data.datasetIds) ? data.datasetIds.map(String) : []
+    }
+  }
+  return data
 }
 
 function cleanEdge(edge: Edge) {

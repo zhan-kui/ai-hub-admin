@@ -59,6 +59,13 @@ function cloneData<T>(value: T): T {
 }
 
 function normalizeNodeData(data: CanvasNodeData): CanvasNodeData {
+  if (data.nodeType === 'knowledge-retrieval') {
+    return {
+      nodeType: 'knowledge-retrieval',
+      title: data.title || '知识检索',
+      datasetIds: Array.from(new Set((data.datasetIds || []).map(String)))
+    }
+  }
   if (data.nodeType === 'if-else') {
     const ifData = data as IfElseNodeData
     for (const item of ifData.cases || []) {

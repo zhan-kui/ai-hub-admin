@@ -16,7 +16,6 @@ const props = defineProps<NodeProps<KnowledgeRetrievalNodeData>>()
 
     <div class="node-body">
       <div class="node-line">知识库：{{ props.data.datasetIds?.length || 0 }} 个</div>
-      <div class="node-line muted">TopK：{{ props.data.topK || 4 }}</div>
     </div>
 
     <Handle id="source" type="source" :position="Position.Right" class="big-handle handle-source" />

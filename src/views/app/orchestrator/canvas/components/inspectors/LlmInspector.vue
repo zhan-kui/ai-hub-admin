@@ -71,6 +71,11 @@ function toModelKey(provider: string, model: string) {
 }
 
 function updateSelectedModel(value: string) {
+  if (!value) {
+    formData.model.provider = ''
+    formData.model.name = ''
+    return
+  }
   const matched = llmOptions.value.find((item) => item.value === value)
   if (matched) {
     formData.model.provider = matched.provider
@@ -84,9 +89,6 @@ async function loadLlmModels() {
   try {
     const models = await knowledgeModelApi.getAvailableModels('llm')
     llmModels.value = models || []
-    if (!formData.model.name && llmOptions.value[0]) {
-      selectedModelKey.value = llmOptions.value[0].value
-    }
   } catch (error: any) {
     ElMessage.error(error?.message || '模型列表加载失败')
   } finally {
@@ -180,10 +182,11 @@ onMounted(() => {
 
     <el-row :gutter="12">
       <el-col :span="14">
-        <el-form-item label="模型">
+        <el-form-item label="模型" required>
           <el-select
             v-model="selectedModelKey"
             filterable
+            clearable
             :loading="loadingModels"
             placeholder="请选择模型"
           >
@@ -211,7 +214,7 @@ onMounted(() => {
 
     <el-row :gutter="12">
       <el-col :span="12">
-        <el-form-item label="启用思考">
+        <el-form-item label="开启思维链（思考）">
           <el-switch v-model="formData.model.enableThinking" />
         </el-form-item>
       </el-col>
@@ -228,16 +231,24 @@ onMounted(() => {
 
     <el-row :gutter="12">
       <el-col :span="12">
-        <el-form-item label="记忆窗口配置">
+        <el-form-item label="开启记忆">
           <el-switch v-model="formData.memory.enabled" />
         </el-form-item>
       </el-col>
-      <el-col :span="12">
+      <el-col v-if="formData.memory.enabled" :span="12">
+        <el-form-item label="开启记忆窗口">
+          <el-switch v-model="formData.memory.windowEnabled" />
+        </el-form-item>
+      </el-col>
+      <el-col v-if="formData.memory.enabled && formData.memory.windowEnabled" :span="12">
         <el-form-item label="记忆窗口数量">
           <el-input-number v-model="formData.memory.windowSize" :min="1" :max="50" class="w-full" />
         </el-form-item>
       </el-col>
     </el-row>
+    <div class="form-tip memory-tip">
+      开启记忆后会生成 Dify 默认的用户查询模板和 user/assistant 角色配置；关闭后不生成 memory 配置。
+    </div>
   </el-form>
 
   <div class="footer">

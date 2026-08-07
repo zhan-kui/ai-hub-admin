@@ -58,7 +58,7 @@ export function createNode(
         systemPrompt: '',
         userPromptTemplate: '{{#sys.query#}}',
         model: { ...DEFAULT_MODEL },
-        memory: { enabled: false, windowSize: 10 }
+        memory: { enabled: true, windowEnabled: false, windowSize: 10 }
       }
     }
   }
@@ -86,11 +86,7 @@ export function createNode(
       data: {
         nodeType: 'knowledge-retrieval',
         title: '知识检索',
-        datasetIds: [],
-        retrievalMode: 'multiple',
-        topK: 4,
-        rerankingEnable: false,
-        rerankingMode: 'reranking_model'
+        datasetIds: []
       }
     }
   }

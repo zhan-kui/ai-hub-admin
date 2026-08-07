@@ -2548,7 +2548,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-
 @keyframes fadeUp {
   from {
     opacity: 0;

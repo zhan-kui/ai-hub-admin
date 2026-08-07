@@ -92,9 +92,11 @@ function cloneData<T>(value: T): T {
 }
 
 function normalizeData(value: KnowledgeRetrievalNodeData): KnowledgeRetrievalNodeData {
-  const cloned = cloneData(value)
-  cloned.datasetIds = Array.from(new Set((cloned.datasetIds || []).map((id) => String(id))))
-  return cloned
+  return {
+    nodeType: 'knowledge-retrieval',
+    title: value.title || '知识检索',
+    datasetIds: Array.from(new Set((value.datasetIds || []).map((id) => String(id))))
+  }
 }
 
 onMounted(() => {

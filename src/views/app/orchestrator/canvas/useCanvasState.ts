@@ -5,10 +5,11 @@ import type {
   CanvasGraphNode,
   CanvasNodeData,
   CanvasNodeType,
+  LlmNodeData,
   CanvasSnapshotPayload,
   CanvasViewport
 } from './types'
-import { DEFAULT_VIEWPORT } from './constants'
+import { DEFAULT_MODEL, DEFAULT_VIEWPORT } from './constants'
 import { createNode, createStartNode } from './utils'
 
 export function useCanvasState() {
@@ -103,6 +104,32 @@ function decorateNode(node: CanvasGraphNode): CanvasGraphNode {
       deletable: false,
       draggable: true,
       selectable: true
+    }
+  }
+
+  if (nodeType === 'llm') {
+    const llmData = node.data as LlmNodeData
+    llmData.model = {
+      ...DEFAULT_MODEL,
+      ...(llmData.model || {})
+    }
+    llmData.userPromptTemplate = llmData.userPromptTemplate || '{{#sys.query#}}'
+
+    const legacyMemory = llmData.memory
+    if (!legacyMemory) {
+      llmData.memory = { enabled: true, windowEnabled: false, windowSize: 10 }
+    } else if (legacyMemory.windowEnabled === undefined) {
+      llmData.memory = {
+        enabled: true,
+        windowEnabled: legacyMemory.enabled === true,
+        windowSize: legacyMemory.windowSize ?? 10
+      }
+    } else {
+      llmData.memory = {
+        enabled: legacyMemory.enabled !== false,
+        windowEnabled: legacyMemory.windowEnabled === true,
+        windowSize: legacyMemory.windowSize ?? 10
+      }
     }
   }
 

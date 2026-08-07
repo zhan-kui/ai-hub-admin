@@ -198,11 +198,14 @@ function validateFlow(
       if (!nodeData.systemPrompt?.trim()) {
         errors.push(`LLM 节点「${nodeData.title}」未填写系统提示词`)
       }
-      if (!nodeData.model?.provider?.trim()) {
-        errors.push(`LLM 节点「${nodeData.title}」未填写模型 provider`)
+      if (!nodeData.model?.provider?.trim() || !nodeData.model?.name?.trim()) {
+        errors.push(`LLM 节点「${nodeData.title}」未选择模型`)
       }
-      if (!nodeData.model?.name?.trim()) {
-        errors.push(`LLM 节点「${nodeData.title}」未填写模型名称`)
+      if (nodeData.memory?.enabled && nodeData.memory.windowEnabled) {
+        const windowSize = Number(nodeData.memory.windowSize)
+        if (!Number.isInteger(windowSize) || windowSize < 1 || windowSize > 50) {
+          errors.push(`LLM 节点「${nodeData.title}」的记忆窗口数量必须为 1-50`)
+        }
       }
       if (incomers.length < 1) errors.push(`LLM 节点「${nodeData.title}」必须有入线`)
       if (incomers.length > 1) errors.push(`LLM 节点「${nodeData.title}」最多 1 条入线`)

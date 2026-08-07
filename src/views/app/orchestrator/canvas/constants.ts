@@ -16,8 +16,8 @@ export const NODE_DIMENSIONS = {
 } as const
 
 export const DEFAULT_MODEL: Required<LlmNodeData['model']> = {
-  provider: 'langgenius/openai_api_compatible/openai_api_compatible',
-  name: 'Qwen3.5-35B-A3B',
+  provider: '',
+  name: '',
   temperature: 0.7,
   enableThinking: false,
   reasoningEffort: 'medium'
