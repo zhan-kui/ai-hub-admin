@@ -445,9 +445,6 @@ onMounted(() => {
           ><span>Skill 关联工具</span><strong>{{ selectedSkillToolCodes.length }} 个</strong></div
         >
         <div class="summary-row"
-          ><span>MCP 服务</span><strong>{{ selectedMcpServerCodes.length }} 个</strong></div
-        >
-        <div class="summary-row"
           ><span>MCP 工具</span><strong>{{ selectedMcpToolCount }} 个</strong></div
         >
         <div class="summary-row"

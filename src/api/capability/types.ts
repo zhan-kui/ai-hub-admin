@@ -192,7 +192,14 @@ export interface ToolCallResult {
   providerType: ProviderType
   durationMs: number
   data?: unknown
+  outputValidation?: {
+    valid: boolean
+    skipped: boolean
+    target: string
+    errors: string[]
+  }
   error?: ToolCallError
+  executionTraceId?: string
 }
 
 export interface Skill {

@@ -26,6 +26,7 @@ const appTypeFilter = ref<AppTypeFilter>('')
 const pageNum = ref(1)
 const pageSize = 24
 const allApps = ref<AppRow[]>([])
+const failedAvatarImages = ref<Set<string>>(new Set())
 
 interface CategoryMeta {
   value: AppTypeFilter
@@ -131,6 +132,26 @@ function avatarText(row: AppRow): string {
   return first ? first.toUpperCase() : 'A'
 }
 
+function resolveAvatarImage(row: AppRow): string {
+  const uploadedImage = String(row.iconImage || '').trim()
+  if (uploadedImage) return uploadedImage
+
+  const icon = String(row.icon || '').trim()
+  return /^(?:data:image\/|blob:|https?:\/\/|\/|\.\.?\/)/i.test(icon) ? icon : ''
+}
+
+function avatarImage(row: AppRow): string {
+  const image = resolveAvatarImage(row)
+  return image && !failedAvatarImages.value.has(image) ? image : ''
+}
+
+function handleAvatarError(row: AppRow) {
+  const image = resolveAvatarImage(row)
+  if (image) {
+    failedAvatarImages.value = new Set([...failedAvatarImages.value, image])
+  }
+}
+
 function avatarColor(row: AppRow): string {
   return hashColor(String(getAppTypeLabel(row.appType) || row.appCode || row.appName || 'app'))
 }
@@ -205,8 +226,9 @@ async function loadApps() {
 }
 
 function enterChat(row: AppRow) {
+  const chatPath = normalizeAppTypeKey(row.appType) === 'agent' ? 'chat-plus' : 'chat'
   router.push({
-    path: `/agents/${row.id}/chat`,
+    path: `/agents/${row.id}/${chatPath}`,
     query: { from: route.fullPath }
   })
 }
@@ -295,13 +317,19 @@ onMounted(() => {
           >
             <div class="card-top">
               <div
-                v-if="!row.iconImage && !row.icon"
+                v-if="!avatarImage(row)"
                 class="app-icon"
                 :style="{ backgroundColor: avatarColor(row) }"
               >
                 {{ avatarText(row) }}
               </div>
-              <img v-else class="app-icon img" :src="row.iconImage || row.icon" alt="icon" />
+              <img
+                v-else
+                class="app-icon img"
+                :src="avatarImage(row)"
+                :alt="`${row.appName || '智能体'}头像`"
+                @error="handleAvatarError(row)"
+              />
 
               <div class="title-area">
                 <div class="app-name">{{ row.appName || '-' }}</div>

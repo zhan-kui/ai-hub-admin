@@ -16,6 +16,12 @@ const modules = import.meta.glob([
 const LayoutView = () => import('@/layout/BasicLayout.vue')
 const ParentView = () => import('@/views/common/ParentView.vue')
 const PlaceholderView = () => import('@/views/common/RoutePlaceholder.vue')
+const operationViews: Record<string, NonNullable<RouteRecordRaw['component']>> = {
+  使用统计: () => import('@/views/operation/UsageStatistics.vue'),
+  反馈管理: () => import('@/views/operation/FeedbackManagement.vue'),
+  调用追踪: () => import('@/views/operation/CallTrace.vue'),
+  审计日志: () => import('@/views/operation/AuditLog.vue')
+}
 
 function normalizeAbsolutePath(rawPath: string): string {
   const normalized = rawPath.split('/').filter(Boolean).join('/')
@@ -54,7 +60,8 @@ function joinAbsolutePath(parentAbsPath: string, routePath: string): string {
 
 function resolveView(
   component: string | undefined,
-  hasChildren: boolean
+  hasChildren: boolean,
+  menuName: string
 ): NonNullable<RouteRecordRaw['component']> {
   if (component === 'Layout') {
     return LayoutView
@@ -62,6 +69,10 @@ function resolveView(
 
   if (component === 'ParentView') {
     return ParentView
+  }
+
+  if (operationViews[menuName]) {
+    return operationViews[menuName]
   }
 
   if (!component) {
@@ -99,7 +110,7 @@ function convertMenuToRoute(menu: MenuVO, parentAbsPath = ''): AppRouteRecordRaw
   const route: AppRouteRecordRaw = {
     path: routePath,
     name: `menu-${menu.id}`,
-    component: resolveView(menu.component, children.length > 0),
+    component: resolveView(menu.component, children.length > 0, menu.menuName),
     meta: {
       title: menu.menuName,
       icon: menu.icon,

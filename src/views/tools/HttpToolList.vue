@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Search } from '@element-plus/icons-vue'
@@ -66,6 +66,7 @@ const router = useRouter()
 const loading = ref(false)
 const list = ref<CapabilityTool[]>([])
 const total = ref(0)
+const enabledCount = computed(() => list.value.filter((item) => item.status === 1).length)
 const query = reactive({ page: 1, size: 20, keyword: '', status: undefined as 0 | 1 | undefined })
 
 const formVisible = ref(false)
@@ -120,7 +121,8 @@ function createEmptyForm(): HttpFormState {
     basicPassword: '',
     customAuthHeaders: {},
     inputSchemaText: '{\n  "type": "object",\n  "properties": {}\n}',
-    outputSchemaText: '{}',
+    outputSchemaText:
+      '{\n  "type": "object",\n  "description": "远端接口响应 body，请按真实字段补充 properties",\n  "properties": {},\n  "additionalProperties": true\n}',
     bodyTemplateText: '{}'
   }
 }
@@ -331,6 +333,26 @@ function removeParameter(index: number) {
   form.parameters.splice(index, 1)
 }
 
+function generateInputSchema() {
+  const properties: Record<string, Record<string, unknown>> = {}
+  const required: string[] = []
+  form.parameters.forEach((item) => {
+    if (!item.name.trim()) return
+    properties[item.name.trim()] = {
+      type: item.dataType || 'string',
+      ...(item.description.trim() ? { description: item.description.trim() } : {})
+    }
+    if (item.required) required.push(item.name.trim())
+  })
+  form.inputSchemaText = stringifyJson({
+    type: 'object',
+    properties,
+    ...(required.length ? { required } : {}),
+    additionalProperties: false
+  })
+  ElMessage.success('已根据参数映射生成输入 Schema')
+}
+
 async function changeStatus(row: CapabilityTool, value: string | number | boolean) {
   const status = Number(value) as 0 | 1
   try {
@@ -372,8 +394,15 @@ async function runTest() {
     const argumentsValue = parseJsonObject(testArguments.value, '测试 Arguments')
     testing.value = true
     testResult.value = await httpToolApi.test(testTool.value.id, argumentsValue)
-    if (testResult.value.success) ElMessage.success('调用成功')
-    else ElMessage.warning(testResult.value.error?.message || '调用失败')
+    if (testResult.value.success) {
+      ElMessage.success(
+        testResult.value.outputValidation?.skipped
+          ? '调用成功，未配置输出校验'
+          : '调用及输出结构校验通过'
+      )
+    } else {
+      ElMessage.warning(testResult.value.error?.message || '调用失败')
+    }
   } catch (error: any) {
     ElMessage.error(error?.message || 'HTTP Tool 测试失败')
   } finally {
@@ -403,7 +432,24 @@ onMounted(async () => {
 </script>
 
 <template>
-  <ContentWrap title="HTTP 工具" message="注册 REST API 为可搜索、可绑定、可执行的 Tool">
+  <ContentWrap class="http-tool-page">
+    <div class="page-heading">
+      <div>
+        <span class="page-heading__eyebrow">AGENT CAPABILITY</span>
+        <h2>HTTP 工具</h2>
+        <p>把 REST API 标准化为智能体可理解、可校验、可追踪的工具能力。</p>
+      </div>
+      <div class="page-heading__stats">
+        <div
+          ><strong>{{ total }}</strong
+          ><span>已注册</span></div
+        >
+        <div
+          ><strong>{{ enabledCount }}</strong
+          ><span>当前页启用</span></div
+        >
+      </div>
+    </div>
     <div class="list-toolbar">
       <el-form class="list-toolbar__filters" inline>
         <el-form-item class="list-toolbar__keyword">
@@ -431,45 +477,55 @@ onMounted(async () => {
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="list" row-key="id">
-      <el-table-column label="Tool" min-width="240">
-        <template #default="{ row }">
-          <div class="primary-cell"
-            ><strong>{{ row.toolName }}</strong
-            ><span>{{ row.toolCode }}</span></div
-          >
-        </template>
-      </el-table-column>
-      <el-table-column prop="description" label="用途" min-width="280" show-overflow-tooltip />
-      <el-table-column label="标签" min-width="180">
-        <template #default="{ row }">
-          <el-tag v-for="tag in row.tags || []" :key="tag" size="small" class="tag">{{
-            tag
-          }}</el-tag>
-          <span v-if="!row.tags?.length">-</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="更新时间" width="180">
-        <template #default="{ row }">{{ formatDate(row.updateTime) }}</template>
-      </el-table-column>
-      <el-table-column label="启用" width="90">
-        <template #default="{ row }">
-          <el-switch
-            :model-value="row.status"
-            :active-value="1"
-            :inactive-value="0"
-            @change="changeStatus(row, $event)"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="210" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="primary" @click="openEdit(row)">配置</el-button>
-          <el-button link type="success" @click="openTest(row)">测试</el-button>
-          <el-button link type="danger" @click="remove(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div class="tool-table-shell">
+      <el-table
+        v-loading="loading"
+        :data="list"
+        row-key="id"
+        empty-text="还没有 HTTP 工具，点击右上角开始注册"
+      >
+        <el-table-column label="Tool" min-width="240">
+          <template #default="{ row }">
+            <div class="primary-cell"
+              ><span class="method-badge">HTTP</span
+              ><div
+                ><strong>{{ row.toolName }}</strong
+                ><span>{{ row.toolCode }}</span></div
+              ></div
+            >
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" label="用途" min-width="280" show-overflow-tooltip />
+        <el-table-column label="标签" min-width="180">
+          <template #default="{ row }">
+            <el-tag v-for="tag in row.tags || []" :key="tag" size="small" class="tag">{{
+              tag
+            }}</el-tag>
+            <span v-if="!row.tags?.length">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="更新时间" width="180">
+          <template #default="{ row }">{{ formatDate(row.updateTime) }}</template>
+        </el-table-column>
+        <el-table-column label="启用" width="90">
+          <template #default="{ row }">
+            <el-switch
+              :model-value="row.status"
+              :active-value="1"
+              :inactive-value="0"
+              @change="changeStatus(row, $event)"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="210" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openEdit(row)">配置</el-button>
+            <el-button link type="success" @click="openTest(row)">测试</el-button>
+            <el-button link type="danger" @click="remove(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <div class="pagination">
       <el-pagination
@@ -485,10 +541,17 @@ onMounted(async () => {
 
   <el-drawer
     v-model="formVisible"
+    class="http-tool-drawer"
     :title="editingId ? '编辑 HTTP Tool' : '注册 HTTP Tool'"
-    size="900px"
+    size="880px"
   >
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="125px">
+    <div class="drawer-intro">
+      <span>{{ editingId ? '更新工具契约' : '注册新能力' }}</span>
+      <p
+        >先描述工具用途和输入输出，再配置 HTTP 请求。智能体只会看到 Tool 契约，不会接触认证密钥。</p
+      >
+    </div>
+    <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <el-divider content-position="left">Tool 信息</el-divider>
       <div class="form-grid">
         <el-form-item label="Tool 编码" prop="toolCode"
@@ -515,7 +578,11 @@ onMounted(async () => {
         </el-form-item>
       </div>
       <el-form-item label="用途说明" prop="description"
-        ><el-input v-model="form.description" type="textarea" :rows="3"
+        ><el-input
+          v-model="form.description"
+          type="textarea"
+          :rows="3"
+          placeholder="说明智能体应在什么场景调用、能解决什么问题"
       /></el-form-item>
 
       <el-divider content-position="left">请求配置</el-divider>
@@ -554,7 +621,7 @@ onMounted(async () => {
           ><el-input-number v-model="form.requestTimeoutSeconds" :min="1" :max="3600"
         /></el-form-item>
       </div>
-      <el-form-item label="固定 Headers"
+      <el-form-item label="固定 Headers" class="wide-editor"
         ><KeyValueEditor
           v-model="form.fixedHeaders"
           secret
@@ -587,60 +654,80 @@ onMounted(async () => {
           ><el-input v-model="form.basicPassword" type="password" show-password
         /></el-form-item>
       </div>
-      <el-form-item v-if="form.authType === 'CUSTOM_HEADERS'" label="认证 Headers"
+      <el-form-item
+        v-if="form.authType === 'CUSTOM_HEADERS'"
+        label="认证 Headers"
+        class="wide-editor"
         ><KeyValueEditor v-model="form.customAuthHeaders" secret
       /></el-form-item>
 
       <el-divider content-position="left">参数映射</el-divider>
-      <el-table :data="form.parameters" border>
-        <el-table-column label="参数名称" min-width="135"
-          ><template #default="{ row }"><el-input v-model="row.name" /></template
-        ></el-table-column>
-        <el-table-column label="位置" width="115"
-          ><template #default="{ row }"
-            ><el-select v-model="row.location"
-              ><el-option
-                v-for="location in ['PATH', 'QUERY', 'HEADER', 'BODY']"
-                :key="location"
-                :label="location"
-                :value="location" /></el-select></template
-        ></el-table-column>
-        <el-table-column label="目标名称" min-width="125"
-          ><template #default="{ row }"><el-input v-model="row.targetName" /></template
-        ></el-table-column>
-        <el-table-column label="类型" width="115"
-          ><template #default="{ row }"
-            ><el-select v-model="row.dataType"
-              ><el-option
-                v-for="type in ['string', 'number', 'integer', 'boolean', 'object', 'array']"
-                :key="type"
-                :label="type"
-                :value="type" /></el-select></template
-        ></el-table-column>
-        <el-table-column label="必填" width="70"
-          ><template #default="{ row }"><el-checkbox v-model="row.required" /></template
-        ></el-table-column>
-        <el-table-column label="默认值" min-width="125"
-          ><template #default="{ row }"><el-input v-model="row.defaultValueText" /></template
-        ></el-table-column>
-        <el-table-column label="说明" min-width="150"
-          ><template #default="{ row }"><el-input v-model="row.description" /></template
-        ></el-table-column>
-        <el-table-column width="70"
-          ><template #default="{ $index }"
-            ><el-button link type="danger" @click="removeParameter($index)"
-              >删除</el-button
-            ></template
-          ></el-table-column
-        >
-      </el-table>
-      <el-button class="add-parameter" plain :icon="Plus" @click="addParameter">添加参数</el-button>
+      <el-alert
+        class="section-tip"
+        title="参数名称面向智能体；目标名称对应实际 URL、Query、Header 或 Body 字段。"
+        type="info"
+        :closable="false"
+      />
+      <div class="parameter-table-shell"
+        ><el-table :data="form.parameters" border empty-text="暂无参数，可直接传空对象或添加参数">
+          <el-table-column label="参数名称" min-width="135"
+            ><template #default="{ row }"><el-input v-model="row.name" /></template
+          ></el-table-column>
+          <el-table-column label="位置" width="115"
+            ><template #default="{ row }"
+              ><el-select v-model="row.location"
+                ><el-option
+                  v-for="location in ['PATH', 'QUERY', 'HEADER', 'BODY']"
+                  :key="location"
+                  :label="location"
+                  :value="location" /></el-select></template
+          ></el-table-column>
+          <el-table-column label="目标名称" min-width="125"
+            ><template #default="{ row }"><el-input v-model="row.targetName" /></template
+          ></el-table-column>
+          <el-table-column label="类型" width="115"
+            ><template #default="{ row }"
+              ><el-select v-model="row.dataType"
+                ><el-option
+                  v-for="type in ['string', 'number', 'integer', 'boolean', 'object', 'array']"
+                  :key="type"
+                  :label="type"
+                  :value="type" /></el-select></template
+          ></el-table-column>
+          <el-table-column label="必填" width="70"
+            ><template #default="{ row }"><el-checkbox v-model="row.required" /></template
+          ></el-table-column>
+          <el-table-column label="默认值" min-width="125"
+            ><template #default="{ row }"><el-input v-model="row.defaultValueText" /></template
+          ></el-table-column>
+          <el-table-column label="说明" min-width="150"
+            ><template #default="{ row }"><el-input v-model="row.description" /></template
+          ></el-table-column>
+          <el-table-column width="70"
+            ><template #default="{ $index }"
+              ><el-button link type="danger" @click="removeParameter($index)"
+                >删除</el-button
+              ></template
+            ></el-table-column
+          >
+        </el-table></div
+      >
+      <div class="parameter-actions"
+        ><el-button plain :icon="Plus" @click="addParameter">添加参数</el-button
+        ><el-button plain @click="generateInputSchema">从参数生成输入 Schema</el-button></div
+      >
 
       <el-divider content-position="left">Schema 与 Body</el-divider>
+      <el-alert class="schema-guide" type="success" :closable="false">
+        <template #title>智能体工具返回规则</template>
+        平台固定返回 success、data、error、durationMs 和 executionTraceId；输出 Schema
+        只描述远端接口的 <code>data.body</code>。运行时若结构不匹配，将返回
+        INVALID_TOOL_OUTPUT，避免错误数据继续进入智能体上下文。
+      </el-alert>
       <el-form-item label="输入 Schema"
         ><JsonEditor v-model="form.inputSchemaText" :height="250"
       /></el-form-item>
-      <el-form-item label="输出 Schema"
+      <el-form-item label="输出 Schema（校验 data.body）"
         ><JsonEditor v-model="form.outputSchemaText" :height="200"
       /></el-form-item>
       <el-form-item label="Body Mode">
@@ -654,8 +741,13 @@ onMounted(async () => {
       /></el-form-item>
     </el-form>
     <template #footer
-      ><el-button @click="formVisible = false">取消</el-button
-      ><el-button type="primary" :loading="submitting" @click="submit">保存</el-button></template
+      ><div class="drawer-footer"
+        ><span>保存后可在列表中执行真实请求并校验返回结构</span
+        ><div
+          ><el-button @click="formVisible = false">取消</el-button
+          ><el-button type="primary" :loading="submitting" @click="submit">保存配置</el-button></div
+        ></div
+      ></template
     >
   </el-drawer>
 
@@ -665,7 +757,7 @@ onMounted(async () => {
     width="760px"
   >
     <el-alert
-      title="Arguments 必须是 JSON 对象，字段应与输入 Schema 和参数映射一致。"
+      title="测试会依次校验输入参数、执行真实 HTTP 请求，并验证 data.body 是否符合输出 Schema。"
       type="info"
       :closable="false"
     />
@@ -678,11 +770,41 @@ onMounted(async () => {
           }}</el-tag></el-descriptions-item
         >
         <el-descriptions-item label="耗时">{{ testResult.durationMs }} ms</el-descriptions-item>
-        <el-descriptions-item label="可重试">{{
-          testResult.error?.retryable ? '是' : '否'
+        <el-descriptions-item label="结构校验"
+          ><el-tag
+            :type="
+              !testResult.outputValidation || testResult.outputValidation.skipped
+                ? 'info'
+                : testResult.outputValidation.valid
+                  ? 'success'
+                  : 'danger'
+            "
+            >{{
+              !testResult.outputValidation
+                ? '未执行'
+                : testResult.outputValidation.skipped
+                  ? '未配置'
+                  : testResult.outputValidation.valid
+                    ? '通过'
+                    : '未通过'
+            }}</el-tag
+          ></el-descriptions-item
+        >
+        <el-descriptions-item v-if="testResult.executionTraceId" label="Trace ID" :span="3">{{
+          testResult.executionTraceId
         }}</el-descriptions-item>
         <el-descriptions-item v-if="testResult.error" label="错误" :span="3"
           >{{ testResult.error.code }}：{{ testResult.error.message }}</el-descriptions-item
+        >
+        <el-descriptions-item
+          v-if="testResult.outputValidation?.errors?.length"
+          label="结构问题"
+          :span="3"
+          ><ul class="validation-errors"
+            ><li v-for="error in testResult.outputValidation.errors" :key="error">{{
+              error
+            }}</li></ul
+          ></el-descriptions-item
         >
       </el-descriptions>
       <div class="test-editor"
@@ -702,15 +824,104 @@ onMounted(async () => {
 <style scoped lang="less">
 @import url('./styles/list-toolbar.less');
 
+.http-tool-page {
+  --tool-border: #e4eaf2;
+  --tool-soft: #f7f9fc;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 4px 2px 22px;
+}
+
+.page-heading__eyebrow {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+  color: var(--el-color-primary);
+}
+
+.page-heading h2 {
+  margin: 6px 0 5px;
+  font-size: 24px;
+}
+
+.page-heading p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+
+.page-heading__stats {
+  display: flex;
+  gap: 10px;
+}
+
+.page-heading__stats div {
+  min-width: 92px;
+  padding: 10px 14px;
+  text-align: right;
+  background: var(--el-fill-color-lighter);
+  border: 1px solid var(--tool-border);
+  border-radius: 12px;
+}
+
+.page-heading__stats strong,
+.page-heading__stats span {
+  display: block;
+}
+
+.page-heading__stats strong {
+  font-size: 20px;
+}
+
+.page-heading__stats span {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+
+.tool-table-shell {
+  padding: 4px 12px;
+  overflow: hidden;
+  border: 1px solid var(--tool-border);
+  border-radius: 12px;
+}
+
 .primary-cell {
   display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.primary-cell > div {
+  display: flex;
+  min-width: 0;
   flex-direction: column;
   gap: 4px;
 }
 
-.primary-cell span {
+.primary-cell > div span {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.method-badge {
+  display: inline-flex;
+  width: 42px;
+  height: 30px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #2563eb;
+  background: #eaf1ff;
+  border-radius: 9px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .tag {
@@ -726,31 +937,151 @@ onMounted(async () => {
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0 14px;
+  gap: 0 18px;
 }
 
 .request-grid {
   display: grid;
-  grid-template-columns: 160px 1fr 1fr;
-  gap: 0 14px;
+  grid-template-columns: 150px 1.25fr 1fr;
+  gap: 0 18px;
 }
 
-.add-parameter {
-  margin-top: 10px;
+.drawer-intro {
+  padding: 15px 17px;
+  margin: 0 0 18px;
+  background: linear-gradient(120deg, #f5f9ff, #f8fbff);
+  border: 1px solid #dce8f8;
+  border-radius: 12px;
+}
+
+.drawer-intro span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--el-color-primary);
+}
+
+.drawer-intro p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-secondary);
+}
+
+.section-tip,
+.schema-guide {
+  margin-bottom: 14px;
+}
+
+.schema-guide code {
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, consolas, monospace;
+  background: rgb(255 255 255 / 72%);
+  border-radius: 4px;
+}
+
+.parameter-table-shell {
+  overflow: hidden;
+  border: 1px solid var(--tool-border);
+  border-radius: 10px;
+}
+
+.parameter-actions {
+  display: flex;
+  margin-top: 12px;
+  gap: 8px;
 }
 
 .test-editor {
   margin-top: 14px;
 }
 
+.validation-errors {
+  padding-left: 18px;
+  margin: 0;
+  color: var(--el-color-danger);
+}
+
+.drawer-footer {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.drawer-footer > span {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
 :deep(.el-select) {
   width: 100%;
+}
+
+:deep(.http-tool-drawer) {
+  width: min(880px, calc(100vw - 24px)) !important;
+}
+
+:deep(.http-tool-drawer .el-drawer__header) {
+  padding: 20px 24px 16px;
+  margin-bottom: 0;
+  font-weight: 700;
+  border-bottom: 1px solid var(--tool-border);
+}
+
+:deep(.http-tool-drawer .el-drawer__body) {
+  padding: 20px 24px 28px;
+}
+
+:deep(.http-tool-drawer .el-drawer__footer) {
+  padding: 14px 24px;
+  border-top: 1px solid var(--tool-border);
+}
+
+:deep(.http-tool-drawer .el-divider) {
+  margin: 28px 0 22px;
+}
+
+:deep(.http-tool-drawer .el-divider__text) {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
+}
+
+:deep(.http-tool-drawer .el-form-item) {
+  margin-bottom: 20px;
+}
+
+:deep(.http-tool-drawer .el-form-item__label) {
+  padding-bottom: 7px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--el-text-color-regular);
+}
+
+:deep(.parameter-table-shell .el-table__cell) {
+  padding: 8px 0;
 }
 
 @media (width <= 900px) {
   .form-grid,
   .request-grid {
     display: block;
+  }
+
+  .page-heading,
+  .drawer-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .page-heading__stats {
+    width: 100%;
+  }
+
+  .page-heading__stats div {
+    flex: 1;
+    text-align: left;
   }
 }
 </style>

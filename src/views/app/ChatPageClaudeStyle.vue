@@ -109,7 +109,7 @@ const fixedAgentConfig = computed(() =>
   currentApp.value?.appType === 'agent' ? currentApp.value.agentRuntimeConfig || null : null
 )
 const isFixedAgent = computed(() => Boolean(fixedAgentConfig.value))
-const fixedMcpServerCount = computed(() => fixedAgentConfig.value?.mcpServerCodes?.length || 0)
+const fixedMcpToolCount = computed(() => new Set(selectedToolCodes.value).size)
 
 const streamController = ref<AbortController | null>(null)
 const activeAssistantMessageId = ref<string | null>(null)
@@ -2604,7 +2604,7 @@ watch(
 
               <template v-else-if="enhanced && !webMode">
                 <span
-                  v-if="selectedToolCodes.length || (isFixedAgent && fixedMcpServerCount)"
+                  v-if="selectedToolCodes.length || (isFixedAgent && fixedMcpToolCount)"
                   class="cx-pill cx-pill--cap"
                   :class="{ 'is-readonly': isFixedAgent }"
                   :title="isFixedAgent ? '由 Agent 发布配置固定' : '点击清空工具'"
@@ -2617,9 +2617,7 @@ watch(
                     />
                   </svg>
                   {{
-                    isFixedAgent
-                      ? `MCP ${fixedMcpServerCount}`
-                      : `工具 ${selectedToolCodes.length}`
+                    isFixedAgent ? `工具 ${fixedMcpToolCount}` : `工具 ${selectedToolCodes.length}`
                   }}<i v-if="!isFixedAgent" class="cx-pill__x">×</i>
                 </span>
                 <span
@@ -2643,10 +2641,10 @@ watch(
                     isFixedAgent &&
                     !selectedToolCodes.length &&
                     !selectedSkillCodes.length &&
-                    !fixedMcpServerCount
+                    !fixedMcpToolCount
                   "
                   class="cx-pill cx-pill--cap is-readonly"
-                  title="该 Agent 未配置 Skill 或 MCP 服务"
+                  title="该 Agent 未配置 Skill 或 MCP 工具"
                 >
                   纯模型模式
                 </span>
@@ -4845,10 +4843,7 @@ watch(
 }
 
 .cc-root .cx-pill.is-readonly {
-  color: #475569;
   cursor: default;
-  background: #f1f5f9;
-  border-color: #dbe3ee;
 }
 
 .cc-root .cx-pill__name {
