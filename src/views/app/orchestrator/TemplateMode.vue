@@ -75,7 +75,7 @@ const pageMessage = computed(() =>
   isAgentChatflowTemplate.value
     ? '配置模型、推理参数与固定能力，保存后可在智能体管理中发布。'
     : isSimpleChatTemplate.value
-      ? '配置提示词、知识库与模型，保存后即可在智能体管理中发布。'
+      ? '配置提示词、知识库、模型与推理参数，保存后即可在智能体管理中发布。'
       : isEditMode.value
         ? '编辑已保存的模板流程，首次无草稿时可先选择模板再保存。'
         : '选择模板，填写参数后保存前端草稿。'
@@ -121,6 +121,21 @@ const selectedModelKey = computed({
 const systemPrompt = computed({
   get: () => String(getLlmConfig().systemPrompt || ''),
   set: (value: string) => patchLlmConfig({ systemPrompt: value })
+})
+const enableThinking = computed({
+  get: () => Boolean(getLlmConfig()['model.enableThinking']),
+  set: (value: boolean) => patchLlmConfig({ 'model.enableThinking': value })
+})
+const temperatureEnabled = computed({
+  get: () => Boolean(getLlmConfig()['model.temperatureEnabled'] ?? true),
+  set: (value: boolean) => patchLlmConfig({ 'model.temperatureEnabled': value })
+})
+const temperature = computed({
+  get: () => {
+    const value = Number(getLlmConfig()['model.temperature'] ?? 0.7)
+    return Number.isFinite(value) ? value : 0.7
+  },
+  set: (value: number) => patchLlmConfig({ 'model.temperature': value })
 })
 const selectedDatasetIds = computed({
   get: () => normalizeStringArray(getLlmConfig()['knowledge.datasetIds']),
@@ -312,6 +327,7 @@ function ensureSimpleChatConfig() {
     'model.name': config['model.name'] || 'qwen3.7-max',
     'model.provider': config['model.provider'] || 'langgenius/tongyi/tongyi',
     'model.temperature': config['model.temperature'] ?? 0.7,
+    'model.temperatureEnabled': config['model.temperatureEnabled'] ?? true,
     'model.enableThinking': config['model.enableThinking'] ?? false,
     'model.reasoningEffort': config['model.reasoningEffort'] || 'medium',
     'knowledge.datasetIds': normalizeStringArray(config['knowledge.datasetIds']),
@@ -349,6 +365,7 @@ function applySimpleChatConfig(config: Record<string, any>) {
     'model.provider': config['model.provider'] || 'langgenius/tongyi/tongyi',
     'model.name': config['model.name'] || 'qwen3.7-max',
     'model.temperature': config['model.temperature'] ?? 0.7,
+    'model.temperatureEnabled': config['model.temperatureEnabled'] ?? true,
     'model.enableThinking': config['model.enableThinking'] ?? false,
     'model.reasoningEffort': config['model.reasoningEffort'] || 'medium'
   }
@@ -872,6 +889,53 @@ onMounted(async () => {
                     :value="item.value"
                   />
                 </el-select>
+
+                <div class="inference-parameters">
+                  <div class="parameter-item">
+                    <div class="parameter-heading">
+                      <div>
+                        <strong>思考模式</strong>
+                        <small>适合复杂分析与多步骤推理</small>
+                      </div>
+                      <el-switch v-model="enableThinking" />
+                    </div>
+                    <div class="parameter-state" :class="{ active: enableThinking }">
+                      {{ enableThinking ? '已开启深度思考' : '已关闭深度思考' }}
+                    </div>
+                  </div>
+
+                  <div class="parameter-item" :class="{ disabled: !temperatureEnabled }">
+                    <div class="parameter-heading">
+                      <div>
+                        <strong>启用温度</strong>
+                        <small>数值越高，回答越有创造性</small>
+                      </div>
+                      <el-switch v-model="temperatureEnabled" />
+                    </div>
+                    <div class="temperature-controls">
+                      <el-slider
+                        v-model="temperature"
+                        :min="0"
+                        :max="2"
+                        :step="0.1"
+                        :disabled="!temperatureEnabled"
+                        :show-tooltip="false"
+                      />
+                      <el-input-number
+                        v-model="temperature"
+                        :min="0"
+                        :max="2"
+                        :step="0.1"
+                        :precision="1"
+                        :disabled="!temperatureEnabled"
+                        controls-position="right"
+                      />
+                    </div>
+                    <div v-if="!temperatureEnabled" class="parameter-tip">
+                      温度已关闭，temperature 不会提交给 Dify
+                    </div>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -892,6 +956,18 @@ onMounted(async () => {
                 <div class="summary-row-item">
                   <span class="row-label">推理模型</span>
                   <span class="row-val text-ellipsis">{{ modelText }}</span>
+                </div>
+                <div class="summary-row-item">
+                  <span class="row-label">思考模式</span>
+                  <span class="row-val" :class="{ 'val-active': enableThinking }">
+                    {{ enableThinking ? '已开启' : '已关闭' }}
+                  </span>
+                </div>
+                <div class="summary-row-item">
+                  <span class="row-label">温度</span>
+                  <span class="row-val">{{
+                    temperatureEnabled ? temperature.toFixed(1) : '已关闭'
+                  }}</span>
                 </div>
               </div>
             </section>
@@ -1462,6 +1538,81 @@ onMounted(async () => {
       white-space: nowrap;
     }
   }
+}
+
+.inference-parameters {
+  padding-top: 16px;
+  margin-top: 16px;
+  border-top: 1px solid #eef2f6;
+}
+
+.parameter-item {
+  padding: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+
+  & + & {
+    margin-top: 10px;
+  }
+
+  &.disabled {
+    background: #f8fafc;
+    border-style: dashed;
+  }
+}
+
+.parameter-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+
+  strong,
+  small {
+    display: block;
+  }
+
+  strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  small {
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #64748b;
+  }
+}
+
+.parameter-state,
+.parameter-tip {
+  margin-top: 9px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.parameter-state.active {
+  color: #2563eb;
+}
+
+.temperature-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+
+  :deep(.el-input-number) {
+    width: 92px;
+  }
+}
+
+.parameter-tip {
+  color: #b45309;
 }
 
 /* 右侧配置快照概览 */
