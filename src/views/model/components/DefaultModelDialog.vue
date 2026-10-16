@@ -107,7 +107,7 @@ async function load(): Promise<void> {
     })
 
     if (results.every((item) => item.status === 'rejected')) {
-      loadError.value = '可用模型加载失败，请先确认 Dify 连接正常'
+      loadError.value = '可用模型加载失败，请先确认 AI 模型服务连接正常'
     }
   } catch (error: any) {
     loadError.value = error?.message || '可用模型加载失败'
@@ -201,7 +201,7 @@ function submit(): void {
 
     <template #footer>
       <div class="dialog-footer">
-        <span>修改保存后将立即同步到 Dify 工作空间</span>
+        <span>修改保存后将立即同步到 AI 模型服务空间</span>
         <div>
           <el-button :disabled="submitting" @click="emit('update:modelValue', false)"
             >取消</el-button

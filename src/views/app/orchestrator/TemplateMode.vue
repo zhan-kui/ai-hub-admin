@@ -932,7 +932,7 @@ onMounted(async () => {
                       />
                     </div>
                     <div v-if="!temperatureEnabled" class="parameter-tip">
-                      温度已关闭，temperature 不会提交给 Dify
+                      温度已关闭，temperature 不会提交给 AI 模型服务
                     </div>
                   </div>
                 </div>

@@ -14,7 +14,7 @@ interface PermissionState {
 function normalizeCustomerMenu(menu: MenuVO): MenuVO {
   return {
     ...menu,
-    menuName: menu.menuName.replace(/Dify/gi, 'AI Hub').replace(/应用/g, '智能体'),
+    menuName: menu.menuName.replace(/Dify/gi, 'AI 平台').replace(/应用/g, '智能体'),
     children: (menu.children || []).map(normalizeCustomerMenu)
   }
 }

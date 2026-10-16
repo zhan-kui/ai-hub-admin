@@ -247,7 +247,8 @@ onMounted(() => {
       </el-col>
     </el-row>
     <div class="form-tip memory-tip">
-      开启记忆后会生成 Dify 默认的用户查询模板和 user/assistant 角色配置；关闭后不生成 memory 配置。
+      开启记忆后会生成 AI 模型服务默认的用户查询模板和 user/assistant 角色配置；关闭后不生成 memory
+      配置。
     </div>
   </el-form>
 

@@ -235,7 +235,7 @@ function author(meta?: { createBy?: string; updateBy?: string; createTime?: stri
           <div v-if="unaddedModels.length" class="sync-hint">
             <span class="sync-dot"></span>
             <span class="muted">
-              Dify 中还有 {{ unaddedModels.length }} 个已配凭据但未加入列表的模型
+              AI 模型服务中还有 {{ unaddedModels.length }} 个已配凭据但未加入列表的模型
             </span>
           </div>
         </div>

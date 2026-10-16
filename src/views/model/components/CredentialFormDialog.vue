@@ -221,9 +221,9 @@ function close(): void {
 
     <div class="security-note">
       <el-icon><WarningFilled /></el-icon>
-      <span
-        >保存前会向模型服务发起一次真实连接校验；密钥仅用于 Dify 配置，不会在页面明文回显。</span
-      >
+      <span>
+        保存前会向模型服务发起一次真实连接校验；密钥仅用于 AI 模型服务配置，不会在页面明文回显。
+      </span>
     </div>
 
     <el-form label-position="top" class="credential-form" @submit.prevent>
@@ -257,7 +257,7 @@ function close(): void {
           <span class="section-index">02</span>
           <div>
             <h4>连接配置</h4>
-            <p>填写插件要求的必填参数，字段由 Dify 动态提供。</p>
+            <p>填写插件要求的必填参数，字段由 AI 模型服务动态提供。</p>
           </div>
         </div>
 

@@ -411,7 +411,7 @@ onMounted(() => {
         </div>
 
         <div class="switch-row">
-          <div><strong>温度</strong><small>关闭时不会向 Dify 输出 temperature</small></div>
+          <div><strong>温度</strong><small>关闭时不会向 AI 模型服务输出 temperature</small></div>
           <el-switch v-model="temperatureEnabled" />
         </div>
 

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { Clock, MoreFilled, Plus, Search, QuestionFilled } from '@element-plus/icons-vue'
+import RouteLoadingOverlay from '@/components/RouteLoadingOverlay.vue'
 import IconUploader from './components/IconUploader.vue'
 import WorkflowEditConfirmDialog from './components/WorkflowEditConfirmDialog.vue'
 import {
@@ -41,6 +42,7 @@ const route = useRoute()
 
 const loading = ref(false)
 const submitting = ref(false)
+const orchestrationLoading = ref(false)
 const publishingId = ref<number | null>(null)
 const parameterLoading = ref(false)
 
@@ -128,6 +130,9 @@ const basicDialogTitle = computed(() =>
   isCreateDialogMode.value ? '创建智能体基础信息' : '修改智能体基本信息'
 )
 const basicDialogSubmitText = computed(() => (isCreateDialogMode.value ? '下一步' : '确认修改'))
+const orchestrationLoadingTitle = computed(() =>
+  pendingCreateMode.value === 'agent' ? '正在创建 Agent 智能体' : '正在创建聊天助手'
+)
 
 const parameterDrawerVisible = ref(false)
 const parameterTitle = ref('智能体参数')
@@ -476,6 +481,7 @@ async function submitBasicForm() {
   if (!validateStarterPrompts()) return
 
   submitting.value = true
+  orchestrationLoading.value = isCreateDialogMode.value && pendingCreateMode.value !== 'blank'
   try {
     if (isCreateDialogMode.value) {
       const result = await appApi.createBasic(toCreateBasicPayload())
@@ -515,6 +521,7 @@ async function submitBasicForm() {
   } catch (error: any) {
     ElMessage.error(error?.message || '智能体保存失败')
   } finally {
+    orchestrationLoading.value = false
     submitting.value = false
   }
 }
@@ -986,6 +993,12 @@ onMounted(() => {
       </div>
     </section>
   </div>
+
+  <RouteLoadingOverlay
+    :active="orchestrationLoading"
+    :title="orchestrationLoadingTitle"
+    description="正在保存基础信息并初始化流程画布，完成后将自动进入编排页面…"
+  />
 
   <el-dialog
     v-model="createDialogVisible"

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElLoading, ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { Connection, Delete, EditPen, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import RouteLoadingOverlay from '@/components/RouteLoadingOverlay.vue'
 import { workflowApi, type WorkflowBindingAppVO, type WorkflowVO } from '@/api/frontend-api'
 import WorkflowEditConfirmDialog from './components/WorkflowEditConfirmDialog.vue'
 import IconUploader from './components/IconUploader.vue'
@@ -127,14 +128,6 @@ async function submitCreate() {
   if (!createFormRef.value) return
   await createFormRef.value.validate()
   creating.value = true
-  let pageLoading: ReturnType<typeof ElLoading.service> | undefined
-  const loadingTimer = window.setTimeout(() => {
-    pageLoading = ElLoading.service({
-      lock: true,
-      text: '正在进入流程编排...',
-      background: 'rgba(15, 23, 42, 0.28)'
-    })
-  }, 300)
   try {
     const result = await workflowApi.createCanvas(buildInitialWorkflowPayload())
     ElMessage.success('工作流创建成功')
@@ -146,8 +139,6 @@ async function submitCreate() {
   } catch (error: any) {
     ElMessage.error(error?.message || '工作流创建失败')
   } finally {
-    window.clearTimeout(loadingTimer)
-    pageLoading?.close()
     creating.value = false
   }
 }
@@ -419,6 +410,12 @@ onMounted(() => {
       :workflow-name="pendingEditWorkflow?.workflowName"
       :apps="editConfirmApps"
       @confirm="confirmEditWorkflow"
+    />
+
+    <RouteLoadingOverlay
+      :active="creating"
+      title="正在创建工作流"
+      description="正在生成初始节点并加载流程编排器，完成后将自动进入编辑页面…"
     />
   </div>
 </template>

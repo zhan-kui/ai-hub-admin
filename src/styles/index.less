@@ -6,6 +6,168 @@
   width: 100% !important;
 }
 
+// 全局确认框：统一危险操作、发布确认和输入提示的轻量视觉。
+.el-overlay.is-message-box {
+  background: rgb(15 23 42 / 42%);
+  backdrop-filter: blur(4px);
+}
+
+.el-message-box {
+  --el-messagebox-width: 440px;
+  --el-messagebox-border-radius: 18px;
+  --el-messagebox-padding-primary: 0;
+  overflow: hidden;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid rgb(148 163 184 / 18%);
+  box-shadow: 0 24px 64px rgb(15 23 42 / 24%);
+}
+
+.el-message-box__header {
+  padding: 24px 26px 0;
+}
+
+.el-message-box__header.show-close {
+  padding-right: 58px;
+}
+
+.el-message-box__title {
+  font-size: 18px;
+  font-weight: 750;
+  line-height: 1.45;
+  color: var(--el-text-color-primary);
+  letter-spacing: -0.01em;
+}
+
+.el-message-box__headerbtn {
+  width: 34px;
+  height: 34px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  border-radius: 10px;
+  right: 18px;
+  top: 18px;
+  transition:
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.el-message-box__headerbtn:hover {
+  color: var(--el-text-color-primary);
+  background: var(--el-fill-color);
+}
+
+.el-message-box__content {
+  padding: 16px 26px 4px;
+  font-size: 14px;
+  color: var(--el-text-color-regular);
+}
+
+.el-message-box__container {
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.el-message-box__status {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  font-size: 21px;
+  background: var(--el-fill-color-light);
+  border-radius: 12px;
+  align-items: center;
+  flex: 0 0 38px;
+  justify-content: center;
+}
+
+.el-message-box__status.el-message-box-icon--warning {
+  color: #d97706;
+  background: #fff7e6;
+}
+
+.el-message-box__status.el-message-box-icon--error {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.el-message-box__status.el-message-box-icon--success {
+  color: #059669;
+  background: #ecfdf5;
+}
+
+.el-message-box__status.el-message-box-icon--info {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.el-message-box__message {
+  min-width: 0;
+  padding-top: 7px;
+}
+
+.el-message-box__message p {
+  line-height: 1.7;
+  white-space: pre-line;
+}
+
+.el-message-box__input {
+  padding-top: 16px;
+}
+
+.el-message-box__input .el-input__wrapper {
+  min-height: 42px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--el-border-color) inset;
+}
+
+.el-message-box__btns {
+  gap: 10px;
+  padding: 20px 26px 24px;
+}
+
+.el-message-box__btns .el-button {
+  min-width: 86px;
+  height: 38px;
+  margin-left: 0;
+  font-weight: 650;
+  border-radius: 10px;
+}
+
+.el-message-box__btns .el-button--default {
+  color: var(--el-text-color-regular);
+  background: var(--el-bg-color-overlay);
+  border-color: var(--el-border-color);
+}
+
+.el-message-box__btns .el-button--primary {
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  border-color: transparent;
+  box-shadow: 0 7px 16px rgb(79 70 229 / 20%);
+}
+
+.el-message-box__btns .el-button--primary:hover {
+  background: linear-gradient(135deg, #7074f3, #5b52e8);
+  box-shadow: 0 9px 20px rgb(79 70 229 / 25%);
+}
+
+@media (width <= 520px) {
+  .el-overlay.is-message-box .el-overlay-message-box {
+    padding: 14px;
+  }
+
+  .el-message-box__header {
+    padding: 22px 20px 0;
+  }
+
+  .el-message-box__content {
+    padding: 14px 20px 2px;
+  }
+
+  .el-message-box__btns {
+    padding: 18px 20px 20px;
+  }
+}
+
 // 系统管理统一视觉：让列表、筛选和弹窗保持同一套轻量企业后台风格。
 .system-management-page.el-card {
   overflow: hidden;

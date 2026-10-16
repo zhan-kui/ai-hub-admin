@@ -141,7 +141,7 @@ async function refresh(): Promise<void> {
     })
     localRecords.value = local || []
   } catch (error: any) {
-    ElMessage.error(error?.message || '供应商列表加载失败，请检查 Dify 连接')
+    ElMessage.error(error?.message || '供应商列表加载失败，请检查 AI 模型服务连接')
   } finally {
     loading.value = false
   }
@@ -226,7 +226,7 @@ async function submitProviderCredential(payload: {
     providerDialog.visible = false
     await refresh()
   } catch (error: any) {
-    providerDialog.error = error?.message || '保存失败，Dify 未返回具体原因'
+    providerDialog.error = error?.message || '保存失败，AI 模型服务未返回具体原因'
   } finally {
     providerDialog.submitting = false
   }
@@ -239,7 +239,7 @@ async function removeProviderCredential(
   if (!provider || !credential?.credential_id) return
   try {
     await ElMessageBox.confirm(
-      `删除凭据「${credential.credential_name}」后，Dify 中依赖它的模型会立即不可用。`,
+      `删除凭据「${credential.credential_name}」后，AI 模型服务中依赖它的模型会立即不可用。`,
       '删除凭据',
       { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' }
     )
@@ -330,7 +330,7 @@ async function submitCustomModel(payload: ModelCredentialRequest): Promise<void>
     customDialog.visible = false
     await refresh()
   } catch (error: any) {
-    customDialog.error = error?.message || '保存失败，Dify 未返回具体原因'
+    customDialog.error = error?.message || '保存失败，AI 模型服务未返回具体原因'
   } finally {
     customDialog.submitting = false
   }
@@ -379,7 +379,7 @@ async function switchModelCredential(
 async function removeCustomModel(provider: ModelProvider, model: CustomModel): Promise<void> {
   try {
     await ElMessageBox.confirm(
-      `删除「${model.model}」会同步从 Dify 移除，正在使用它的应用会报错。`,
+      `删除「${model.model}」会同步从 AI 模型服务移除，正在使用它的智能体会报错。`,
       '删除模型',
       { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' }
     )
@@ -432,7 +432,7 @@ onMounted(() => void refresh())
         <div class="head-text">
           <span class="head-eyebrow">AI 基础设施</span>
           <h2>模型管理</h2>
-          <p>集中维护 Dify 工作空间的供应商凭据、自定义模型与默认模型。</p>
+          <p>集中维护 AI 模型服务空间的供应商凭据、自定义模型与默认模型。</p>
         </div>
       </div>
       <div class="head-actions">
@@ -599,7 +599,7 @@ onMounted(() => void refresh())
             :description="
               keyword || statusFilter !== 'all'
                 ? '没有匹配的供应商，换个筛选条件试试'
-                : '当前模型类型下还没有已安装的供应商，先去 Dify 插件市场装一个'
+                : '当前模型类型下还没有已安装的供应商，请先前往 AI 模型服务插件市场安装'
             "
           />
         </template>
