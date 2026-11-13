@@ -11,8 +11,8 @@ import type {
 } from '@/views/app/orchestrator/canvas/types'
 
 /**
- * 閸欘垶鈧俺绻冮崜宥囶伂閻滎垰顣ㄩ崣姗€鍣虹憰鍡欐磰
- * 娓氬顩ч敍姝廔TE_API_BASE_URL=http://localhost:8088/aihub-api
+ * 后端接口默认地址；配置 VITE_API_BASE_URL 可覆盖此回退值。
+ * 例如：VITE_API_BASE_URL=http://localhost:8088/aihub-api
  */
 export const DEFAULT_API_BASE_URL = 'http://localhost:8088/aihub-api'
 
@@ -1027,7 +1027,7 @@ export const chatApi = {
   },
 
   /**
-   * POST + SSE 濞翠礁绱￠懕濠傘亯
+   * POST + SSE 流式聊天
    */
   async streamChat(
     appId: number,
@@ -1376,7 +1376,7 @@ export const fileApi = {
 
 export const agentApi = {
   /**
-   * POST + SSE Agent 濞翠礁绱＄€电鐦?
+   * POST + SSE 发起 Agent 流式请求。
    */
   async stream(
     agentId: AgentId,

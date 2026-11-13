@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
@@ -40,8 +40,8 @@ const renderedContent = computed(() => md.render(props.content || ''))
 
 .markdown-body :deep(pre) {
   margin: 8px 0;
-  border-radius: 8px;
   overflow: auto;
+  border-radius: 8px;
 }
 
 .markdown-body :deep(code) {

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="placeholder-page">
     <el-result title="页面占位" sub-title="该页面尚未开发，后续阶段会逐步完善。" />
   </div>
@@ -6,9 +6,9 @@
 
 <style scoped>
 .placeholder-page {
+  display: flex;
   width: 100%;
   min-height: 400px;
-  display: flex;
   align-items: center;
   justify-content: center;
 }

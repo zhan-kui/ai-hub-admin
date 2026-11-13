@@ -35,7 +35,7 @@ const { hour, month, minute, meridiem, year, day, week } = useNow(true)
 
 const { t } = useI18n()
 
-// 瑙ｉ攣
+// 解锁
 async function unLock() {
   if (!password.value) {
     return
@@ -50,7 +50,7 @@ async function unLock() {
   }
 }
 
-// 杩斿洖鐧诲綍
+// 返回登录
 async function goLogin() {
   await userStore.logout()
   clear()
