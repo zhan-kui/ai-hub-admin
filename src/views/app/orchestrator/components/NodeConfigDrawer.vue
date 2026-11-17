@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { toDisplayText } from '@/utils/display-text'
 import { ElMessage } from 'element-plus'
 import { MODEL_OPTIONS } from '../constants'
 import type { FieldOption, FieldSchema } from '../types'
@@ -62,7 +63,7 @@ function handleConfirm() {
   for (const field of props.fields) {
     if (!field.required) continue
     if (isEmptyRequiredValue(formData.value[field.key])) {
-      ElMessage.warning(`请填写「${field.label}」`)
+      ElMessage.warning(`请填写「${toDisplayText(field.label)}」`)
       return
     }
   }
@@ -73,18 +74,18 @@ function handleConfirm() {
 </script>
 
 <template>
-  <el-drawer v-model="visible" :title="`${nodeTitle} - 参数配置`" size="520px">
+  <el-drawer v-model="visible" :title="`${toDisplayText(nodeTitle)} - 参数配置`" size="520px">
     <el-form label-position="top">
       <el-form-item
         v-for="field in fields"
         :key="field.key"
-        :label="field.label"
+        :label="toDisplayText(field.label)"
         :required="field.required"
       >
         <el-input
           v-if="field.type === 'input'"
           v-model="formData[field.key]"
-          :placeholder="field.placeholder"
+          :placeholder="toDisplayText(field.placeholder)"
         />
 
         <el-input
@@ -92,7 +93,7 @@ function handleConfirm() {
           v-model="formData[field.key]"
           type="textarea"
           :rows="field.rows || 4"
-          :placeholder="field.placeholder"
+          :placeholder="toDisplayText(field.placeholder)"
         />
 
         <el-select
@@ -104,7 +105,7 @@ function handleConfirm() {
           <el-option
             v-for="option in resolveSelectOptions(field)"
             :key="String(option.value)"
-            :label="option.label"
+            :label="toDisplayText(option.label)"
             :value="option.value"
           />
         </el-select>
@@ -120,9 +121,13 @@ function handleConfirm() {
 
         <el-switch v-else-if="field.type === 'switch'" v-model="formData[field.key]" />
 
-        <el-input v-else v-model="formData[field.key]" :placeholder="field.placeholder" />
+        <el-input
+          v-else
+          v-model="formData[field.key]"
+          :placeholder="toDisplayText(field.placeholder)"
+        />
 
-        <div v-if="field.help" class="field-help">{{ field.help }}</div>
+        <div v-if="field.help" class="field-help">{{ toDisplayText(field.help) }}</div>
       </el-form-item>
     </el-form>
 

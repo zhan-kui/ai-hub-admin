@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { toDisplayError, toDisplayJson } from '@/utils/display-text'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { Clock, MoreFilled, Plus, Search, QuestionFilled } from '@element-plus/icons-vue'
@@ -575,9 +576,9 @@ async function showParameters(row: AppRow) {
   parameterText.value = ''
   try {
     const response = await appApi.getParameters(Number(row.id))
-    parameterText.value = JSON.stringify(response ?? {}, null, 2)
+    parameterText.value = toDisplayJson(response ?? {})
   } catch (error: any) {
-    parameterText.value = error?.message || '智能体参数加载失败'
+    parameterText.value = toDisplayError(error, '智能体参数加载失败')
   } finally {
     parameterLoading.value = false
   }

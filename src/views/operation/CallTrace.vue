@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { toDisplayJson, toDisplayText } from '@/utils/display-text'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { appApi, type AppConfigVO } from '@/api/frontend-api'
@@ -50,7 +51,7 @@ function openDetail(row: ToolTraceItem) {
   detailVisible.value = true
 }
 function jsonText(value?: string) {
-  return JSON.stringify(parseJsonText(value), null, 2)
+  return toDisplayJson(parseJsonText(value))
 }
 
 onMounted(async () => {
@@ -127,9 +128,9 @@ onMounted(async () => {
         >
         <el-table-column label="工具" min-width="190"
           ><template #default="{ row }"
-            ><div class="table-primary">{{ row.toolName || row.toolCode }}</div
+            ><div class="table-primary">{{ toDisplayText(row.toolName || row.toolCode) }}</div
             ><div class="table-secondary"
-              >{{ row.providerType }} · {{ row.toolCode }}</div
+              >{{ toDisplayText(row.providerType) }} · {{ toDisplayText(row.toolCode) }}</div
             ></template
           ></el-table-column
         >
@@ -153,7 +154,7 @@ onMounted(async () => {
         <el-table-column label="错误码" width="160"
           ><template #default="{ row }"
             ><span :class="{ 'error-code': row.errorCode }">{{
-              row.errorCode || '-'
+              toDisplayText(row.errorCode || '-')
             }}</span></template
           ></el-table-column
         >
@@ -189,9 +190,11 @@ onMounted(async () => {
           >
           <el-descriptions-item label="耗时">{{ detail.durationMs || 0 }} ms</el-descriptions-item>
           <el-descriptions-item label="工具">{{
-            detail.toolName || detail.toolCode
+            toDisplayText(detail.toolName || detail.toolCode)
           }}</el-descriptions-item>
-          <el-descriptions-item label="类型">{{ detail.providerType }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{
+            toDisplayText(detail.providerType)
+          }}</el-descriptions-item>
           <el-descriptions-item label="Trace ID" :span="2">{{
             detail.executionTraceId
           }}</el-descriptions-item>
@@ -200,7 +203,7 @@ onMounted(async () => {
             detail.username || detail.userId || '-'
           }}</el-descriptions-item>
           <el-descriptions-item v-if="detail.errorCode" label="错误码" :span="2">{{
-            detail.errorCode
+            toDisplayText(detail.errorCode)
           }}</el-descriptions-item>
         </el-descriptions>
         <h3 class="json-title">调用参数（敏感字段已脱敏）</h3

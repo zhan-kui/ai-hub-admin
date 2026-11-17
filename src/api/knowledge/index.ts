@@ -1,4 +1,5 @@
 import { apiClient } from '@/api/frontend-api'
+import { toDisplayError } from '@/utils/display-text'
 import type { AxiosProgressEvent } from 'axios'
 import type {
   ApiResult,
@@ -23,7 +24,7 @@ const unwrap = async <T>(promise: Promise<{ data: ApiResult<T> }>): Promise<T> =
   const response = await promise
   const body = response.data
   if (body?.code !== 200) {
-    const error = new Error(body?.message || '接口调用失败') as Error & {
+    const error = new Error(toDisplayError(body?.message || '接口调用失败')) as Error & {
       code?: number
       data?: unknown
       errorCode?: string | null

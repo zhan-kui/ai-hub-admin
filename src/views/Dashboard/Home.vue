@@ -52,7 +52,7 @@ const coreMetrics = computed<MetricCard[]>(() => [
     key: 'apps',
     label: 'AI 智能体',
     value: formatNumber(overview.value.appCount),
-    helper: '统计已创建智能体与发布状态',
+    helper: '未删除的业务智能体，不含系统应用',
     accent: 'blue',
     icon: 'app'
   },
@@ -120,11 +120,7 @@ const moduleCards = computed<ModuleCard[]>(() => [
     icon: 'database',
     path: '/knowledge',
     action: '进入知识库',
-    metrics: [
-      { label: '知识库', value: formatNumber(overview.value.knowledgeCount) },
-      { label: '状态', value: '实时' },
-      { label: '索引', value: '已接入' }
-    ]
+    metrics: [{ label: '知识库', value: formatNumber(overview.value.knowledgeCount) }]
   },
   {
     title: 'AI 写作',
@@ -156,26 +152,22 @@ const operationMetrics = computed(() => [
   {
     label: '今日请求量',
     value: formatNumber(overview.value.todayRequestCount),
-    helper: '已落库的对话调用',
-    percent: Math.min(100, overview.value.todayRequestCount)
+    helper: '已落库的对话调用（含系统应用）'
   },
   {
     label: '今日 Token',
     value: formatNumber(overview.value.todayTokenCount),
-    helper: '平台模型调用 Token 消耗',
-    percent: Math.min(100, overview.value.todayTokenCount / 1000)
+    helper: '平台模型调用 Token 消耗'
   },
   {
     label: '今日费用',
     value: `¥${Number(overview.value.todayCost || 0).toFixed(4)}`,
-    helper: '模型调用累计费用',
-    percent: Math.min(100, Number(overview.value.todayCost || 0) * 10)
+    helper: '模型调用累计费用'
   },
   {
     label: '消息总量',
     value: formatNumber(overview.value.messageCount),
-    helper: '平台历史消息记录',
-    percent: Math.min(100, overview.value.messageCount / 10)
+    helper: '平台历史消息记录'
   }
 ])
 
@@ -420,9 +412,6 @@ onMounted(loadOverview)
                 <div class="operation-helper">{{ item.helper }}</div>
               </div>
               <strong>{{ item.value }}</strong>
-            </div>
-            <div class="operation-track">
-              <span :style="{ width: `${item.percent}%` }"></span>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { toDisplayError, toDisplayText, toDisplayJson } from '@/utils/display-text'
 import type { ToolCallItem, ToolSource } from '@/store/modules/chat'
 
 const props = defineProps<{
@@ -19,9 +20,9 @@ function statusText(status: ToolCallItem['status']): string {
 function formatArguments(value: unknown): string {
   if (value === undefined || value === null) return '{}'
   try {
-    return JSON.stringify(value, null, 2)
+    return toDisplayJson(value)
   } catch {
-    return String(value)
+    return toDisplayText(value)
   }
 }
 
@@ -40,8 +41,10 @@ function safeSourceUrl(source: ToolSource): string | null {
     <div v-for="item in sortedItems" :key="item.callId" class="tool-node">
       <div class="tool-head">
         <span class="status-dot" :class="item.status"></span>
-        <strong>{{ item.toolName || item.toolCode }}</strong>
-        <span v-if="item.providerType" class="provider">{{ item.providerType }}</span>
+        <strong>{{ toDisplayText(item.toolName || item.toolCode) }}</strong>
+        <span v-if="item.providerType" class="provider">{{
+          toDisplayText(item.providerType)
+        }}</span>
         <span class="status-label" :class="item.status">{{ statusText(item.status) }}</span>
         <span v-if="item.durationMs !== undefined" class="duration">{{ item.durationMs }} ms</span>
       </div>
@@ -52,7 +55,8 @@ function safeSourceUrl(source: ToolSource): string | null {
       </details>
 
       <p v-if="item.error?.message" class="tool-error">
-        {{ item.error.message }}<span v-if="item.error.code">（{{ item.error.code }}）</span>
+        {{ toDisplayError(item.error.message)
+        }}<span v-if="item.error.code">（{{ toDisplayText(item.error.code) }}）</span>
       </p>
 
       <div v-if="item.sources?.length" class="tool-sources">
@@ -64,9 +68,9 @@ function safeSourceUrl(source: ToolSource): string | null {
           :href="safeSourceUrl(source) || undefined"
           target="_blank"
           rel="noopener noreferrer"
-          :title="source.snippet"
+          :title="toDisplayText(source.snippet)"
         >
-          {{ source.title || source.url }}
+          {{ toDisplayText(source.title || source.url) }}
         </a>
       </div>
     </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { toDisplayError } from '@/utils/display-text'
 import { useResizeObserver } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -239,7 +240,7 @@ const showWelcome = computed(
     !streamingDraft.value
 )
 
-const maxUploadSize = 20 * 1024 * 1024
+const maxUploadSize = 50 * 1024 * 1024
 const allowedFileExtensions = new Set([
   'txt',
   'md',
@@ -994,10 +995,11 @@ function getSuggestedQuestions(message: ChatMessage): string[] {
 }
 
 function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === 'string') return error
+  if (error instanceof Error) return toDisplayError(error.message)
+  if (typeof error === 'string') return toDisplayError(error)
   const record = toRecord(error)
-  if (record) return extractStringByKeys(record, ['message', 'msg', 'error']) || '请求失败'
+  if (record)
+    return toDisplayError(extractStringByKeys(record, ['message', 'msg', 'error']) || '请求失败')
   return '请求失败'
 }
 
@@ -1111,7 +1113,8 @@ function buildMessageFileReferences(
 }
 
 function validateUploadFile(file: File): string | null {
-  if (file.size > maxUploadSize) return `文件 ${file.name} 超过 20MB 限制`
+  if (file.size > maxUploadSize)
+    return `文件“${file.name}”超过 50 MB，请压缩文件或选择较小的文件后重试。`
   const extension = getFileExtension(file.name)
   if (!extension || !allowedFileExtensions.has(extension)) return `文件 ${file.name} 类型暂不支持`
   return null

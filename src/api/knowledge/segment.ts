@@ -1,5 +1,6 @@
 import type { AxiosResponse } from 'axios'
 import { apiClient } from '@/api/frontend-api'
+import { toDisplayError } from '@/utils/display-text'
 import type { ApiResult } from './types'
 
 /** 文档分块模式 */
@@ -141,7 +142,7 @@ async function unwrap<T>(promise: Promise<AxiosResponse<ApiResult<T>>>): Promise
   const response = await promise
   const body = response.data
   if (body?.code !== 200) {
-    const error = new Error(body?.message || '接口调用失败') as Error & {
+    const error = new Error(toDisplayError(body?.message || '接口调用失败')) as Error & {
       code?: number
       data?: unknown
       errorCode?: string | null

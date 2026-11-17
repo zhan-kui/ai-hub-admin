@@ -13,6 +13,7 @@
  */
 
 import { providerIconUrl } from '@/api/model'
+import { toDisplayText } from '@/utils/display-text'
 import type { I18nText, ModelProvider, ProviderIconType } from '@/api/model'
 
 const localIcons = import.meta.glob('../../assets/model-providers/*.{png,jpg,jpeg,svg,webp}', {
@@ -58,7 +59,9 @@ export function pickI18n(value?: I18nText, fallback = ''): string {
 }
 
 export function providerName(provider: ModelProvider): string {
-  return pickI18n(provider.label, provider.provider.split('/').at(-1) || provider.provider)
+  return toDisplayText(
+    pickI18n(provider.label, provider.provider.split('/').at(-1) || provider.provider)
+  )
 }
 
 function hashColor(seed: string): string {

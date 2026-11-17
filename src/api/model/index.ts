@@ -1,4 +1,5 @@
 import type { AxiosResponse } from 'axios'
+import { toDisplayError } from '@/utils/display-text'
 import { apiClient, type R } from '@/api/frontend-api'
 import type {
   AvailableModelResponse,
@@ -23,7 +24,7 @@ async function unwrap<T>(promise: Promise<AxiosResponse<R<T>>>): Promise<T> {
   const response = await promise
   const body = response.data
   if (body?.code !== 0 && body?.code !== 200) {
-    throw new Error(body?.message || `接口请求失败：${body?.code}`)
+    throw new Error(toDisplayError(body?.message || `接口请求失败：${body?.code}`))
   }
   return body.data
 }

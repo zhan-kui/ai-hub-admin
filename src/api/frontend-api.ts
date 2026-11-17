@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios'
+import { toDisplayError } from '@/utils/display-text'
 import type {
   CreateFromTemplateRequest,
   CreateFromTemplateResponse,
@@ -614,6 +615,22 @@ export function createApiClient(options: ApiClientOptions = {}): AxiosInstance {
     return config
   })
 
+  client.interceptors.response.use(
+    (response) => {
+      // Only project the envelope message; successful business data and protocol fields stay intact.
+      if (typeof response.data?.message === 'string') {
+        response.data = { ...response.data, message: toDisplayError(response.data.message) }
+      }
+      return response
+    },
+    (error) => {
+      if (error?.response?.data && typeof error.response.data === 'object') {
+        error.response.data = { ...error.response.data, message: toDisplayError(error) }
+      }
+      if (error instanceof Error) error.message = toDisplayError(error)
+      return Promise.reject(error)
+    }
+  )
   return client
 }
 
@@ -630,7 +647,9 @@ async function unwrap<T>(promise: Promise<AxiosResponse<R<T>>>): Promise<T> {
   const body = resp.data
   const isSuccess = body?.code === 0 || body?.code === 200
   if (!isSuccess) {
-    const error = new Error(body.message || `API Error: ${body?.code}`) as Error & {
+    const error = new Error(
+      toDisplayError(body?.message || `API Error: ${body?.code}`)
+    ) as Error & {
       code?: number
       data?: unknown
     }

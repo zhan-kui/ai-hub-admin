@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
+import { toDisplayError, toDisplayText } from '@/utils/display-text'
 import { CircleCheck, Connection, Key, WarningFilled } from '@element-plus/icons-vue'
 import type { CredentialFormSchema, I18nText, ModelType } from '@/api/model'
 
@@ -106,7 +107,7 @@ watch(
 )
 
 function pickI18n(value?: I18nText, fallback = ''): string {
-  return value?.zh_Hans || value?.en_US || fallback
+  return toDisplayText(value?.zh_Hans || value?.en_US || fallback)
 }
 
 function placeholder(schema: CredentialFormSchema): string {
@@ -195,8 +196,8 @@ function close(): void {
         <div class="dialog-heading">
           <span class="dialog-eyebrow">MODEL CREDENTIAL</span>
           <div class="dialog-title-line">
-            <span class="dialog-title">{{ title }}</span>
-            <span v-if="subtitle" class="dialog-subtitle">{{ subtitle }}</span>
+            <span class="dialog-title">{{ toDisplayText(title) }}</span>
+            <span v-if="subtitle" class="dialog-subtitle">{{ toDisplayText(subtitle) }}</span>
           </div>
         </div>
       </div>
@@ -204,7 +205,7 @@ function close(): void {
 
     <el-alert v-if="error || localError" class="feedback" type="error" :closable="false" show-icon>
       <template #title>保存失败</template>
-      <pre class="feedback-detail">{{ error || localError }}</pre>
+      <pre class="feedback-detail">{{ toDisplayError(error || localError) }}</pre>
     </el-alert>
 
     <el-alert
@@ -215,8 +216,10 @@ function close(): void {
       show-icon
     >
       <template #title>{{ validateResult.ok ? '连接正常' : '连接失败' }}</template>
-      <pre v-if="!validateResult.ok" class="feedback-detail">{{ validateResult.message }}</pre>
-      <template v-else>{{ validateResult.message }}</template>
+      <pre v-if="!validateResult.ok" class="feedback-detail">{{
+        toDisplayError(validateResult.message)
+      }}</pre>
+      <template v-else>{{ toDisplayText(validateResult.message) }}</template>
     </el-alert>
 
     <div class="security-note">
