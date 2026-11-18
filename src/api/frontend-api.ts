@@ -635,7 +635,7 @@ export function createApiClient(options: ApiClientOptions = {}): AxiosInstance {
 }
 
 export const apiClient = createApiClient({
-  baseURL: (import.meta as any)?.env?.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
+  baseURL: import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
 })
 
 export function setStaticToken(token?: string | null): void {
@@ -1162,7 +1162,7 @@ export const conversationApi = {
   }
 }
 
-const KNOWLEDGE_BASE_PATH = ((import.meta as any)?.env?.VITE_KNOWLEDGE_BASE_PATH || '/knowledge')
+const KNOWLEDGE_BASE_PATH = (import.meta.env.VITE_KNOWLEDGE_BASE_PATH || '/knowledge')
   .trim()
   .replace(/\/$/, '')
 
